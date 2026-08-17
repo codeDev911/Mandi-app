@@ -1,0 +1,87 @@
+import { VendorLot, LotExpenses, LotSummary } from '../types';
+
+export function calculateLotSummary(
+  totalQuantity: number,
+  sales: VendorLot['sales'],
+  expenses: LotExpenses
+): LotSummary {
+  // 1. Calculate sales totals
+  let totalSoldQuantity = 0;
+  let grossSales = 0;
+
+  for (const sale of sales) {
+    totalSoldQuantity += Number(sale.quantity) || 0;
+    grossSales += Number(sale.totalAmount) || 0;
+  }
+
+  const remainingQuantity = Math.max(0, totalQuantity - totalSoldQuantity);
+  const percentSold = totalQuantity > 0 ? Math.min(100, Math.round((totalSoldQuantity / totalQuantity) * 100)) : 0;
+
+  // 2. Calculate expenses / deductions
+  let totalExpenses = 0;
+
+  // Commission
+  if (expenses.commission.enabled) {
+    if (expenses.commission.type === 'percentage') {
+      const computed = (grossSales * (expenses.commission.rate || 0)) / 100;
+      expenses.commission.amount = Math.round(computed);
+    }
+    totalExpenses += Number(expenses.commission.amount) || 0;
+  }
+
+  // Kiraya
+  if (expenses.kiraya.enabled) {
+    totalExpenses += Number(expenses.kiraya.amount) || 0;
+  }
+
+  // Mazdoori
+  if (expenses.mazdoori.enabled) {
+    totalExpenses += Number(expenses.mazdoori.amount) || 0;
+  }
+
+  // Munshiana
+  if (expenses.munshiana.enabled) {
+    totalExpenses += Number(expenses.munshiana.amount) || 0;
+  }
+
+  // Naqd / Advance
+  if (expenses.naqdAdvance.enabled) {
+    totalExpenses += Number(expenses.naqdAdvance.amount) || 0;
+  }
+
+  // Market Fee
+  if (expenses.marketFee.enabled) {
+    totalExpenses += Number(expenses.marketFee.amount) || 0;
+  }
+
+  // Custom Expenses
+  if (expenses.customExpenses && Array.isArray(expenses.customExpenses)) {
+    for (const item of expenses.customExpenses) {
+      totalExpenses += Number(item.amount) || 0;
+    }
+  }
+
+  // 3. Meezan (Net Payable to Vendor)
+  const netPayableToVendor = grossSales - totalExpenses;
+
+  // 4. Arhti's Net Income from this lot (Commission + Munshiana)
+  const arhtiProfitCommission =
+    (expenses.commission.enabled ? Number(expenses.commission.amount) || 0 : 0) +
+    (expenses.munshiana.enabled ? Number(expenses.munshiana.amount) || 0 : 0);
+
+  return {
+    totalSoldQuantity,
+    remainingQuantity,
+    grossSales,
+    totalExpenses,
+    netPayableToVendor,
+    arhtiProfitCommission,
+    percentSold,
+  };
+}
+
+export function generateLotNumber(existingLotsCount: number): string {
+  const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+  const seq = (existingLotsCount + 1).toString().padStart(3, '0');
+  return `LOT-${dateStr}-${seq}`;
+}
