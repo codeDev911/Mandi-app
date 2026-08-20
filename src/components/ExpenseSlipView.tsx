@@ -3,6 +3,7 @@ import { VendorLot, AppSettings, CustomExpense } from '../types';
 import { translations, unitLabels } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
+import { getUnitMazdooriRate } from '../utils/calculations';
 import {
   Receipt,
   Plus,
@@ -18,12 +19,15 @@ import {
   HelpCircle,
   ArrowLeft,
   ArrowRight,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react';
 
 interface ExpenseSlipViewProps {
   lot: VendorLot;
   onUpdateLotExpenses: (lotId: string, updatedExpenses: VendorLot['expenses']) => void;
   onOpenReceipt: (lotId: string) => void;
+  onToggleVendorPaymentStatus?: (lotId: string, customStatus?: 'pending' | 'paid') => void;
   onBackToBolli?: () => void;
   settings: AppSettings;
 }
@@ -32,6 +36,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
   lot,
   onUpdateLotExpenses,
   onOpenReceipt,
+  onToggleVendorPaymentStatus,
   onBackToBolli,
   settings,
 }) => {
@@ -173,7 +178,8 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
   const handleResetToDefaults = () => {
     sound.playTick();
     const defaultComm = Math.round((lot.summary.grossSales * settings.defaultCommissionPercent) / 100);
-    const defaultMaz = settings.defaultMazdooriPerUnit * lot.totalQuantity;
+    const unitMazRate = getUnitMazdooriRate(lot.unitType, settings);
+    const defaultMaz = unitMazRate * lot.totalQuantity;
     const defaultMkt = settings.defaultMarketFeePerUnit * lot.totalQuantity;
 
     const resetExpenses: VendorLot['expenses'] = {
@@ -188,7 +194,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
         enabled: false,
       },
       mazdoori: {
-        ratePerUnit: settings.defaultMazdooriPerUnit,
+        ratePerUnit: unitMazRate,
         amount: defaultMaz,
         enabled: true,
       },
@@ -232,7 +238,37 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {onToggleVendorPaymentStatus && (
+            <button
+              onClick={() => {
+                sound.playTick();
+                onToggleVendorPaymentStatus(lot.id);
+              }}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 border shadow-2xs active:scale-95 ${
+                lot.vendorPaymentStatus === 'paid'
+                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300 hover:bg-emerald-200'
+                  : 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+              }`}
+              title={
+                lot.vendorPaymentStatus === 'paid'
+                  ? 'ادائیگی ہو چکی ہے - کلک کر کے بقایا کریں'
+                  : 'ادائیگی بقایا ہے - کلک کر کے ادا شدہ کریں'
+              }
+            >
+              {lot.vendorPaymentStatus === 'paid' ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+              ) : (
+                <Clock className="w-3.5 h-3.5 text-amber-700" />
+              )}
+              <span>
+                {lot.vendorPaymentStatus === 'paid'
+                  ? (isUrdu ? 'ادا شدہ (Paid)' : 'Paid')
+                  : (isUrdu ? 'ادائیگی بقایا (Pending)' : 'Pending')}
+              </span>
+            </button>
+          )}
+
           {onBackToBolli && (
             <button
               onClick={onBackToBolli}
@@ -300,7 +336,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
               <div className="bg-white p-2.5 rounded-xl border border-blue-200 shadow-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md bg-blue-600 text-white font-bold text-xs font-urdu-nastaliq">
+                    <span className="font-bold text-xs text-blue-900 font-urdu-nastaliq">
                       {t.commission}
                     </span>
                     <span className="text-[11px] text-slate-500 font-urdu-sans font-numbers">
@@ -351,7 +387,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
               <div className="bg-white p-2.5 rounded-xl border border-emerald-200 shadow-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-xs font-urdu-nastaliq">
+                    <span className="font-bold text-xs text-emerald-900 font-urdu-nastaliq">
                       {t.kiraya}
                     </span>
                     <span className="text-[11px] text-slate-500 font-urdu-sans">
@@ -389,7 +425,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
               <div className="bg-white p-2.5 rounded-xl border border-fuchsia-200 shadow-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md bg-fuchsia-700 text-white font-bold text-xs font-urdu-nastaliq">
+                    <span className="font-bold text-xs text-fuchsia-950 font-urdu-nastaliq">
                       {t.mazdoori}
                     </span>
                     <span className="text-[11px] text-slate-500 font-urdu-sans">
@@ -427,7 +463,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
               <div className="bg-white p-2.5 rounded-xl border border-sky-200 shadow-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md bg-sky-600 text-white font-bold text-xs font-urdu-nastaliq">
+                    <span className="font-bold text-xs text-sky-900 font-urdu-nastaliq">
                       {t.munshiana}
                     </span>
                     <span className="text-[11px] text-slate-500 font-urdu-sans">
@@ -465,7 +501,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
               <div className="bg-white p-2.5 rounded-xl border border-rose-200 shadow-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md bg-rose-600 text-white font-bold text-xs font-urdu-nastaliq">
+                    <span className="font-bold text-xs text-rose-900 font-urdu-nastaliq">
                       {t.naqdAdvance}
                     </span>
                     <span className="text-[11px] text-slate-500 font-urdu-sans">
@@ -503,7 +539,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
               <div className="bg-white p-2.5 rounded-xl border border-amber-200 shadow-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md bg-amber-600 text-white font-bold text-xs font-urdu-nastaliq">
+                    <span className="font-bold text-xs text-amber-900 font-urdu-nastaliq">
                       {t.marketFee}
                     </span>
                     <span className="text-[11px] text-slate-500 font-urdu-sans">

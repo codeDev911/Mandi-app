@@ -114,6 +114,63 @@ class SoundEngine {
       // ignore
     }
   }
+
+  /**
+   * Crisp UI pop sound for modal opens/toggles
+   */
+  public playPop() {
+    if (!this.isEnabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(900, this.ctx.currentTime + 0.06);
+
+      gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.06);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.07);
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Keyboard click sound for rapid digit entries
+   */
+  public playKeyClick() {
+    if (!this.isEnabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1200, this.ctx.currentTime);
+
+      gain.gain.setValueAtTime(0.06, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.02);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.025);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export const sound = new SoundEngine();

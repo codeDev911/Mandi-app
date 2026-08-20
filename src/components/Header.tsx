@@ -2,7 +2,7 @@ import React from 'react';
 import { AppSettings, VendorLot } from '../types';
 import { translations } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
-import { PlusCircle, Globe, Smartphone, Monitor, Volume2, VolumeX, Sparkles } from 'lucide-react';
+import { PlusCircle, Globe, Smartphone, Monitor, Volume2, VolumeX, Sparkles, Cloud, CloudUpload, Wifi } from 'lucide-react';
 
 interface HeaderProps {
   settings: AppSettings;
@@ -10,6 +10,7 @@ interface HeaderProps {
   activeLotsCount: number;
   totalTodaySales: number;
   totalTodayProfit: number;
+  onOpenCloudSync?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeLotsCount,
   totalTodaySales,
   totalTodayProfit,
+  onOpenCloudSync,
 }) => {
   const t = translations[settings.language];
   const isUrdu = settings.language === 'ur';
@@ -72,6 +74,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Controls - Language & Speaker positioned neatly on the right */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          {/* Cloud Sync Button */}
+          {onOpenCloudSync && (
+            <button
+              onClick={onOpenCloudSync}
+              title={isUrdu ? 'کلاؤڈ ڈیٹا بیس و ڈیوائس سنک' : 'Cloud DB & Sync'}
+              className="h-8 sm:h-9 px-2 sm:px-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 transition text-white border border-emerald-400/30 flex items-center gap-1.5 text-xs shadow-2xs font-urdu-sans"
+            >
+              <CloudUpload className="w-3.5 h-3.5 text-emerald-200" />
+              <span className="text-[11px] font-bold hidden sm:inline">{isUrdu ? 'کلاؤڈ سنک' : 'Cloud Sync'}</span>
+            </button>
+          )}
+
           {/* Device Frame View Toggle (Desktop only) */}
           <button
             onClick={toggleViewMode}

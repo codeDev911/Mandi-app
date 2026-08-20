@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { UnitType, AppSettings, VendorLot, SavedVendor } from '../types';
 import { translations, commonMandiProducts, unitLabels, ProductPreset } from '../utils/localization';
-import { generateLotNumber, calculateLotSummary } from '../utils/calculations';
+import { generateLotNumber, calculateLotSummary, getUnitMazdooriRate } from '../utils/calculations';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { PlusCircle, X, Check, Truck, MapPin, Phone, User, Package, Hash, BookmarkCheck } from 'lucide-react';
@@ -32,6 +32,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const [vendorPhone, setVendorPhone] = useState('');
   const [vendorCity, setVendorCity] = useState('');
   const [saveVendorToDb, setSaveVendorToDb] = useState(true);
+  const [keepVendorAndStayOpen, setKeepVendorAndStayOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ProductPreset | 'other'>(commonMandiProducts[0]);
   const [isOtherProduct, setIsOtherProduct] = useState(false);
   const [customProductUrdu, setCustomProductUrdu] = useState('');
@@ -41,18 +42,29 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const [totalQuantity, setTotalQuantity] = useState<number>(30);
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [commissionRate, setCommissionRate] = useState<number>(settings.defaultCommissionPercent);
-  const [mazdooriRate, setMazdooriRate] = useState<number>(settings.defaultMazdooriPerUnit);
+  const [mazdooriRate, setMazdooriRate] = useState<number>(() =>
+    getUnitMazdooriRate(commonMandiProducts[0].defaultUnit, settings)
+  );
   const [kirayaAmount, setKirayaAmount] = useState<number>(0);
   const [advanceAmount, setAdvanceAmount] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
+  const handleUnitChange = (newUnit: UnitType) => {
+    sound.playTick();
+    setUnitType(newUnit);
+    const newRate = getUnitMazdooriRate(newUnit, settings);
+    setMazdooriRate(newRate);
+  };
+
   const handleSelectProduct = (prod: ProductPreset) => {
     sound.playTick();
     setIsOtherProduct(false);
     setSelectedProduct(prod);
     setUnitType(prod.defaultUnit);
+    const newRate = getUnitMazdooriRate(prod.defaultUnit, settings);
+    setMazdooriRate(newRate);
     setError(null);
   };
 
@@ -124,6 +136,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       vehicleNumber: vehicleNumber.trim() || undefined,
       arrivalDate: new Date().toISOString().slice(0, 10),
       status: 'active',
+      vendorPaymentStatus: 'pending',
       sales: [],
       expenses: {
         commission: {
@@ -187,7 +200,23 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
 
     sound.playBidSound();
     onSaveLot(newLot);
-    onClose();
+
+    // If "keep vendor details & don't close" is checked:
+    if (keepVendorAndStayOpen) {
+      // Keep vendorName, vendorPhone, vendorCity, vehicleNumber intact!
+      // Only reset product-specific fields for the next product:
+      setTotalQuantity(30);
+      setKirayaAmount(0);
+      setAdvanceAmount(0);
+      setIsOtherProduct(false);
+      setSelectedProduct(commonMandiProducts[0]);
+      setUnitType(commonMandiProducts[0].defaultUnit);
+      setCustomProductUrdu('');
+      setCustomProductEn('');
+      setError(null);
+    } else {
+      onClose();
+    }
   };
 
   const cities = ['اوکاڑہ', 'سرگودھا', 'ساہیوال', 'شیخوپورہ', 'قصور', 'ملتان', 'رحیم یار خان', 'سوات', 'پشاور'];
@@ -338,16 +367,44 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               ))}
             </div>
 
-            {/* Save Vendor to Directory Checkbox */}
-            <label className="flex items-center gap-2 pt-1 text-xs text-slate-700 cursor-pointer font-urdu-sans select-none">
-              <input
-                type="checkbox"
-                checked={saveVendorToDb}
-                onChange={(e) => setSaveVendorToDb(e.target.checked)}
-                className="w-4 h-4 text-emerald-600 rounded-md border-slate-300 focus:ring-emerald-500"
-              />
-              <span className="font-semibold text-slate-800">{t.saveVendorToDb}</span>
-            </label>
+            {/* Vendor Checkbox Options */}
+            <div className="pt-2 border-t border-slate-200/80 space-y-2">
+              {/* Keep Vendor & Don't Close (Multi-product entry for same vendor) */}
+              <label className="flex items-start gap-2.5 p-2 rounded-xl bg-emerald-50/70 border border-emerald-200/80 text-xs text-slate-800 cursor-pointer font-urdu-sans select-none hover:bg-emerald-100/60 transition">
+                <input
+                  type="checkbox"
+                  checked={keepVendorAndStayOpen}
+                  onChange={(e) => {
+                    sound.playTick();
+                    setKeepVendorAndStayOpen(e.target.checked);
+                  }}
+                  className="w-4 h-4 mt-0.5 text-emerald-600 rounded-md border-slate-300 focus:ring-emerald-500 flex-shrink-0"
+                />
+                <div>
+                  <span className="font-bold text-emerald-950 block">
+                    {isUrdu
+                      ? 'اسی زمیندار کی دوسری جنس درج کریں (ونڈو بند نہ کریں اور نام محفوظ رکھیں)'
+                      : 'Keep vendor details & don\'t close modal (for multiple products from same vendor)'}
+                  </span>
+                  <p className="text-[11px] text-emerald-800 font-urdu-sans mt-0.5 leading-tight">
+                    {isUrdu
+                      ? 'اگر ایک ہی زمیندار 2 یا 3 مختلف اجناس (مثلاً آلو اور ٹماٹر) لایا ہو، تو یہ آپشن چیک کریں تاکہ نام بار بار نہ لکھنا پڑے۔'
+                      : 'Check this if a vendor brought multiple products (e.g. Potatoes & Tomatoes) to avoid re-typing vendor details.'}
+                  </p>
+                </div>
+              </label>
+
+              {/* Save Vendor to Directory Checkbox */}
+              <label className="flex items-center gap-2 px-1 text-xs text-slate-700 cursor-pointer font-urdu-sans select-none">
+                <input
+                  type="checkbox"
+                  checked={saveVendorToDb}
+                  onChange={(e) => setSaveVendorToDb(e.target.checked)}
+                  className="w-4 h-4 text-emerald-600 rounded-md border-slate-300 focus:ring-emerald-500"
+                />
+                <span className="font-medium text-slate-700">{t.saveVendorToDb}</span>
+              </label>
+            </div>
           </div>
 
           {/* Product & Packing Selection */}
@@ -492,27 +549,70 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
 
             {/* Packaging Unit Type */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5 font-urdu-sans">
-                {t.unitType} (پیکنگ کی قسم)
-              </label>
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-                {(['crates', 'bori', 'theli', 'peti', 'kg', 'nag'] as UnitType[]).map((u) => {
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 font-urdu-sans">
+                  {t.unitType} (پیکنگ کی قسم) <span className="text-rose-500">*</span>
+                </label>
+                <span className="text-[11px] text-emerald-700 font-urdu-sans font-medium">
+                  {isUrdu ? 'مزدوری ریٹ خودکار لاگو ہوگا' : 'Labor rate auto-applied'}
+                </span>
+              </div>
+
+              {/* Main Required Units: بوری, توڑہ, کینچی, شاپر */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                {(['bori', 'tora', 'kainchi', 'shopper'] as UnitType[]).map((u) => {
                   const isSelected = unitType === u;
+                  const uRate = getUnitMazdooriRate(u, settings);
                   return (
                     <button
                       type="button"
                       key={u}
-                      onClick={() => setUnitType(u)}
-                      className={`py-1.5 px-2 rounded-xl text-xs text-center border font-urdu-sans transition active:scale-95 ${
+                      onClick={() => handleUnitChange(u)}
+                      className={`p-2 rounded-xl text-center border font-urdu-sans transition active:scale-95 flex flex-col items-center justify-center gap-0.5 relative ${
                         isSelected
-                          ? 'bg-slate-900 text-white font-bold border-slate-900 shadow-xs'
-                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                          ? 'bg-emerald-900 text-white font-bold border-emerald-900 shadow-md ring-2 ring-emerald-500/30'
+                          : 'bg-white border-slate-300 text-slate-800 hover:bg-emerald-50 hover:border-emerald-300'
                       }`}
                     >
-                      {unitLabels[u][settings.language]}
+                      <span className="text-sm font-bold">{unitLabels[u][settings.language]}</span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.2 rounded-md font-numbers ${
+                          isSelected ? 'bg-emerald-800 text-emerald-100 font-semibold' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        ₨{uRate}/{isUrdu ? unitLabels[u].ur.split(' ')[0] : u}
+                      </span>
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Secondary / Other Units: کریٹ, پیٹی, تھیلی, کلو, نگ */}
+              <div className="pt-1.5 border-t border-slate-200/80">
+                <span className="block text-[10px] text-slate-500 mb-1 font-urdu-sans">
+                  {isUrdu ? 'دیگر متبادل پیکنگ یونٹس:' : 'Other unit types:'}
+                </span>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {(['crates', 'peti', 'theli', 'kg', 'nag'] as UnitType[]).map((u) => {
+                    const isSelected = unitType === u;
+                    const uRate = getUnitMazdooriRate(u, settings);
+                    return (
+                      <button
+                        type="button"
+                        key={u}
+                        onClick={() => handleUnitChange(u)}
+                        className={`py-1 px-1.5 rounded-lg text-xs text-center border font-urdu-sans transition active:scale-95 ${
+                          isSelected
+                            ? 'bg-slate-900 text-white font-bold border-slate-900 shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100 text-[11px]'
+                        }`}
+                      >
+                        <span className="block truncate">{unitLabels[u][settings.language]}</span>
+                        <span className="text-[9px] opacity-75 font-numbers">₨{uRate}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -571,6 +671,14 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               <h4 className="text-xs font-bold text-slate-700 font-urdu-sans">
                 {t.expensesSection} (ابتدائی کٹوتیاں - بعد میں تبدیل ہو سکتے ہیں)
               </h4>
+              <div className="text-[11px] text-emerald-800 font-urdu-sans font-bold bg-emerald-100/70 px-2 py-0.5 rounded-md">
+                <span>
+                  {t.mazdoori}: {totalQuantity} {unitLabels[unitType][settings.language]} × ₨{mazdooriRate} ={' '}
+                  <span className="font-numbers font-extrabold text-emerald-950">
+                    ₨{(totalQuantity * mazdooriRate).toLocaleString('en-US')}
+                  </span>
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -639,7 +747,13 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
             className="flex-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95 font-urdu-sans"
           >
             <Check className="w-4 h-4" />
-            <span>{t.startBolli} ({t.save})</span>
+            <span>
+              {keepVendorAndStayOpen
+                ? isUrdu
+                  ? 'محفوظ کریں اور اگلی جنس درج کریں'
+                  : 'Save & Enter Next Item'
+                : `${t.startBolli} (${t.save})`}
+            </span>
           </button>
         </div>
       </div>

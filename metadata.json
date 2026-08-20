@@ -1,6 +1,8 @@
 {
   "name": "Mandi Bolli & Commission Manager",
   "description": "Mobile Sabzi and Fruit Mandi auction, lot bolli calculator, vendor expense slip management, and profit ledger with Urdu localization and Pakistani Rupee formatting.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "microphone"
+  ],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

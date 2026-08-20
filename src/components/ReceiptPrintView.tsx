@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import html2canvas from 'html2canvas';
 import { VendorLot, AppSettings } from '../types';
 import { translations, unitLabels } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
+import { generateMandiInvoiceCanvas, printThermalPOSReceipt } from '../utils/receiptGenerator';
 import {
   Printer,
   Share2,
@@ -18,12 +20,28 @@ import {
   ArrowLeft,
   ArrowRight,
   Receipt,
+  Download,
+  Image as ImageIcon,
+  Loader2,
+  Send,
+  MessageCircle,
+  QrCode,
+  ShieldCheck,
+  Eye,
+  X,
+  ExternalLink,
+  DollarSign,
+  CheckCircle2,
+  Clock,
+  Building2,
+  Sliders,
 } from 'lucide-react';
 
 interface ReceiptPrintViewProps {
   lot: VendorLot;
   lots: VendorLot[];
   onSelectLot: (lotId: string) => void;
+  onToggleVendorPaymentStatus?: (lotId: string, customStatus?: 'pending' | 'paid') => void;
   onBackToBolli?: () => void;
   onOpenExpenseSlip?: (lotId: string) => void;
   settings: AppSettings;
@@ -33,6 +51,7 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
   lot,
   lots,
   onSelectLot,
+  onToggleVendorPaymentStatus,
   onBackToBolli,
   onOpenExpenseSlip,
   settings,
@@ -42,400 +61,718 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
   const unitLabel = unitLabels[lot.unitType][settings.language];
 
   const [isCopied, setIsCopied] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [shareSuccessToast, setShareSuccessToast] = useState<string | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [copiedImageStatus, setCopiedImageStatus] = useState(false);
+  const [paperFormat, setPaperFormat] = useState<'pos80' | 'standard'>('pos80');
+  const receiptCardRef = useRef<HTMLDivElement>(null);
 
-  const handlePrint = () => {
+  const isPaid = lot.vendorPaymentStatus === 'paid';
+
+  // Dedicated 80mm POS Thermal Receipt Print
+  const handlePOSPrint = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    sound.playTick();
+    printThermalPOSReceipt(lot, settings);
+  };
+
+  // Full Page A4 Print Fallback
+  const handleFullPagePrint = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     sound.playTick();
     window.print();
   };
 
-  // Generate WhatsApp message text in Urdu
-  const generateWhatsAppMessage = (): string => {
-    let msg = `*${settings.shopNameUrdu}*\n`;
-    msg += `📍 ${settings.shopAddressUrdu}\n`;
-    msg += `📞 فون: ${settings.shopPhone}\n`;
-    msg += `--------------------------------\n`;
-    msg += `*پکی پرچی آڑھت - بل نمبر:* ${lot.lotNumber}\n`;
-    msg += `📅 تاریخ: ${lot.arrivalDate}\n`;
-    msg += `👤 زمیندار: ${lot.vendorName} (${lot.vendorCity || ''})\n`;
-    msg += `📦 جنس: ${lot.productUrdu} (${lot.totalQuantity} ${unitLabel})\n`;
-    if (lot.vehicleNumber) msg += `🚚 گاڑی: ${lot.vehicleNumber}\n`;
-    msg += `--------------------------------\n`;
-    msg += `*نیلامی / فروخت تفصیل:*\n`;
+  // Helper to safely render receipt into a PNG DataURL and Blob
+  const getReceiptImage = async (): Promise<{ dataUrl: string; blob: Blob }> => {
+    // Strategy 1: Try HTML2Canvas on the rendered DOM component
+    if (receiptCardRef.current) {
+      try {
+        const canvas = await html2canvas(receiptCardRef.current, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+        });
 
-    lot.sales.forEach((s, idx) => {
-      msg += `${idx + 1}. ${s.buyerName}: ${s.quantity} ${unitLabel} @ ${s.ratePerUnit} = ${formatPKR(s.totalAmount, 'Rs.', 'en')}\n`;
-    });
+        const dataUrl = canvas.toDataURL('image/png');
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((b) => resolve(b), 'image/png', 0.95)
+        );
 
-    msg += `--------------------------------\n`;
-    msg += `*کل ٹوٹل فروخت:* ${formatPKR(lot.summary.grossSales, 'Rs.', 'en')}\n\n`;
-    msg += `*اخراجات و کٹوتیاں:*\n`;
+        if (blob && dataUrl && dataUrl.length > 500) {
+          return { dataUrl, blob };
+        }
+      } catch (domErr) {
+        console.warn('DOM html2canvas fallback to standalone canvas generator:', domErr);
+      }
+    }
 
-    if (lot.expenses.commission.enabled) {
-      msg += `• کمیشن: ${formatPKR(lot.expenses.commission.amount, 'Rs.', 'en')}\n`;
+    // Strategy 2: Ultra-reliable Standalone Canvas 2D Renderer (always works in sandboxed iframes)
+    const directCanvas = generateMandiInvoiceCanvas(lot, settings);
+    const dataUrl = directCanvas.toDataURL('image/png');
+    const blob = await new Promise<Blob | null>((resolve) =>
+      directCanvas.toBlob((b) => resolve(b), 'image/png', 0.95)
+    );
+
+    if (!blob) {
+      throw new Error('Image creation failed');
     }
-    if (lot.expenses.kiraya.enabled) {
-      msg += `• کرایہ گاڑی: ${formatPKR(lot.expenses.kiraya.amount, 'Rs.', 'en')}\n`;
+    return { dataUrl, blob };
+  };
+
+  const triggerBrowserDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 2000);
+  };
+
+  // 1. One-Click Save PNG
+  const handleSaveImage = async () => {
+    sound.playCashChime();
+    setIsGeneratingImage(true);
+    try {
+      const { blob } = await getReceiptImage();
+      const sanitizedVendor = lot.vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+      triggerBrowserDownload(blob, `Mandi_POS_Bill_${sanitizedVendor}_Lot_${lot.lotNumber}.png`);
+
+      setShareSuccessToast(isUrdu ? 'رسید کی تصویر کامیابی سے محفوظ ہو گئی!' : 'POS Receipt image downloaded successfully!');
+      setTimeout(() => setShareSuccessToast(null), 4000);
+    } catch (err) {
+      console.error('Error saving receipt image:', err);
+      setShareSuccessToast(isUrdu ? 'تصویر تیار کرنے میں مسئلہ پیش آیا' : 'Failed to generate receipt image');
+      setTimeout(() => setShareSuccessToast(null), 3000);
+    } finally {
+      setIsGeneratingImage(false);
     }
-    if (lot.expenses.mazdoori.enabled) {
-      msg += `• مزدوری: ${formatPKR(lot.expenses.mazdoori.amount, 'Rs.', 'en')}\n`;
+  };
+
+  // 2. High-Res Visual Preview Modal
+  const handleOpenPreview = async () => {
+    sound.playTick();
+    setIsGeneratingImage(true);
+    try {
+      const { dataUrl } = await getReceiptImage();
+      setPreviewImageUrl(dataUrl);
+    } catch (err) {
+      console.error('Error generating preview:', err);
+    } finally {
+      setIsGeneratingImage(false);
     }
-    if (lot.expenses.munshiana.enabled) {
-      msg += `• منشیانہ: ${formatPKR(lot.expenses.munshiana.amount, 'Rs.', 'en')}\n`;
-    }
-    if (lot.expenses.naqdAdvance.enabled) {
-      msg += `• نقد پیشگی: ${formatPKR(lot.expenses.naqdAdvance.amount, 'Rs.', 'en')}\n`;
-    }
-    if (lot.expenses.marketFee.enabled) {
-      msg += `• مارکیٹ فیس: ${formatPKR(lot.expenses.marketFee.amount, 'Rs.', 'en')}\n`;
-    }
-    if (lot.expenses.customExpenses) {
-      lot.expenses.customExpenses.forEach((ce) => {
-        msg += `• ${ce.nameUrdu}: ${formatPKR(ce.amount, 'Rs.', 'en')}\n`;
+  };
+
+  // 3. Formatted WhatsApp text (NO CUSTOMER NAMES - QTY, RATE, TOTAL ONLY)
+  const generateWhatsAppMessage = () => {
+    let msg = `*${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}*\n`;
+    msg += `🧾 *${isUrdu ? 'پکی پرچی رسید برائے زمیندار (POS Bill)' : 'Vendor POS Invoice'}*\n`;
+    msg += `━━━━━━━━━━━━━━━━━\n`;
+    msg += `📋 *بل نمبر:* #${lot.lotNumber}\n`;
+    msg += `📅 *تاریخ:* ${lot.arrivalDate}\n`;
+    msg += `👤 *زمیندار:* ${lot.vendorName} ${lot.vendorCity ? `(${lot.vendorCity})` : ''}\n`;
+    if (lot.vehicleNumber) msg += `🚚 *گاڑی نمبر:* ${lot.vehicleNumber}\n`;
+    msg += `📦 *جنس:* ${lot.productUrdu} (${lot.totalQuantity} ${unitLabel})\n`;
+    msg += `━━━━━━━━━━━━━━━━━\n`;
+    msg += `*فروخت کی تفصیل (Sales Detail):*\n`;
+
+    if (lot.sales.length === 0) {
+      msg += `_(ابھی کوئی فروخت درج نہیں ہوئی)_\n`;
+    } else {
+      lot.sales.forEach((s, idx) => {
+        msg += `${idx + 1}. ${lot.productUrdu}: ${s.quantity} ${unitLabel} @ ${s.ratePerUnit} = ${formatPKR(s.totalAmount, 'Rs.', 'en')}\n`;
       });
     }
 
-    msg += `*کل کٹوتی اخراجات:* ${formatPKR(lot.summary.totalExpenses, 'Rs.', 'en')}\n`;
-    msg += `================================\n`;
-    msg += `*میزان (صافی رقم برائے ادائیگی):* ${formatPKR(lot.summary.netPayableToVendor, 'Rs.', 'en')}\n`;
-    msg += `================================\n`;
-    msg += `آڑھتی: ${settings.arhtiNameUrdu}\n`;
-    msg += `منجانب: ${settings.shopNameUrdu}`;
+    msg += `━━━━━━━━━━━━━━━━━\n`;
+    msg += `💰 *کل مال فروخت:* ${formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)} (${lot.summary.totalSoldQuantity} ${unitLabel})\n`;
 
+    // Deductions
+    const activeDeductions: string[] = [];
+    if (lot.expenses.commission.enabled) activeDeductions.push(`کمیشن (${lot.expenses.commission.rate}%): ${formatPKR(lot.expenses.commission.amount, 'Rs.', 'en')}`);
+    if (lot.expenses.kiraya.enabled) activeDeductions.push(`کرایہ: ${formatPKR(lot.expenses.kiraya.amount, 'Rs.', 'en')}`);
+    if (lot.expenses.mazdoori.enabled) activeDeductions.push(`مزدوری: ${formatPKR(lot.expenses.mazdoori.amount, 'Rs.', 'en')}`);
+    if (lot.expenses.munshiana.enabled) activeDeductions.push(`منشیانہ: ${formatPKR(lot.expenses.munshiana.amount, 'Rs.', 'en')}`);
+    if (lot.expenses.naqdAdvance.enabled) activeDeductions.push(`نقد پیشگی: ${formatPKR(lot.expenses.naqdAdvance.amount, 'Rs.', 'en')}`);
+    if (lot.expenses.marketFee.enabled) activeDeductions.push(`مارکیٹ فیس: ${formatPKR(lot.expenses.marketFee.amount, 'Rs.', 'en')}`);
+    lot.expenses.customExpenses?.forEach((ce) => {
+      activeDeductions.push(`${ce.nameUrdu}: ${formatPKR(ce.amount, 'Rs.', 'en')}`);
+    });
+
+    if (activeDeductions.length > 0) {
+      msg += `📉 *منہا کٹوتیاں و اخراجات:*\n• ` + activeDeductions.join('\n• ') + `\n`;
+      msg += `🔻 *کل کٹوتی:* -${formatPKR(lot.summary.totalExpenses, settings.currencySymbol, settings.language)}\n`;
+    }
+
+    msg += `━━━━━━━━━━━━━━━━━\n`;
+    msg += `💵 *صافی رقم واجب الادا (Net Payable):* *${formatPKR(lot.summary.netPayableToVendor, settings.currencySymbol, settings.language)}*\n`;
+    msg += `📌 *ادائیگی کی کیفیت:* ${isPaid ? '✅ ادا شدہ (PAID IN FULL)' : '⚠️ ادائیگی بقایا (PENDING)'}\n`;
+    msg += `━━━━━━━━━━━━━━━━━\n`;
+    msg += `👤 آڑھتی: ${settings.arhtiNameUrdu || settings.arhtiNameEn}\n`;
+    msg += `📍 ${settings.shopAddressUrdu || settings.shopAddressEn}\n`;
+    msg += `📞 فون: ${settings.shopPhone}`;
     return msg;
   };
 
-  const handleShareWhatsApp = () => {
-    sound.playTick();
-    const text = generateWhatsAppMessage();
-    const url = `https://wa.me/${lot.vendorPhone ? lot.vendorPhone.replace(/[^0-9]/g, '') : ''}?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
-  };
+  // 4. WhatsApp Share
+  const handleShareWhatsApp = async () => {
+    sound.playCashChime();
+    setIsGeneratingImage(true);
 
-  const handleCopyText = async () => {
-    sound.playTick();
-    const text = generateWhatsAppMessage();
+    const messageText = generateWhatsAppMessage();
+    const rawPhone = (lot.vendorPhone || '').replace(/[^0-9]/g, '');
+    const cleanPhone = rawPhone.startsWith('0') ? '92' + rawPhone.slice(1) : rawPhone;
+    const whatsappUrl = cleanPhone
+      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`
+      : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
+
     try {
-      await navigator.clipboard.writeText(text);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-    } catch {
-      // fallback
+      const { blob } = await getReceiptImage();
+      const sanitizedVendor = lot.vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+      const filename = `Mandi_POS_Bill_${sanitizedVendor}_Lot_${lot.lotNumber}.png`;
+
+      // Copy image to clipboard
+      try {
+        if (navigator.clipboard && window.ClipboardItem) {
+          const item = new ClipboardItem({ 'image/png': blob });
+          await navigator.clipboard.write([item]);
+          setCopiedImageStatus(true);
+          setTimeout(() => setCopiedImageStatus(false), 4000);
+        }
+      } catch (clipErr) {
+        console.warn('Clipboard image copy not supported, downloading directly:', clipErr);
+      }
+
+      // Mobile Web Share
+      const file = new File([blob], filename, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `رسید بل #${lot.lotNumber} - ${lot.vendorName}`,
+          text: messageText,
+        });
+        setShareSuccessToast(isUrdu ? 'واٹس ایپ پر رسید شیئر کر دی گئی!' : 'Receipt shared via WhatsApp!');
+        setTimeout(() => setShareSuccessToast(null), 4000);
+        return;
+      }
+
+      // Desktop Flow: Download image + Open WhatsApp Web
+      triggerBrowserDownload(blob, filename);
+      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+
+      setShareSuccessToast(
+        isUrdu
+          ? 'رسید کی تصویر محفوظ ہو گئی ہے! واٹس ایپ چیٹ میں تصویر پیسٹ (Ctrl+V) بھی کر سکتے ہیں۔'
+          : 'Receipt downloaded & copied to clipboard! Paste directly into WhatsApp chat.'
+      );
+      setTimeout(() => setShareSuccessToast(null), 6000);
+    } catch (err) {
+      console.error('Share failed, opening text chat fallback:', err);
+      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+    } finally {
+      setIsGeneratingImage(false);
     }
   };
 
+  const handleCopyText = () => {
+    sound.playTick();
+    const text = generateWhatsAppMessage();
+    navigator.clipboard.writeText(text);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
   return (
-    <div className="space-y-4 pb-16 sm:pb-6">
+    <div className="space-y-4 pb-20 sm:pb-8 animate-in fade-in duration-200">
+      
       {/* Top Action Bar */}
-      <div className="bg-white p-3 sm:p-4 rounded-2xl sm:rounded-3xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print">
-        {/* Lot Selector & Navigation */}
-        <div className="flex items-center gap-2 flex-wrap">
+      <div className="bg-slate-900 border border-slate-800 p-3 sm:p-4 rounded-2xl text-white flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-lg no-print">
+        
+        {/* Lot Selector & Back Controls */}
+        <div className="flex items-center gap-2.5 flex-wrap">
           {onBackToBolli && (
             <button
-              onClick={onBackToBolli}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition flex items-center gap-1.5 font-urdu-sans border border-slate-300"
+              onClick={() => {
+                sound.playTick();
+                onBackToBolli();
+              }}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 border border-slate-700 transition active:scale-95"
             >
-              {isUrdu ? <ArrowRight className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowLeft className="w-3.5 h-3.5 text-emerald-600" />}
-              <span>{t.backToBolli}</span>
+              <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" />
+              <span>{isUrdu ? 'واپس بولی روم' : 'Back to Bolli'}</span>
             </button>
           )}
 
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs font-bold text-slate-700 font-urdu-sans">{t.lotNumber}:</label>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 font-urdu-sans hidden sm:inline">{isUrdu ? 'منتخب لاٹ:' : 'Select Lot:'}</span>
             <select
               value={lot.id}
-              onChange={(e) => onSelectLot(e.target.value)}
-              className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 font-semibold text-slate-800"
+              onChange={(e) => {
+                sound.playTick();
+                onSelectLot(e.target.value);
+              }}
+              className="bg-slate-800 text-slate-100 text-xs rounded-xl px-3 py-1.5 border border-slate-700 font-urdu-sans focus:ring-2 focus:ring-emerald-500 font-bold"
             >
               {lots.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.vendorName} - {l.productUrdu} ({l.lotNumber})
+                  {l.vendorName} - {l.productUrdu} (#{l.lotNumber})
                 </option>
               ))}
             </select>
           </div>
-        </div>
 
-        {/* Print / WhatsApp / Copy / Expense Buttons */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {onOpenExpenseSlip && (
+          {/* 1-Click Vendor Payment Status Switcher */}
+          {onToggleVendorPaymentStatus && (
             <button
-              onClick={() => onOpenExpenseSlip(lot.id)}
-              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans border border-slate-200"
+              onClick={() => onToggleVendorPaymentStatus(lot.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-sm border ${
+                isPaid
+                  ? 'bg-emerald-950 text-emerald-300 border-emerald-700 hover:bg-emerald-900'
+                  : 'bg-amber-950 text-amber-300 border-amber-700 hover:bg-amber-900'
+              }`}
+              title={isPaid ? 'ادائیگی ہو چکی ہے - کلک کر کے بقایا کریں' : 'ادائیگی بقایا ہے - کلک کر کے ادا شدہ کریں'}
             >
-              <Receipt className="w-4 h-4 text-emerald-600" />
-              <span>{t.tabExpenses}</span>
+              {isPaid ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Clock className="w-3.5 h-3.5 text-amber-400" />}
+              <span>{isPaid ? (isUrdu ? 'ادا شدہ (Paid) ✅' : 'Paid ✅') : (isUrdu ? 'ادائیگی بقایا (Pending) ⏳' : 'Pending ⏳')}</span>
             </button>
           )}
+        </div>
+
+        {/* Action Buttons: POS Thermal Print, A4 Print, Preview, Image, WhatsApp */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Dedicated 80mm POS Thermal Print Button */}
+          <button
+            type="button"
+            onClick={handlePOSPrint}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-md border border-amber-400"
+            title="80mm تھرمل پرنٹر پر فوری پرچی پرنٹ کریں (Zero Margins, POS Thermal Roll)"
+          >
+            <Printer className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>{isUrdu ? '🖨️ 80mm POS تھرمل پرنٹ' : '🖨️ 80mm POS Thermal Print'}</span>
+          </button>
+
+          {/* Paper View Toggle (80mm POS vs A4 Standard) */}
+          <div className="flex items-center bg-slate-800 p-0.5 rounded-xl border border-slate-700">
+            <button
+              type="button"
+              onClick={() => setPaperFormat('pos80')}
+              className={`px-2 py-1 rounded-lg text-[11px] font-bold font-urdu-sans transition ${
+                paperFormat === 'pos80'
+                  ? 'bg-amber-500 text-slate-950 shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {isUrdu ? '80mm پرچی' : '80mm Slip'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaperFormat('standard')}
+              className={`px-2 py-1 rounded-lg text-[11px] font-bold font-urdu-sans transition ${
+                paperFormat === 'standard'
+                  ? 'bg-amber-500 text-slate-950 shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {isUrdu ? 'A4 بل' : 'A4 Bill'}
+            </button>
+          </div>
 
           <button
+            type="button"
+            onClick={handleOpenPreview}
+            disabled={isGeneratingImage}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 border border-slate-700 disabled:opacity-50"
+          >
+            <Eye className="w-3.5 h-3.5 text-sky-400" />
+            <span>{isUrdu ? 'پیش نظارہ' : 'Preview'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleCopyText}
-            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans border border-slate-200"
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 border border-slate-700"
           >
-            {isCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-            <span>{isCopied ? t.receiptCopied : t.copyReceipt}</span>
+            {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+            <span>{isCopied ? t.copied : t.copyText}</span>
           </button>
 
           <button
+            type="button"
+            onClick={handleSaveImage}
+            disabled={isGeneratingImage}
+            className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-sm transition active:scale-95 disabled:opacity-50"
+          >
+            {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            <span>{isUrdu ? 'تصویر محفوظ کریں' : 'Save Image'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleShareWhatsApp}
-            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs active:scale-95 font-urdu-sans"
+            disabled={isGeneratingImage}
+            className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs font-urdu-sans flex items-center gap-1.5 shadow-md transition active:scale-95 disabled:opacity-50"
           >
-            <Share2 className="w-4 h-4" />
-            <span>{t.shareWhatsApp}</span>
-          </button>
-
-          <button
-            onClick={handlePrint}
-            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 font-urdu-sans"
-          >
-            <Printer className="w-4 h-4 text-emerald-400" />
-            <span>{t.printReceipt}</span>
+            {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageCircle className="w-3.5 h-3.5 fill-current" />}
+            <span>{isUrdu ? 'واٹس ایپ پر بھیجیں' : 'WhatsApp'}</span>
           </button>
         </div>
       </div>
 
-      {/* Official Mandi Printable Receipt Paper Card */}
-      <div className="max-w-2xl mx-auto bg-white rounded-2xl sm:rounded-3xl border-2 border-slate-300 shadow-xl overflow-hidden print:border print:shadow-none print:m-0 print:max-w-none print:w-full">
-        {/* Receipt Header */}
-        <div className="bg-slate-900 text-white p-5 text-center relative overflow-hidden border-b-2 border-slate-950">
-          <div className="absolute top-2 right-2 rtl:left-2 rtl:right-auto opacity-15 text-5xl">
-            🌾
+      {/* Toast Notification */}
+      {shareSuccessToast && (
+        <div className="bg-emerald-950 border border-emerald-600/40 text-emerald-200 px-4 py-2.5 rounded-xl text-xs font-bold font-urdu-sans flex items-center justify-between gap-2 animate-in fade-in shadow-md no-print">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span>{shareSuccessToast}</span>
           </div>
-          <div className="inline-block px-3 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-bold text-[11px] mb-1.5 font-urdu-sans">
-            {isUrdu ? 'پکی پرچی آڑھت - سبزی و فروٹ منڈی' : 'Official Mandi Receipt'}
-          </div>
-          <h1 className="text-xl sm:text-2xl font-black font-urdu-nastaliq tracking-wide text-white">
-            {isUrdu ? settings.shopNameUrdu : settings.shopNameEn}
-          </h1>
-          <p className="text-xs text-slate-300 font-urdu-sans mt-0.5">
-            {isUrdu ? settings.arhtiNameUrdu : settings.arhtiNameEn} • {isUrdu ? settings.shopAddressUrdu : settings.shopAddressEn}
-          </p>
-          <p className="text-[11px] text-emerald-400 font-numbers mt-0.5">
-            فون: {settings.shopPhone}
-          </p>
+          {copiedImageStatus && (
+            <span className="text-[11px] px-2 py-0.5 bg-emerald-800 text-white rounded-md font-normal">
+              📋 تصویر کاپی ہے
+            </span>
+          )}
         </div>
+      )}
 
-        {/* Bill Metadata Grid */}
-        <div className="p-4 bg-slate-50 border-b border-slate-200 text-xs font-urdu-sans">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div>
-              <span className="text-[10px] text-slate-500 block">{t.lotNumber}:</span>
-              <strong className="font-mono text-slate-900">{lot.lotNumber}</strong>
+      {/* THE MINIMAL LOCAL SHOP POS RECEIPT / BILL (پاکستانی دکان POS پرچی) */}
+      <div className="flex justify-center p-1 sm:p-4">
+        <div
+          ref={receiptCardRef}
+          id="mandi-pos-receipt-card"
+          className={`w-full ${
+            paperFormat === 'pos80' ? 'max-w-[360px]' : 'max-w-md'
+          } bg-white text-slate-900 border border-slate-300 rounded-2xl shadow-xl p-4 sm:p-5 space-y-3.5 font-urdu-sans print:border-none print:shadow-none print:m-0 print:p-2 print:max-w-none print:w-full transition-all`}
+        >
+          {/* Receipt Top Header */}
+          <div className="text-center space-y-1">
+            <div className="font-urdu-nastaliq text-sm font-bold text-slate-900">
+              بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ
             </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block">{t.date}:</span>
-              <strong className="font-numbers text-slate-900">{lot.arrivalDate}</strong>
+
+            <h1 className="text-xl sm:text-2xl font-black font-urdu-nastaliq text-slate-950 leading-tight">
+              {isUrdu ? settings.shopNameUrdu : settings.shopNameEn}
+            </h1>
+
+            <p className="text-xs font-bold text-slate-800 font-urdu-sans">
+              پروپرائٹر: <span className="font-urdu-nastaliq text-sm">{isUrdu ? settings.arhtiNameUrdu : settings.arhtiNameEn}</span>
+            </p>
+
+            <p className="text-[11px] text-slate-600 font-urdu-sans">
+              📍 {isUrdu ? settings.shopAddressUrdu : settings.shopAddressEn} • <span className="font-numbers font-bold text-slate-800">📞 فون: {settings.shopPhone}</span>
+            </p>
+
+            <div className="inline-block mt-1 px-3 py-0.5 bg-slate-100 border border-slate-300 rounded-md text-[11px] font-bold text-slate-800 font-urdu-sans">
+              پکی پرچی رسید برائے زمیندار (POS Invoice)
             </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block">{t.vendor}:</span>
-              <strong className="text-slate-900">{lot.vendorName}</strong>
+          </div>
+
+          {/* Dashed Separator */}
+          <div className="border-t border-dashed border-slate-400 my-2" />
+
+          {/* Bill Metadata */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="space-y-0.5 text-start">
+              <span className="text-[10px] text-slate-500 font-bold block">بل نمبر:</span>
+              <strong className="font-mono text-xs text-slate-900 block font-bold">#{lot.lotNumber}</strong>
             </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block">{t.product}:</span>
-              <strong className="text-emerald-800">
+
+            <div className="space-y-0.5 text-start">
+              <span className="text-[10px] text-slate-500 font-bold block">تاریخ آمد:</span>
+              <strong className="font-numbers text-xs text-slate-900 block font-bold">{lot.arrivalDate}</strong>
+            </div>
+
+            <div className="space-y-0.5 text-start">
+              <span className="text-[10px] text-slate-500 font-bold block">زمیندار / کاشتکار:</span>
+              <strong className="font-urdu-nastaliq text-xs sm:text-sm text-slate-950 block truncate font-bold">
+                {lot.vendorName} {lot.vendorCity ? `(${lot.vendorCity})` : ''}
+              </strong>
+            </div>
+
+            <div className="space-y-0.5 text-start">
+              <span className="text-[10px] text-slate-500 font-bold block">کل جنس / آمد:</span>
+              <strong className="text-xs text-slate-950 block font-bold">
                 {lot.productUrdu} ({lot.totalQuantity} {unitLabel})
               </strong>
             </div>
+
+            {lot.vehicleNumber && (
+              <div className="space-y-0.5 text-start col-span-2">
+                <span className="text-[10px] text-slate-500 font-bold block">گاڑی نمبر:</span>
+                <strong className="text-xs text-slate-900 block font-mono">{lot.vehicleNumber}</strong>
+              </div>
+            )}
           </div>
 
-          {(lot.vendorCity || lot.vehicleNumber) && (
-            <div className="flex gap-4 mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-600">
-              {lot.vendorCity && (
-                <span>
-                  {t.vendorCity}: <strong>{lot.vendorCity}</strong>
-                </span>
-              )}
-              {lot.vehicleNumber && (
-                <span>
-                  {t.vehicleNumber}: <strong>{lot.vehicleNumber}</strong>
-                </span>
-              )}
-            </div>
-          )}
-        </div>
+          {/* Dashed Separator */}
+          <div className="border-t border-dashed border-slate-400 my-2" />
 
-        {/* Sales Table (Split Bids Breakdown) */}
-        <div className="p-4 sm:p-5">
-          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 font-urdu-sans border-b border-slate-200 pb-1">
-            {isUrdu ? 'تفصیل بولی و فروخت (ٹوٹل)' : 'Auction Split Breakdown (Total)'}
-          </h3>
-
-          <table className="w-full text-xs font-urdu-sans border-collapse mb-4">
-            <thead>
-              <tr className="bg-slate-100 text-slate-700 border-b border-slate-300 font-bold">
-                <th className="py-2 px-2 text-start">#</th>
-                <th className="py-2 px-2 text-start">{t.buyerName}</th>
-                <th className="py-2 px-2 text-center">{t.qty}</th>
-                <th className="py-2 px-2 text-end">{t.rate}</th>
-                <th className="py-2 px-2 text-end">{t.totalAmount}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200">
-              {lot.sales.map((sale, idx) => (
-                <tr key={sale.id} className="hover:bg-slate-50">
-                  <td className="py-2 px-2 font-numbers text-slate-600">{idx + 1}</td>
-                  <td className="py-2 px-2 font-bold text-slate-800 font-urdu-nastaliq">{sale.buyerName}</td>
-                  <td className="py-2 px-2 text-center font-numbers text-slate-700">{sale.quantity}</td>
-                  <td className="py-2 px-2 text-end font-numbers text-slate-700">
-                    {formatPKR(sale.ratePerUnit, settings.currencySymbol, settings.language)}
+          {/* SALES TABLE - NO CUSTOMER NAME, ONLY QTY, RATE, TOTAL */}
+          <div>
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-900 text-slate-900 font-bold">
+                  <th className="py-1 px-1 text-start w-6">#</th>
+                  <th className="py-1 px-2 text-start">تفصیلِ جنس (Item)</th>
+                  <th className="py-1 px-1.5 text-center">تعداد ({unitLabel})</th>
+                  <th className="py-1 px-2 text-end">ریٹ</th>
+                  <th className="py-1 px-2 text-end">کل رقم</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {lot.sales.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-3 text-center text-slate-400 text-xs font-urdu-sans">
+                      کوئی بولی فروخت درج نہیں ہوئی۔
+                    </td>
+                  </tr>
+                ) : (
+                  lot.sales.map((sale, idx) => (
+                    <tr key={sale.id} className="text-slate-900">
+                      <td className="py-1.5 px-1 font-numbers text-slate-500 text-start">{idx + 1}</td>
+                      <td className="py-1.5 px-2 font-bold text-slate-950 font-urdu-sans text-start">
+                        {lot.productUrdu}
+                      </td>
+                      <td className="py-1.5 px-1.5 text-center font-numbers font-bold">
+                        {sale.quantity}
+                      </td>
+                      <td className="py-1.5 px-2 text-end font-numbers text-slate-700">
+                        {formatPKR(sale.ratePerUnit, 'Rs.', 'en')}
+                      </td>
+                      <td className="py-1.5 px-2 text-end font-numbers font-bold text-slate-950">
+                        {formatPKR(sale.totalAmount, 'Rs.', 'en')}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-slate-900 font-bold bg-slate-50 text-slate-950">
+                  <td colSpan={2} className="py-1.5 px-2 text-start font-urdu-sans">
+                    کل فروخت ({lot.summary.totalSoldQuantity} {unitLabel}):
                   </td>
-                  <td className="py-2 px-2 text-end font-bold text-slate-900 font-numbers">
-                    {formatPKR(sale.totalAmount, settings.currencySymbol, settings.language)}
+                  <td className="py-1.5 px-1.5 text-center font-numbers">{lot.summary.totalSoldQuantity}</td>
+                  <td className="py-1.5 px-2 text-end text-[10px] text-slate-500 font-urdu-sans">ٹوٹل</td>
+                  <td className="py-1.5 px-2 text-end font-numbers font-black text-sm text-slate-950">
+                    {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
                   </td>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-emerald-50 border-t-2 border-emerald-600 font-bold">
-                <td colSpan={2} className="py-2 px-2 font-urdu-sans text-emerald-950">
-                  {t.grossTotal} ({lot.summary.totalSoldQuantity} {unitLabel}):
-                </td>
-                <td className="py-2 px-2 text-center font-numbers text-emerald-950">
-                  {lot.summary.totalSoldQuantity}
-                </td>
-                <td className="py-2 px-2 text-end"></td>
-                <td className="py-2 px-2 text-end text-sm font-black text-emerald-950 font-numbers">
-                  {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+              </tfoot>
+            </table>
+          </div>
 
-          {/* 2-Column Deductions and Meezan Card */}
-          <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3.5 space-y-2 mb-4">
-            <h4 className="text-xs font-bold text-slate-800 font-urdu-sans border-b border-slate-200 pb-1">
-              {t.expensesSection} (زمیندار کے اخراجات کی کٹوتی)
-            </h4>
+          {/* Dashed Separator */}
+          <div className="border-t border-dashed border-slate-400 my-2" />
 
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {/* کمیشن */}
+          {/* DEDUCTIONS / EXPENSES LIST (کٹوتیاں و اخراجات) */}
+          <div className="space-y-1 text-xs">
+            <div className="font-bold text-slate-900 font-urdu-nastaliq text-xs mb-1">
+              منہا کٹوتیاں و اخراجات (Deductions):
+            </div>
+
+            <div className="space-y-1 text-slate-700">
               {lot.expenses.commission.enabled && (
-                <div className="flex items-center justify-between p-1.5 bg-white rounded-xl border border-blue-200">
-                  <span className="px-2 py-0.5 rounded bg-blue-600 text-white font-bold text-[11px] font-urdu-nastaliq">
-                    {t.commission}
-                  </span>
-                  <span className="font-bold text-slate-900 font-numbers">
+                <div className="flex justify-between items-center">
+                  <span>کمیشن ({lot.expenses.commission.rate}%):</span>
+                  <span className="font-numbers font-bold text-slate-900">
                     {formatPKR(lot.expenses.commission.amount, settings.currencySymbol, settings.language)}
                   </span>
                 </div>
               )}
 
-              {/* کرایہ */}
               {lot.expenses.kiraya.enabled && (
-                <div className="flex items-center justify-between p-1.5 bg-white rounded-xl border border-emerald-200">
-                  <span className="px-2 py-0.5 rounded bg-emerald-600 text-white font-bold text-[11px] font-urdu-nastaliq">
-                    {t.kiraya}
-                  </span>
-                  <span className="font-bold text-slate-900 font-numbers">
+                <div className="flex justify-between items-center">
+                  <span>کرایہ گاڑی:</span>
+                  <span className="font-numbers font-bold text-slate-900">
                     {formatPKR(lot.expenses.kiraya.amount, settings.currencySymbol, settings.language)}
                   </span>
                 </div>
               )}
 
-              {/* مزدوری */}
               {lot.expenses.mazdoori.enabled && (
-                <div className="flex items-center justify-between p-1.5 bg-white rounded-xl border border-indigo-200">
-                  <span className="px-2 py-0.5 rounded bg-indigo-600 text-white font-bold text-[11px] font-urdu-nastaliq">
-                    {t.mazdoori}
-                  </span>
-                  <span className="font-bold text-slate-900 font-numbers">
+                <div className="flex justify-between items-center">
+                  <span>مزدوری:</span>
+                  <span className="font-numbers font-bold text-slate-900">
                     {formatPKR(lot.expenses.mazdoori.amount, settings.currencySymbol, settings.language)}
                   </span>
                 </div>
               )}
 
-              {/* منشیانہ */}
               {lot.expenses.munshiana.enabled && (
-                <div className="flex items-center justify-between p-1.5 bg-white rounded-xl border border-sky-200">
-                  <span className="px-2 py-0.5 rounded bg-sky-600 text-white font-bold text-[11px] font-urdu-nastaliq">
-                    {t.munshiana}
-                  </span>
-                  <span className="font-bold text-slate-900 font-numbers">
+                <div className="flex justify-between items-center">
+                  <span>منشیانہ:</span>
+                  <span className="font-numbers font-bold text-slate-900">
                     {formatPKR(lot.expenses.munshiana.amount, settings.currencySymbol, settings.language)}
                   </span>
                 </div>
               )}
 
-              {/* نقد */}
               {lot.expenses.naqdAdvance.enabled && (
-                <div className="flex items-center justify-between p-1.5 bg-white rounded-xl border border-rose-200">
-                  <span className="px-2 py-0.5 rounded bg-rose-600 text-white font-bold text-[11px] font-urdu-nastaliq">
-                    {t.naqdAdvance}
-                  </span>
-                  <span className="font-bold text-slate-900 font-numbers">
+                <div className="flex justify-between items-center">
+                  <span>نقد پیشگی (Advance):</span>
+                  <span className="font-numbers font-bold text-slate-900">
                     {formatPKR(lot.expenses.naqdAdvance.amount, settings.currencySymbol, settings.language)}
                   </span>
                 </div>
               )}
 
-              {/* مارکیٹ فیس */}
               {lot.expenses.marketFee.enabled && (
-                <div className="flex items-center justify-between p-1.5 bg-white rounded-xl border border-amber-200">
-                  <span className="px-2 py-0.5 rounded bg-amber-600 text-white font-bold text-[11px] font-urdu-nastaliq">
-                    {t.marketFee}
-                  </span>
-                  <span className="font-bold text-slate-900 font-numbers">
+                <div className="flex justify-between items-center">
+                  <span>مارکیٹ فیس:</span>
+                  <span className="font-numbers font-bold text-slate-900">
                     {formatPKR(lot.expenses.marketFee.amount, settings.currencySymbol, settings.language)}
                   </span>
                 </div>
               )}
 
-              {/* Custom items */}
               {lot.expenses.customExpenses?.map((ce) => (
-                <div key={ce.id} className="flex items-center justify-between p-1.5 bg-white rounded-xl border border-slate-200">
-                  <span className="px-2 py-0.5 rounded bg-slate-700 text-white font-bold text-[11px] font-urdu-nastaliq">
-                    {ce.nameUrdu}
-                  </span>
-                  <span className="font-bold text-slate-900 font-numbers">
+                <div key={ce.id} className="flex justify-between items-center">
+                  <span>{ce.nameUrdu}:</span>
+                  <span className="font-numbers font-bold text-slate-900">
                     {formatPKR(ce.amount, settings.currencySymbol, settings.language)}
                   </span>
                 </div>
               ))}
             </div>
 
-            {/* Total Deductions Bar */}
-            <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs font-bold text-slate-800">
-              <span className="font-urdu-sans">{t.totalExpenses}:</span>
-              <span className="text-rose-600 font-numbers">
+            {/* Total Deductions */}
+            <div className="flex justify-between items-center pt-1 border-t border-slate-200 font-bold text-rose-800">
+              <span>کل منہا اخراجات:</span>
+              <span className="font-numbers font-black">
                 - {formatPKR(lot.summary.totalExpenses, settings.currencySymbol, settings.language)}
               </span>
             </div>
           </div>
 
-          {/* FINAL MEEZAN BOX */}
-          <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-2xl flex items-center justify-between shadow-xs mb-6 border border-slate-800">
+          {/* Dashed Separator */}
+          <div className="border-t border-dashed border-slate-400 my-2" />
+
+          {/* NET PAYABLE BOX (صافی رقم برائے ادائیگی) */}
+          <div className="bg-slate-950 text-white p-3.5 rounded-xl flex items-center justify-between shadow-md">
             <div>
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black text-sm font-urdu-nastaliq inline-block mb-1">
-                {t.meezan} (صافی رقم)
-              </span>
-              <span className="text-xs text-slate-300 block font-urdu-sans">
-                {isUrdu ? 'زمیندار کو قابلِ ادا رقم' : 'Net payable to vendor'}
-              </span>
+              <span className="text-[10px] text-slate-300 font-urdu-sans block">صافی میزان واجب الادا</span>
+              <span className="text-xs font-bold font-urdu-nastaliq text-amber-300">صافی رقم برائے ادائیگی</span>
             </div>
-            <div className="text-2xl sm:text-3xl font-black text-amber-300 font-numbers tracking-tight">
-              {formatPKR(lot.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
+            <div className="text-end">
+              <span className="text-lg sm:text-xl font-black font-numbers text-white tracking-tight">
+                {formatPKR(lot.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
+              </span>
             </div>
           </div>
 
-          {/* Signatures & Stamp Box */}
-          <div className="grid grid-cols-2 gap-6 pt-4 border-t border-dashed border-slate-300 text-center text-xs font-urdu-sans">
-            <div>
-              <div className="h-10 border-b border-slate-400 mb-1"></div>
-              <span className="text-slate-600">{isUrdu ? 'دستخط منشی / کیشیئر' : "Munshi's Signature"}</span>
+          {/* VENDOR PAYMENT STATUS BOX (بقایا یا ادا شدہ) */}
+          <div
+            onClick={() => onToggleVendorPaymentStatus && onToggleVendorPaymentStatus(lot.id)}
+            className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition cursor-pointer ${
+              isPaid
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-950 hover:bg-emerald-100'
+                : 'bg-amber-50 border-amber-300 text-amber-950 hover:bg-amber-100'
+            }`}
+            title="کلک کر کے ادائیگی کی کیفیت تبدیل کریں (Click to toggle payment status)"
+          >
+            <div className="flex items-center gap-2">
+              {isPaid ? (
+                <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
+                  <Check className="w-4 h-4 stroke-[3]" />
+                </div>
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center flex-shrink-0">
+                  <Clock className="w-4 h-4 stroke-[2.5]" />
+                </div>
+              )}
+              <div>
+                <span className="text-xs font-black font-urdu-sans block">
+                  {isPaid ? '✅ ادائیگی کی کیفیت: ادا شدہ (PAID IN FULL)' : '⚠️ ادائیگی کی کیفیت: ادائیگی بقایا (PENDING)'}
+                </span>
+                <span className="text-[10px] opacity-75 font-urdu-sans block">
+                  {isPaid
+                    ? `زمیندار کو مکمل ادائیگی ہو چکی ہے ${lot.vendorPaymentDate ? `(${lot.vendorPaymentDate})` : ''}`
+                    : 'زمیندار کو رقم کی ادائیگی ابھی باقی ہے (کلک کر کے ادا شدہ کریں)'}
+                </span>
+              </div>
             </div>
-            <div>
-              <div className="h-10 border-b border-slate-400 mb-1"></div>
-              <span className="text-slate-600">{isUrdu ? 'دستخط آڑھتی / مہر' : "Arhti's Stamp & Signature"}</span>
-            </div>
-          </div>
-        </div>
 
-        {/* Bottom Footer Note */}
-        <div className="bg-slate-100 p-2.5 text-center text-[10px] text-slate-500 border-t border-slate-200 font-urdu-sans">
-          {isUrdu
-            ? 'کسی بھی قسم کے تنازعے کی صورت میں منڈی کمیٹی کا فیصلہ حتمی ہوگا۔ شکریہ!'
-            : 'Generated by Mandi Bolli & Commission Manager. Thank you!'}
+            <span className="text-[10px] px-2 py-0.5 rounded bg-white/80 border border-slate-300 font-bold font-urdu-sans">
+              {isPaid ? 'ادا شدہ' : 'بقایا'}
+            </span>
+          </div>
+
+          {/* Signatures & Footer Note */}
+          <div className="pt-4 border-t border-dashed border-slate-300 space-y-3">
+            <div className="grid grid-cols-2 gap-4 text-center text-xs">
+              <div className="space-y-1">
+                <div className="border-b border-dashed border-slate-400 pb-2" />
+                <span className="text-[11px] text-slate-600 font-bold font-urdu-sans">دستخط منشی / کیشیئر</span>
+              </div>
+              <div className="space-y-1">
+                <div className="border-b border-dashed border-slate-400 pb-2" />
+                <span className="text-[11px] text-slate-600 font-bold font-urdu-sans">دستخط و مہر آڑھتی</span>
+              </div>
+            </div>
+
+            <p className="text-center text-[10px] text-slate-500 font-urdu-sans">
+              کمپیوٹرائزڈ رسید برائے زمیندار | منڈی کمیٹی کے جملہ قواعد نافذ العمل ہیں
+            </p>
+          </div>
         </div>
       </div>
+
+      {/* High-Resolution Standalone Image Preview Modal */}
+      {previewImageUrl && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 max-w-lg w-full rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+            <div className="p-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-emerald-400" />
+                <h3 className="font-bold text-xs sm:text-sm font-urdu-sans">
+                  {isUrdu ? 'رسید کی ہائی ریزولوشن تصویر' : 'High-Res Receipt Image Preview'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setPreviewImageUrl(null)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 bg-slate-950/50 flex items-center justify-center">
+              <img
+                src={previewImageUrl}
+                alt="Receipt Full Preview"
+                className="max-w-full h-auto rounded-lg shadow-lg border border-slate-800"
+              />
+            </div>
+
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  sound.playCashChime();
+                  const link = document.createElement('a');
+                  link.download = `Mandi_POS_Receipt_Lot_${lot.lotNumber}.png`;
+                  link.href = previewImageUrl;
+                  link.click();
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-md active:scale-95 transition"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{isUrdu ? 'ڈاؤن لوڈ کریں' : 'Download PNG'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,8 +1,19 @@
 import React, { useState, useMemo } from 'react';
-import { VendorLot, AppSettings, CustomerBuyer } from '../types';
+import { VendorLot, AppSettings, CustomerBuyer, VendorPaymentStatus } from '../types';
 import { translations, unitLabels, commonMandiProducts } from '../utils/localization';
-import { formatPKR } from '../utils/currency';
+import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
+import { VendorConsolidatedBillModal } from './VendorConsolidatedBillModal';
+import { ReportPDFPreviewModal } from './ReportPDFPreviewModal';
+import {
+  PDFPreviewData,
+  buildReportPDF,
+  buildEntireRecordReportPDF,
+  buildSingleLotReportPDF,
+  buildSingleCustomerReportPDF,
+  buildSingleProductReportPDF,
+  buildSingleVendorReportPDF,
+} from '../utils/pdfReportGenerator';
 import {
   BarChart3,
   Users,
@@ -21,6 +32,16 @@ import {
   FileSpreadsheet,
   FileText,
   Search,
+  Layers,
+  Receipt,
+  FileDown,
+  Eye,
+  FileCheck,
+  CheckCircle2,
+  Check,
+  X,
+  ArrowDownLeft,
+  ArrowUpRight,
 } from 'lucide-react';
 
 interface ReportsViewProps {
@@ -29,6 +50,18 @@ interface ReportsViewProps {
   settings: AppSettings;
   onOpenReceipt?: (lotId: string) => void;
   onOpenExpenseSlip?: (lotId: string) => void;
+  onToggleVendorPaymentStatus?: (lotId: string, customStatus?: 'pending' | 'paid') => void;
+  onRecordVendorPayment?: (
+    vendorName: string,
+    payment: {
+      lotId?: string;
+      amount: number;
+      notes?: string;
+      paymentDate?: string;
+      paymentMethod?: 'cash' | 'online' | 'cheque';
+      status?: VendorPaymentStatus;
+    }
+  ) => void;
 }
 
 type ReportType = 'vendor' | 'customer' | 'date' | 'product';
@@ -40,6 +73,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   settings,
   onOpenReceipt,
   onOpenExpenseSlip,
+  onToggleVendorPaymentStatus,
+  onRecordVendorPayment,
 }) => {
   const t = translations[settings.language];
   const isUrdu = settings.language === 'ur';
@@ -57,6 +92,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [selectedCustomerFilter, setSelectedCustomerFilter] = useState<string>('all');
   const [selectedProductFilter, setSelectedProductFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // State for Dedicated Vendor Payment div
+  const [selectedVendorForPayment, setSelectedVendorForPayment] = useState<string | null>(null);
+  const [vendorPaymentAmount, setVendorPaymentAmount] = useState<number>(0);
+  const [vendorPaymentNote, setVendorPaymentNote] = useState('');
+  const [vendorPaymentMethod, setVendorPaymentMethod] = useState<'cash' | 'online' | 'cheque'>('cash');
+  const [vendorPaymentTargetLotId, setVendorPaymentTargetLotId] = useState<string>('all');
+
+  // State for PDF preview modal
+  const [pdfPreview, setPdfPreview] = useState<PDFPreviewData | null>(null);
+
+  // State for Consolidated Vendor Bill (مجموعی بل - تمام اجناس ایک ساتھ)
+  const [consolidatedBillVendor, setConsolidatedBillVendor] = useState<{
+    vendorName: string;
+    vendorPhone?: string;
+    vendorCity?: string;
+    lots: VendorLot[];
+    dateLabel: string;
+  } | null>(null);
 
   // Date filtering helper
   const isLotInDateRange = (lotDate: string) => {
@@ -117,28 +171,173 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     return Array.from(map.values());
   }, [lots]);
 
-  // 1. DATE REPORT DATA
+  // 1. CUSTOMER REPORT DATA
+  const customerReports = useMemo(() => {
+    const custMap = new Map<
+      string,
+      {
+        customerName: string;
+        phone?: string;
+        shopName?: string;
+        totalPurchases: number;
+        totalUnitsBought: number;
+        totalAmount: number;
+        directCashPaid: number;
+        khataPaid: number;
+        cashPaid: number;
+        creditPending: number;
+        transactions: Array<{
+          lotId: string;
+          lotNumber: string;
+          productUrdu: string;
+          date: string;
+          quantity: number;
+          ratePerUnit: number;
+          totalAmount: number;
+          paymentStatus: 'cash' | 'credit' | 'partial';
+        }>;
+      }
+    >();
+
+    // If viewing all dates or filtering a specific customer, initialize with saved customers
+    if (dateFilter === 'all' || selectedCustomerFilter !== 'all') {
+      customers.forEach((c) => {
+        if (selectedCustomerFilter !== 'all' && c.name.toLowerCase() !== selectedCustomerFilter.toLowerCase()) {
+          return;
+        }
+        if (!custMap.has(c.name)) {
+          custMap.set(c.name, {
+            customerName: c.name,
+            phone: c.phone,
+            shopName: c.shopName,
+            totalPurchases: 0,
+            totalUnitsBought: 0,
+            totalAmount: c.openingBalance || 0,
+            directCashPaid: 0,
+            khataPaid: 0,
+            cashPaid: 0,
+            creditPending: c.openingBalance || 0,
+            transactions: [],
+          });
+        }
+      });
+    }
+
+    filteredLotsByDate.forEach((lot) => {
+      lot.sales.forEach((sale) => {
+        if (selectedCustomerFilter !== 'all' && sale.buyerName.toLowerCase() !== selectedCustomerFilter.toLowerCase()) {
+          return;
+        }
+
+        const savedCust = customers.find((c) => c.name.toLowerCase() === sale.buyerName.toLowerCase());
+        const existing = custMap.get(sale.buyerName) || {
+          customerName: sale.buyerName,
+          phone: sale.buyerPhone || savedCust?.phone,
+          shopName: savedCust?.shopName,
+          totalPurchases: 0,
+          totalUnitsBought: 0,
+          totalAmount: dateFilter === 'all' && savedCust ? (savedCust.openingBalance || 0) : 0,
+          directCashPaid: 0,
+          khataPaid: 0,
+          cashPaid: 0,
+          creditPending: 0,
+          transactions: [],
+        };
+
+        existing.totalPurchases += 1;
+        existing.totalUnitsBought += sale.quantity;
+        existing.totalAmount += sale.totalAmount;
+        if (sale.paymentStatus === 'cash') {
+          existing.directCashPaid += sale.totalAmount;
+        } else if (sale.paidAmount) {
+          existing.directCashPaid += sale.paidAmount;
+        }
+
+        if (!existing.phone && (sale.buyerPhone || savedCust?.phone)) {
+          existing.phone = sale.buyerPhone || savedCust?.phone;
+        }
+        if (!existing.shopName && savedCust?.shopName) {
+          existing.shopName = savedCust.shopName;
+        }
+
+        existing.transactions.push({
+          lotId: lot.id,
+          lotNumber: lot.lotNumber,
+          productUrdu: lot.productUrdu,
+          date: lot.arrivalDate,
+          quantity: sale.quantity,
+          ratePerUnit: sale.ratePerUnit,
+          totalAmount: sale.totalAmount,
+          paymentStatus: sale.paymentStatus,
+        });
+
+        custMap.set(sale.buyerName, existing);
+      });
+    });
+
+    const list = Array.from(custMap.values()).map((c) => {
+      const savedCust = customers.find((sc) => sc.name.toLowerCase() === c.customerName.toLowerCase());
+      const khataPayments = (savedCust?.payments || [])
+        .filter((p) => dateFilter === 'all' || isLotInDateRange((p.paymentDate || p.date || '').slice(0, 10)))
+        .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      const totalPaid = c.directCashPaid + khataPayments;
+      const creditRemaining = Math.max(0, c.totalAmount - totalPaid);
+
+      return {
+        ...c,
+        khataPaid: khataPayments,
+        cashPaid: totalPaid,
+        creditPending: creditRemaining,
+      };
+    });
+
+    return list.filter((c) =>
+      c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.phone && c.phone.includes(searchTerm)) ||
+      (c.shopName && c.shopName.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+  }, [filteredLotsByDate, selectedCustomerFilter, customers, searchTerm, dateFilter, customFromDate, customToDate]);
+
+  // 2. DATE REPORT STATS
   const dateReportStats = useMemo(() => {
     let grossSales = 0;
     let commission = 0;
     let totalExpenses = 0;
     let vendorPayable = 0;
+    let vendorPaid = 0;
     let unitsSold = 0;
-    let cashReceived = 0;
-    let creditPending = 0;
+    let directCashReceived = 0;
 
     filteredLotsByDate.forEach((lot) => {
       grossSales += lot.summary.grossSales;
       commission += lot.summary.arhtiProfitCommission;
       totalExpenses += lot.summary.totalExpenses;
       vendorPayable += lot.summary.netPayableToVendor;
+
+      const lotPaid =
+        lot.vendorPaymentAmount !== undefined
+          ? lot.vendorPaymentAmount
+          : lot.vendorPaymentStatus === 'paid'
+          ? lot.summary.netPayableToVendor
+          : 0;
+      vendorPaid += lotPaid;
+
       unitsSold += lot.summary.totalSoldQuantity;
 
       lot.sales.forEach((s) => {
-        if (s.paymentStatus === 'cash') cashReceived += s.totalAmount;
-        else creditPending += s.totalAmount;
+        if (s.paymentStatus === 'cash') {
+          directCashReceived += s.totalAmount;
+        } else if (s.paidAmount) {
+          directCashReceived += s.paidAmount;
+        }
       });
     });
+
+    const totalKhataPaid = customerReports.reduce((sum, c) => sum + c.khataPaid, 0);
+    const totalCreditPending = customerReports.reduce((sum, c) => sum + c.creditPending, 0);
+    const cashReceived = directCashReceived + totalKhataPaid;
+    const vendorPending = Math.max(0, vendorPayable - vendorPaid);
 
     return {
       lotsCount: filteredLotsByDate.length,
@@ -146,11 +345,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       commission,
       totalExpenses,
       vendorPayable,
+      vendorPaid,
+      vendorPending,
       unitsSold,
       cashReceived,
-      creditPending,
+      creditPending: totalCreditPending,
     };
-  }, [filteredLotsByDate]);
+  }, [filteredLotsByDate, customerReports]);
 
   // 2. VENDOR REPORT DATA
   const vendorReports = useMemo(() => {
@@ -167,6 +368,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         totalExpenses: number;
         commission: number;
         netPayable: number;
+        totalPaid: number;
+        pendingBalance: number;
         lots: VendorLot[];
       }
     >();
@@ -187,8 +390,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         totalExpenses: 0,
         commission: 0,
         netPayable: 0,
+        totalPaid: 0,
+        pendingBalance: 0,
         lots: [],
       };
+
+      const lotPaid =
+        lot.vendorPaymentAmount !== undefined
+          ? lot.vendorPaymentAmount
+          : lot.vendorPaymentStatus === 'paid'
+          ? lot.summary.netPayableToVendor
+          : 0;
 
       existing.lotsCount += 1;
       existing.totalUnits += lot.totalQuantity;
@@ -197,6 +409,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       existing.totalExpenses += lot.summary.totalExpenses;
       existing.commission += lot.summary.arhtiProfitCommission;
       existing.netPayable += lot.summary.netPayableToVendor;
+      existing.totalPaid += lotPaid;
+      existing.pendingBalance = Math.max(0, existing.netPayable - existing.totalPaid);
       existing.lots.push(lot);
 
       vendorMap.set(lot.vendorName, existing);
@@ -208,82 +422,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     );
   }, [filteredLotsByDate, selectedVendorFilter, searchTerm]);
 
-  // 3. CUSTOMER REPORT DATA
-  const customerReports = useMemo(() => {
-    const custMap = new Map<
-      string,
-      {
-        customerName: string;
-        phone?: string;
-        shopName?: string;
-        totalPurchases: number;
-        totalUnitsBought: number;
-        totalAmount: number;
-        cashPaid: number;
-        creditPending: number;
-        transactions: Array<{
-          lotId: string;
-          lotNumber: string;
-          productUrdu: string;
-          date: string;
-          quantity: number;
-          ratePerUnit: number;
-          totalAmount: number;
-          paymentStatus: 'cash' | 'credit' | 'partial';
-        }>;
-      }
-    >();
-
-    filteredLotsByDate.forEach((lot) => {
-      lot.sales.forEach((sale) => {
-        if (selectedCustomerFilter !== 'all' && sale.buyerName !== selectedCustomerFilter) {
-          return;
-        }
-
-        const savedCust = customers.find((c) => c.name === sale.buyerName);
-        const existing = custMap.get(sale.buyerName) || {
-          customerName: sale.buyerName,
-          phone: sale.buyerPhone || savedCust?.phone,
-          shopName: savedCust?.shopName,
-          totalPurchases: 0,
-          totalUnitsBought: 0,
-          totalAmount: 0,
-          cashPaid: 0,
-          creditPending: 0,
-          transactions: [],
-        };
-
-        existing.totalPurchases += 1;
-        existing.totalUnitsBought += sale.quantity;
-        existing.totalAmount += sale.totalAmount;
-        if (sale.paymentStatus === 'cash') {
-          existing.cashPaid += sale.totalAmount;
-        } else {
-          existing.creditPending += sale.totalAmount;
-        }
-
-        existing.transactions.push({
-          lotId: lot.id,
-          lotNumber: lot.lotNumber,
-          productUrdu: lot.productUrdu,
-          date: lot.arrivalDate,
-          quantity: sale.quantity,
-          ratePerUnit: sale.ratePerUnit,
-          totalAmount: sale.totalAmount,
-          paymentStatus: sale.paymentStatus,
-        });
-
-        custMap.set(sale.buyerName, existing);
-      });
-    });
-
-    return Array.from(custMap.values()).filter((c) =>
-      c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.phone && c.phone.includes(searchTerm))
-    );
-  }, [filteredLotsByDate, selectedCustomerFilter, customers, searchTerm]);
-
-  // 4. PRODUCT REPORT DATA
+  // 3. PRODUCT REPORT DATA
   const productReports = useMemo(() => {
     const prodMap = new Map<
       string,
@@ -351,15 +490,196 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     );
   }, [filteredLotsByDate, selectedProductFilter, searchTerm]);
 
-  // Export CSV function
-  const handleExportCSV = () => {
+  // Get current date range string representation
+  const getDateRangeDetails = () => {
+    const dateFilterLabels: Record<DateFilter, string> = {
+      all: isUrdu ? 'تمام تاریخیں' : 'All Time',
+      today: isUrdu ? 'آج کی تاریخ' : "Today's Date",
+      yesterday: isUrdu ? 'گزشتہ کل' : 'Yesterday',
+      last7days: isUrdu ? 'گزشتہ 7 دن' : 'Last 7 Days',
+      thismonth: isUrdu ? 'موجودہ مہینہ' : 'This Month',
+      custom: `${customFromDate || 'From'} تا ${customToDate || 'To'}`,
+    };
+
+    let dateRangeStr = '';
+    const now = new Date();
+    if (dateFilter === 'custom') {
+      dateRangeStr = `${customFromDate || 'Start'} to ${customToDate || 'End'}`;
+    } else if (dateFilter === 'today') {
+      dateRangeStr = now.toISOString().slice(0, 10);
+    } else if (dateFilter === 'yesterday') {
+      dateRangeStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    } else if (dateFilter === 'last7days') {
+      const past7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      dateRangeStr = `${past7} to ${now.toISOString().slice(0, 10)}`;
+    } else if (dateFilter === 'thismonth') {
+      dateRangeStr = `${now.toISOString().slice(0, 7)} (Monthly)`;
+    } else {
+      dateRangeStr = isUrdu ? 'تمام دستیاب تاریخیں' : 'All Available Dates';
+    }
+
+    return {
+      label: dateFilterLabels[dateFilter],
+      rangeStr: dateRangeStr,
+    };
+  };
+
+  // Preview PDF for Current Tab Report (Filtered by Selected Date Range)
+  const handlePreviewPDF = () => {
+    sound.playTick();
+
+    const { label: dateFilterLabel, rangeStr: dateRangeStr } = getDateRangeDetails();
+
+    let previewData: PDFPreviewData;
+
+    if (activeReport === 'customer') {
+      const customerRows = customerReports.map((c) => ({
+        customerName: c.customerName,
+        phone: c.phone || '',
+        purchasesCount: c.totalPurchases,
+        unitsBought: c.totalUnitsBought,
+        totalAmount: c.totalAmount,
+        cashPaid: c.cashPaid,
+        creditPending: c.creditPending,
+      }));
+
+      previewData = buildReportPDF({
+        reportType: 'customer',
+        settings,
+        dateFilterLabel,
+        dateRangeStr,
+        summary: {
+          grossSales: customerReports.reduce((a, b) => a + b.totalAmount, 0),
+          commission: dateReportStats.commission,
+          cashReceived: customerReports.reduce((a, b) => a + b.cashPaid, 0),
+          creditPending: customerReports.reduce((a, b) => a + b.creditPending, 0),
+          unitsSold: customerReports.reduce((a, b) => a + b.totalUnitsBought, 0),
+          vendorPayable: dateReportStats.vendorPending,
+        },
+        customerRows,
+      });
+    } else if (activeReport === 'product') {
+      const productRows = productReports.map((p) => ({
+        productName: p.productUrdu || p.productName,
+        totalLots: p.totalLots,
+        totalUnits: p.totalUnits,
+        soldUnits: p.totalSold,
+        grossTurnover: p.grossTurnover,
+        avgRate: p.avgRate,
+        minRate: p.minRate,
+        maxRate: p.maxRate,
+        commission: p.commissionEarned,
+      }));
+
+      previewData = buildReportPDF({
+        reportType: 'product',
+        settings,
+        dateFilterLabel,
+        dateRangeStr,
+        summary: {
+          grossSales: productReports.reduce((a, b) => a + b.grossTurnover, 0),
+          commission: productReports.reduce((a, b) => a + b.commissionEarned, 0),
+          cashReceived: dateReportStats.cashReceived,
+          creditPending: dateReportStats.creditPending,
+          unitsSold: productReports.reduce((a, b) => a + b.totalSold, 0),
+          vendorPayable: dateReportStats.vendorPending,
+        },
+        productRows,
+      });
+    } else if (activeReport === 'vendor') {
+      const vendorRows = vendorReports.map((v) => ({
+        vendorName: v.vendorName,
+        city: v.vendorCity || '',
+        phone: v.vendorPhone || '',
+        lotsCount: v.lotsCount,
+        totalUnits: v.totalUnits,
+        unitsSold: v.unitsSold,
+        grossSales: v.grossSales,
+        commission: v.commission,
+        netPayable: v.netPayable,
+      }));
+
+      previewData = buildReportPDF({
+        reportType: 'vendor',
+        settings,
+        dateFilterLabel,
+        dateRangeStr,
+        summary: {
+          grossSales: vendorReports.reduce((a, b) => a + b.grossSales, 0),
+          commission: vendorReports.reduce((a, b) => a + b.commission, 0),
+          cashReceived: dateReportStats.cashReceived,
+          creditPending: dateReportStats.creditPending,
+          unitsSold: vendorReports.reduce((a, b) => a + b.unitsSold, 0),
+          lotsCount: vendorReports.reduce((a, b) => a + b.lotsCount, 0),
+          vendorPayable: dateReportStats.vendorPending,
+        },
+        vendorRows,
+      });
+    } else {
+      // Date report
+      const dateRows = filteredLotsByDate.map((l) => ({
+        lotNumber: l.lotNumber,
+        date: l.arrivalDate,
+        vendor: l.vendorName,
+        product: l.productUrdu,
+        totalQty: l.totalQuantity,
+        soldQty: l.summary.totalSoldQuantity,
+        grossSales: l.summary.grossSales,
+        commission: l.summary.arhtiProfitCommission,
+        netPayable: l.summary.netPayableToVendor,
+      }));
+
+      previewData = buildReportPDF({
+        reportType: 'date',
+        settings,
+        dateFilterLabel,
+        dateRangeStr,
+        summary: {
+          grossSales: dateReportStats.grossSales,
+          commission: dateReportStats.commission,
+          cashReceived: dateReportStats.cashReceived,
+          creditPending: dateReportStats.creditPending,
+          unitsSold: dateReportStats.unitsSold,
+          lotsCount: dateReportStats.lotsCount,
+          vendorPayable: dateReportStats.vendorPending,
+        },
+        dateRows,
+      });
+    }
+
+    setPdfPreview(previewData);
+  };
+
+  // Preview Complete Entire Record Master Report (All Details in One File)
+  const handlePreviewEntireRecordPDF = () => {
     sound.playCashChime();
-    let csvContent = 'data:text/csv;charset=utf-8,';
+
+    const { label: dateFilterLabel, rangeStr: dateRangeStr } = getDateRangeDetails();
+
+    const previewData = buildEntireRecordReportPDF({
+      lots: filteredLotsByDate,
+      settings,
+      dateFilterLabel: `${dateFilterLabel} (تمام تفصیلات)`,
+      dateRangeStr,
+      customers,
+    });
+
+    setPdfPreview(previewData);
+  };
+
+  // Export CSV function
+  const handleExportCSV = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    sound.playCashChime();
+    let csvContent = '\uFEFF'; // Add UTF-8 BOM for Urdu support in Excel
 
     if (activeReport === 'vendor') {
-      csvContent += 'Vendor Name,City,Phone,Lots,Total Qty,Sold Qty,Gross Sales,Total Expenses,Commission,Net Payable\n';
+      csvContent += 'Vendor Name,City,Phone,Lots,Total Qty,Sold Qty,Gross Sales,Total Expenses,Commission,Net Payable,Pending Balance\n';
       vendorReports.forEach((v) => {
-        csvContent += `"${v.vendorName}","${v.vendorCity || ''}","${v.vendorPhone || ''}",${v.lotsCount},${v.totalUnits},${v.unitsSold},${v.grossSales},${v.totalExpenses},${v.commission},${v.netPayable}\n`;
+        csvContent += `"${v.vendorName}","${v.vendorCity || ''}","${v.vendorPhone || ''}",${v.lotsCount},${v.totalUnits},${v.unitsSold},${v.grossSales},${v.totalExpenses},${v.commission},${v.netPayable},${v.pendingBalance}\n`;
       });
     } else if (activeReport === 'customer') {
       csvContent += 'Customer Name,Phone,Purchases Count,Units Bought,Total Amount,Cash Paid,Credit Pending\n';
@@ -378,17 +698,37 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       });
     }
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `mandi_report_${activeReport}_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.style.display = 'none';
+      link.href = url;
+      link.download = `mandi_report_${activeReport}_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.target = '_self';
+      link.rel = 'noopener noreferrer';
+      link.onclick = (ev) => ev.stopPropagation();
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        try {
+          if (link.parentNode) link.parentNode.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+      }, 2000);
+    } catch (err) {
+      console.error('CSV export error:', err);
+    }
   };
 
   // WhatsApp Share function
-  const handleShareWhatsApp = () => {
+  const handleShareWhatsApp = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     sound.playCashChime();
     let text = `*📊 ${settings.shopNameUrdu}*\n`;
     text += `*${t.reportsTitle} (${dateFilter.toUpperCase()})*\n`;
@@ -399,15 +739,48 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     text += `📦 *کل مال فروخت:* ${dateReportStats.unitsSold} تعداد\n`;
     text += `💵 *نقد وصولی:* ${formatPKR(dateReportStats.cashReceived, settings.currencySymbol, settings.language)}\n`;
     text += `⏳ *بقایا کھاتہ ادھار:* ${formatPKR(dateReportStats.creditPending, settings.currencySymbol, settings.language)}\n`;
+    text += `🤝 *زمینداروں کا واجب الادا:* ${formatPKR(dateReportStats.vendorPending, settings.currencySymbol, settings.language)}\n`;
     text += `--------------------------\n`;
     text += `👤 *آڑھتی:* ${settings.arhtiNameUrdu}\n`;
     text += `📞 *رابطہ:* ${settings.shopPhone}`;
 
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const handlePrint = () => {
+  // Handlers for Dedicated Vendor Payment Form
+  const handleOpenVendorPayment = (vendorName: string, defaultAmount: number, targetLotId: string = 'all') => {
+    sound.playTick();
+    if (selectedVendorForPayment === vendorName && vendorPaymentTargetLotId === targetLotId) {
+      setSelectedVendorForPayment(null);
+    } else {
+      setSelectedVendorForPayment(vendorName);
+      setVendorPaymentAmount(defaultAmount > 0 ? defaultAmount : 0);
+      setVendorPaymentNote('');
+      setVendorPaymentMethod('cash');
+      setVendorPaymentTargetLotId(targetLotId);
+    }
+  };
+
+  const handleSaveVendorPayment = (vendorName: string) => {
+    if (vendorPaymentAmount <= 0) return;
+    if (onRecordVendorPayment) {
+      onRecordVendorPayment(vendorName, {
+        lotId: vendorPaymentTargetLotId === 'all' ? undefined : vendorPaymentTargetLotId,
+        amount: vendorPaymentAmount,
+        notes: vendorPaymentNote.trim() || undefined,
+        paymentMethod: vendorPaymentMethod,
+      });
+    }
+    sound.playCashChime();
+    setSelectedVendorForPayment(null);
+  };
+
+  const handlePrint = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     sound.playTick();
     window.print();
   };
@@ -432,22 +805,63 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Entire Record Master PDF Button (All Records in One File with Details) */}
           <button
-            onClick={handleExportCSV}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handlePreviewEntireRecordPDF();
+            }}
+            className="px-3.5 py-2 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans shadow-md border border-emerald-600/30"
+            title="تمام ریکارڈز اور تفصیلی بولیوں کی مکمل مشترکہ پی ڈی ایف رپورٹ دیکھیں یا ڈاؤن لوڈ کریں"
+          >
+            <FileCheck className="w-4 h-4 text-emerald-300 animate-pulse" />
+            <span>{isUrdu ? '📑 مکمل ریکارڈ رپورٹ (تمام تفصیلات)' : '📑 Entire Record Report (All Details)'}</span>
+          </button>
+
+          {/* Current Tab Dynamic PDF Report Preview Button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handlePreviewPDF();
+            }}
+            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans shadow-md border border-rose-500"
+            title={`منتخب تاریخ برائے ${activeReport} رپورٹ دیکھیں`}
+          >
+            <Eye className="w-4 h-4" />
+            <span>
+              {activeReport === 'customer'
+                ? isUrdu ? `👥 گاہک رپورٹ (${getDateRangeDetails().label})` : `👥 Customer Report (${getDateRangeDetails().label})`
+                : activeReport === 'product'
+                ? isUrdu ? `📦 جنس رپورٹ (${getDateRangeDetails().label})` : `📦 Product Report (${getDateRangeDetails().label})`
+                : activeReport === 'vendor'
+                ? isUrdu ? `🚜 زمیندار رپورٹ (${getDateRangeDetails().label})` : `🚜 Vendor Report (${getDateRangeDetails().label})`
+                : isUrdu ? `📅 روزنامچہ رپورٹ (${getDateRangeDetails().label})` : `📅 Daily Report (${getDateRangeDetails().label})`}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => handleExportCSV(e)}
             className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans active:scale-95 shadow-xs"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
             <span>{t.exportCSV}</span>
           </button>
           <button
-            onClick={handleShareWhatsApp}
+            type="button"
+            onClick={(e) => handleShareWhatsApp(e)}
             className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans active:scale-95 shadow-xs"
           >
             <Share2 className="w-3.5 h-3.5" />
             <span>{t.shareReportWA}</span>
           </button>
           <button
-            onClick={handlePrint}
+            type="button"
+            onClick={(e) => handlePrint(e)}
             className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans active:scale-95 shadow-xs"
           >
             <Printer className="w-3.5 h-3.5" />
@@ -457,17 +871,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       </div>
 
       {/* Overview Stat Cards at the Top */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {/* 1. Gross Total */}
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
           <span className="text-[11px] text-slate-500 font-bold font-urdu-sans block">{t.grossTotal}</span>
           <span className="text-base sm:text-lg font-black text-slate-900 font-numbers block mt-0.5">
             {formatPKR(dateReportStats.grossSales, settings.currencySymbol, settings.language)}
           </span>
           <span className="text-[10px] text-slate-400 font-urdu-sans">
-            {dateReportStats.lotsCount} {t.totalLotsCount}
+            {dateReportStats.lotsCount} {t.totalLotsCount} ({getDateRangeDetails().label})
           </span>
         </div>
 
+        {/* 2. Arhti Commission */}
         <div className="bg-emerald-50 p-3.5 sm:p-4 rounded-2xl border border-emerald-200 shadow-xs">
           <span className="text-[11px] text-emerald-800 font-bold font-urdu-sans block">{t.netArhtiCommission}</span>
           <span className="text-base sm:text-lg font-black text-emerald-950 font-numbers block mt-0.5">
@@ -478,6 +894,32 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </span>
         </div>
 
+        {/* 3. Payable to Vendors (زمیندار واجب الادا) */}
+        <div className="bg-slate-900 text-white p-3.5 sm:p-4 rounded-2xl border border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-[11px] text-slate-300 font-bold font-urdu-sans block">
+              {isUrdu ? 'زمیندار واجب الادا' : 'Payable to Vendors'}
+            </span>
+            <span
+              className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold font-urdu-sans ${
+                dateReportStats.vendorPending > 0
+                  ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
+                  : 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/30'
+              }`}
+            >
+              {dateReportStats.vendorPending > 0 ? (isUrdu ? 'بقایا' : 'Pending') : (isUrdu ? 'مکمل ادا' : 'Paid')}
+            </span>
+          </div>
+          <span className="text-base sm:text-lg font-black text-white font-numbers block mt-0.5">
+            {formatPKR(dateReportStats.vendorPending, settings.currencySymbol, settings.language)}
+          </span>
+          <div className="flex items-center justify-between text-[10px] text-slate-400 font-urdu-sans mt-0.5">
+            <span>{isUrdu ? 'میزان:' : 'Net:'} {formatPKR(dateReportStats.vendorPayable, settings.currencySymbol, settings.language)}</span>
+            <span>{isUrdu ? 'ادا:' : 'Paid:'} {formatPKR(dateReportStats.vendorPaid, settings.currencySymbol, settings.language)}</span>
+          </div>
+        </div>
+
+        {/* 4. Cash Received */}
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
           <span className="text-[11px] text-slate-500 font-bold font-urdu-sans block">{t.cashCollected} (نقد)</span>
           <span className="text-base sm:text-lg font-black text-emerald-700 font-numbers block mt-0.5">
@@ -488,6 +930,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </span>
         </div>
 
+        {/* 5. Customer Credit Outstanding */}
         <div className="bg-amber-50 p-3.5 sm:p-4 rounded-2xl border border-amber-200 shadow-xs">
           <span className="text-[11px] text-amber-900 font-bold font-urdu-sans block">{t.creditOutstanding} (ادھار)</span>
           <span className="text-base sm:text-lg font-black text-amber-800 font-numbers block mt-0.5">
@@ -607,11 +1050,24 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {/* 1. DATE REPORT: LOT-BY-LOT DAILY STATEMENT */}
       {activeReport === 'date' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-            <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans flex items-center gap-2">
+          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-emerald-600" />
-              <span>{t.dailySummary} ({filteredLotsByDate.length} {isUrdu ? 'لاٹس' : 'Lots'})</span>
-            </h3>
+              <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans">
+                <span>{t.dailySummary} ({filteredLotsByDate.length} {isUrdu ? 'لاٹس' : 'Lots'})</span>
+              </h3>
+              <span className="text-[11px] px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold font-urdu-sans">
+                {getDateRangeDetails().label}
+              </span>
+            </div>
+
+            <button
+              onClick={handlePreviewPDF}
+              className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 self-start sm:self-auto shadow-xs active:scale-95"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>{isUrdu ? `روزنامچہ پی ڈی ایف (${getDateRangeDetails().label})` : `Roznamcha PDF (${getDateRangeDetails().label})`}</span>
+            </button>
           </div>
 
           {filteredLotsByDate.length === 0 ? (
@@ -621,7 +1077,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           ) : (
             <div className="divide-y divide-slate-100">
               {filteredLotsByDate.map((lot) => {
-                const isCompleted = lot.status === 'completed';
                 return (
                   <div
                     key={lot.id}
@@ -662,7 +1117,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Preview & Download PDF button for this specific lot report by date */}
+                        <button
+                          onClick={() => {
+                            sound.playTick();
+                            const preview = buildSingleLotReportPDF(lot, settings, getDateRangeDetails().label);
+                            setPdfPreview(preview);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-xs font-bold font-urdu-sans transition flex items-center gap-1 shadow-2xs"
+                          title="اس لاٹ کی پی ڈی ایف رپورٹ دیکھیں یا ڈاؤن لوڈ کریں"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>پی ڈی ایف</span>
+                        </button>
+
                         {onOpenExpenseSlip && (
                           <button
                             onClick={() => onOpenExpenseSlip(lot.id)}
@@ -692,11 +1161,40 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {/* 2. VENDOR REPORT: SUMMARY PER VENDOR */}
       {activeReport === 'vendor' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-            <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans flex items-center gap-2">
+          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
               <User className="w-4 h-4 text-emerald-600" />
-              <span>{t.reportByVendor} ({vendorReports.length} {isUrdu ? 'زمیندار' : 'Vendors'})</span>
-            </h3>
+              <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans">
+                <span>{t.reportByVendor} ({vendorReports.length} {isUrdu ? 'زمیندار' : 'Vendors'})</span>
+              </h3>
+              <span className="text-[11px] px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold font-urdu-sans">
+                {getDateRangeDetails().label}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Vendor Selector Filter */}
+              <select
+                value={selectedVendorFilter}
+                onChange={(e) => setSelectedVendorFilter(e.target.value)}
+                className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="all">{isUrdu ? 'تمام زمیندار (All Vendors)' : 'All Vendors'}</option>
+                {allVendors.map((v) => (
+                  <option key={v.name} value={v.name}>
+                    {v.name} {v.city ? `(${v.city})` : ''}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={handlePreviewPDF}
+                className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-xs active:scale-95"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>{isUrdu ? `زمیندار رپورٹ پی ڈی ایف (${getDateRangeDetails().label})` : `Vendor PDF (${getDateRangeDetails().label})`}</span>
+              </button>
+            </div>
           </div>
 
           {vendorReports.length === 0 ? (
@@ -707,9 +1205,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <div className="divide-y divide-slate-100">
               {vendorReports.map((v) => (
                 <div key={v.vendorName} className="p-3.5 sm:p-4 hover:bg-slate-50 transition space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="font-bold text-sm sm:text-base text-slate-900 font-urdu-nastaliq">
                           {v.vendorName}
                         </h4>
@@ -729,52 +1227,348 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                      {/* Gross Sales */}
                       <div className="text-start sm:text-end">
-                        <span className="text-xs text-slate-500 font-urdu-sans block">{t.grossTotal}:</span>
-                        <span className="text-sm sm:text-base font-black text-slate-900 font-numbers block">
+                        <span className="text-[10px] text-slate-500 font-urdu-sans block">{t.grossTotal}:</span>
+                        <span className="text-xs sm:text-sm font-black text-slate-900 font-numbers block">
                           {formatPKR(v.grossSales, settings.currencySymbol, settings.language)}
                         </span>
                       </div>
-                      <div className="text-start sm:text-end bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200">
-                        <span className="text-[10px] text-emerald-800 font-bold font-urdu-sans block">{t.netVendorPayable}:</span>
-                        <span className="text-xs sm:text-sm font-bold text-emerald-950 font-numbers block">
+
+                      {/* Net Payable */}
+                      <div className="text-start sm:text-end bg-slate-100 px-2.5 py-1 rounded-xl border border-slate-200">
+                        <span className="text-[10px] text-slate-700 font-bold font-urdu-sans block">{t.netVendorPayable}:</span>
+                        <span className="text-xs sm:text-sm font-bold text-slate-950 font-numbers block">
                           {formatPKR(v.netPayable, settings.currencySymbol, settings.language)}
                         </span>
+                      </div>
+
+                      {/* Paid Amount */}
+                      <div className="text-start sm:text-end bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200">
+                        <span className="text-[10px] text-emerald-800 font-bold font-urdu-sans flex items-center gap-1 justify-end">
+                          <CheckCircle2 className="w-2.5 h-2.5" />
+                          <span>{isUrdu ? 'ادا شدہ:' : 'Paid:'}</span>
+                        </span>
+                        <span className="text-xs sm:text-sm font-bold text-emerald-950 font-numbers block">
+                          {formatPKR(v.totalPaid, settings.currencySymbol, settings.language)}
+                        </span>
+                      </div>
+
+                      {/* Pending Balance */}
+                      <div className={`text-start sm:text-end px-2.5 py-1 rounded-xl border ${
+                        v.pendingBalance > 0 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'
+                      }`}>
+                        <span className={`text-[10px] font-bold font-urdu-sans flex items-center gap-1 justify-end ${
+                          v.pendingBalance > 0 ? 'text-amber-800' : 'text-slate-500'
+                        }`}>
+                          <Clock className="w-2.5 h-2.5" />
+                          <span>{isUrdu ? 'بقایا واجب الادا:' : 'Pending:'}</span>
+                        </span>
+                        <span className={`text-xs sm:text-sm font-bold font-numbers block ${
+                          v.pendingBalance > 0 ? 'text-amber-950' : 'text-slate-500'
+                        }`}>
+                          {formatPKR(v.pendingBalance, settings.currencySymbol, settings.language)}
+                        </span>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
+                        {/* Dedicated Payment Button */}
+                        <button
+                          onClick={() => handleOpenVendorPayment(v.vendorName, v.pendingBalance > 0 ? v.pendingBalance : v.netPayable)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-2xs active:scale-95 ${
+                            selectedVendorForPayment === v.vendorName
+                              ? 'bg-slate-800 text-white'
+                              : v.pendingBalance > 0
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                              : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300'
+                          }`}
+                          title="زمیندار کو رقم ادائیگی کا اندراج کریں"
+                        >
+                          <Banknote className="w-3.5 h-3.5" />
+                          <span>{selectedVendorForPayment === v.vendorName ? (isUrdu ? 'بند کریں' : 'Close') : (isUrdu ? 'ادائیگی درج کریں' : 'Pay Vendor')}</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            sound.playTick();
+                            const preview = buildSingleVendorReportPDF(v, settings, getDateRangeDetails().label);
+                            setPdfPreview(preview);
+                          }}
+                          className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1 shadow-2xs"
+                          title="اس زمیندار کی سپلائی رپورٹ پی ڈی ایف دیکھیں"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>پی ڈی ایف</span>
+                        </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* Micro lots list for this vendor */}
-                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                    {v.lots.map((lot) => (
-                      <div
-                        key={lot.id}
-                        className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between"
-                      >
-                        <div className="truncate">
-                          <span className="font-bold text-slate-800 font-urdu-sans">
-                            {lot.productEmoji} {lot.productUrdu}
+                  {/* DEDICATED PAYMENT RECEIVE / PAYOUT FORM FOR VENDOR */}
+                  {selectedVendorForPayment === v.vendorName && (
+                    <div className="bg-emerald-50/90 p-3.5 sm:p-4 rounded-2xl border-2 border-emerald-300 space-y-3 animate-in fade-in duration-150 shadow-xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200 pb-2">
+                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-950 font-urdu-sans">
+                          <Banknote className="w-4 h-4 text-emerald-700" />
+                          <span>{isUrdu ? `زمیندار (${v.vendorName}) کو رقم ادائیگی کا اندراج:` : `Record Payment to ${v.vendorName}:`}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs font-urdu-sans flex-wrap">
+                          <span className="text-slate-600">
+                            {isUrdu ? 'کل واجب الادا:' : 'Net Payable:'}{' '}
+                            <strong className="text-slate-900 font-numbers">{formatPKR(v.netPayable, settings.currencySymbol, settings.language)}</strong>
                           </span>
-                          <span className="text-[11px] text-slate-400 font-numbers block">
-                            {lot.lotNumber} • {lot.arrivalDate}
+                          <span className="text-emerald-800">
+                            {isUrdu ? 'ادا شدہ:' : 'Paid:'}{' '}
+                            <strong className="text-emerald-700 font-numbers">{formatPKR(v.totalPaid, settings.currencySymbol, settings.language)}</strong>
+                          </span>
+                          <span className="text-amber-800 font-bold">
+                            {isUrdu ? 'موجودہ بقایا:' : 'Pending:'}{' '}
+                            <strong className="text-amber-900 font-numbers">{formatPKR(v.pendingBalance, settings.currencySymbol, settings.language)}</strong>
                           </span>
                         </div>
-                        <div className="text-end flex-shrink-0">
-                          <span className="font-bold text-slate-900 font-numbers block">
-                            {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
-                          </span>
-                          {onOpenReceipt && (
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                        {/* Amount Input */}
+                        <div className="sm:col-span-3">
+                          <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                            {isUrdu ? 'ادائیگی رقم (روپے):' : 'Amount Paid (Rs.):'}
+                          </label>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            value={vendorPaymentAmount || ''}
+                            onChange={(e) => setVendorPaymentAmount(parseNumber(e.target.value))}
+                            placeholder="0"
+                            className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-numbers font-bold text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-2xs"
+                            autoFocus
+                          />
+                        </div>
+
+                        {/* Description / Notes */}
+                        <div className="sm:col-span-4">
+                          <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                            {isUrdu ? 'تفصیل و نوٹس (نوٹ / حوالہ):' : 'Description / Notes:'}
+                          </label>
+                          <input
+                            type="text"
+                            value={vendorPaymentNote}
+                            onChange={(e) => setVendorPaymentNote(e.target.value)}
+                            placeholder={isUrdu ? 'مثلاً: نقد بذریعہ منشی، آن لائن ٹرانسفر، وغیرہ' : 'e.g. Cash, Bank Transfer'}
+                            className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 shadow-2xs"
+                          />
+                        </div>
+
+                        {/* Payment Method */}
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                            {isUrdu ? 'طریقہ ادائیگی:' : 'Method:'}
+                          </label>
+                          <select
+                            value={vendorPaymentMethod}
+                            onChange={(e) => setVendorPaymentMethod(e.target.value as 'cash' | 'online' | 'cheque')}
+                            className="w-full px-2.5 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 shadow-2xs"
+                          >
+                            <option value="cash">{isUrdu ? 'نقد (Cash)' : 'Cash'}</option>
+                            <option value="online">{isUrdu ? 'آن لائن / بینک' : 'Online / Bank'}</option>
+                            <option value="cheque">{isUrdu ? 'بینک چیک' : 'Cheque'}</option>
+                          </select>
+                        </div>
+
+                        {/* Target Lot Selector */}
+                        <div className="sm:col-span-3">
+                          <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                            {isUrdu ? 'کھاتہ / لاٹ:' : 'Target Lot:'}
+                          </label>
+                          <select
+                            value={vendorPaymentTargetLotId}
+                            onChange={(e) => setVendorPaymentTargetLotId(e.target.value)}
+                            className="w-full px-2.5 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 shadow-2xs"
+                          >
+                            <option value="all">{isUrdu ? 'تمام لاٹس (کل کھاتہ)' : 'All Lots (Consolidated)'}</option>
+                            {v.lots.map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {l.productEmoji} {l.productUrdu} ({l.lotNumber}) - {formatPKR(l.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Quick helpers and action buttons */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-emerald-200">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] text-slate-500 font-urdu-sans">{isUrdu ? 'فوری رقم:' : 'Quick Pay:'}</span>
+                          <button
+                            type="button"
+                            onClick={() => setVendorPaymentAmount(v.pendingBalance > 0 ? v.pendingBalance : v.netPayable)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-[10px] font-bold font-urdu-sans transition shadow-2xs"
+                          >
+                            {isUrdu ? 'پوری بقایا رقم' : 'Full Balance'} ({formatPKR(v.pendingBalance > 0 ? v.pendingBalance : v.netPayable, settings.currencySymbol, settings.language)})
+                          </button>
+                          {v.netPayable > 10000 && (
                             <button
-                              onClick={() => onOpenReceipt(lot.id)}
-                              className="text-[10px] text-emerald-700 hover:underline font-bold font-urdu-sans"
+                              type="button"
+                              onClick={() => setVendorPaymentAmount((prev) => prev + 10000)}
+                              className="px-2 py-0.5 rounded-md bg-white border border-emerald-300 text-emerald-800 text-[10px] font-bold font-numbers hover:bg-emerald-50 transition"
                             >
-                              رسید دیکھیں
+                              +10,000
+                            </button>
+                          )}
+                          {v.netPayable > 50000 && (
+                            <button
+                              type="button"
+                              onClick={() => setVendorPaymentAmount((prev) => prev + 50000)}
+                              className="px-2 py-0.5 rounded-md bg-white border border-emerald-300 text-emerald-800 text-[10px] font-bold font-numbers hover:bg-emerald-50 transition"
+                            >
+                              +50,000
                             </button>
                           )}
                         </div>
+
+                        <div className="flex items-center gap-2 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedVendorForPayment(null)}
+                            className="px-3 py-1.5 bg-white text-slate-700 rounded-xl text-xs font-urdu-sans border border-slate-300 hover:bg-slate-50 transition"
+                          >
+                            {t.cancel}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={vendorPaymentAmount <= 0}
+                            onClick={() => handleSaveVendorPayment(v.vendorName)}
+                            className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold font-urdu-sans shadow-xs flex items-center gap-1.5 transition active:scale-95"
+                          >
+                            <Check className="w-4 h-4" />
+                            <span>{isUrdu ? 'ادائیگی محفوظ کریں' : 'Save Payment'}</span>
+                          </button>
+                        </div>
                       </div>
-                    ))}
+                    </div>
+                  )}
+
+                  {/* Micro lots list for this vendor with 'See All Bill' option */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-700 font-urdu-sans flex items-center gap-1.5">
+                        <span>اجناس و لاٹس تفصیل ({v.lots.length}):</span>
+                      </span>
+
+                      {/* "See All Products Bill" Button requested by user */}
+                      <button
+                        onClick={() => {
+                          sound.playTick();
+                          const dateLabel =
+                            dateFilter === 'today'
+                              ? isUrdu ? 'آج کی تاریخ' : "Today's Date"
+                              : dateFilter === 'yesterday'
+                              ? isUrdu ? 'گزشتہ کل' : 'Yesterday'
+                              : v.lots[0]?.arrivalDate || '';
+
+                          setConsolidatedBillVendor({
+                            vendorName: v.vendorName,
+                            vendorPhone: v.vendorPhone,
+                            vendorCity: v.vendorCity,
+                            lots: v.lots,
+                            dateLabel,
+                          });
+                        }}
+                        className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-xs transition active:scale-95"
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>{isUrdu ? 'تمام اجناس کا بل دیکھیں (کل مشترکہ بل)' : 'See All Products Bill'}</span>
+                      </button>
+                    </div>
+
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {v.lots.map((lot) => {
+                        const lotNet = lot.summary.netPayableToVendor;
+                        const lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : (lot.vendorPaymentStatus === 'paid' ? lotNet : 0);
+                        const isLotPaid = lot.vendorPaymentStatus === 'paid' || lotPaid >= lotNet;
+                        const isPartial = lot.vendorPaymentStatus === 'partial' || (lotPaid > 0 && lotPaid < lotNet);
+
+                        return (
+                          <div
+                            key={lot.id}
+                            className="bg-white p-2.5 rounded-xl border border-slate-200 flex flex-col justify-between gap-2 shadow-2xs"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="truncate">
+                                <span className="font-bold text-slate-800 font-urdu-sans">
+                                  {lot.productEmoji} {lot.productUrdu}
+                                </span>
+                                <span className="text-[11px] text-slate-400 font-numbers block">
+                                  {lot.lotNumber} • {lot.arrivalDate} ({lot.totalQuantity} {unitLabels[lot.unitType][settings.language]})
+                                </span>
+                              </div>
+
+                              <div className="text-end flex-shrink-0">
+                                <span className="font-bold text-slate-900 font-numbers block">
+                                  {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-numbers block">
+                                  {isUrdu ? 'خالص:' : 'Net:'} {formatPKR(lotNet, settings.currencySymbol, settings.language)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Lot payment status and actions */}
+                            <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-[11px]">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {isLotPaid ? (
+                                  <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold font-urdu-sans flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                    <span>{isUrdu ? 'ادا شدہ' : 'Paid'}</span>
+                                    {lot.vendorPaymentDate && (
+                                      <span className="text-[9px] text-emerald-700 font-numbers">({lot.vendorPaymentDate})</span>
+                                    )}
+                                  </span>
+                                ) : isPartial ? (
+                                  <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold font-urdu-sans flex items-center gap-1">
+                                    <Clock className="w-3 h-3 text-blue-700" />
+                                    <span>{isUrdu ? 'جزوی ادا' : 'Partial'}</span>
+                                    <span className="text-[9px] text-blue-700 font-numbers">({formatPKR(lotPaid, settings.currencySymbol, settings.language)})</span>
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold font-urdu-sans flex items-center gap-1">
+                                    <Clock className="w-3 h-3 text-amber-700" />
+                                    <span>{isUrdu ? 'ادائیگی بقایا' : 'Pending'}</span>
+                                  </span>
+                                )}
+
+                                {lot.vendorPaymentNotes && (
+                                  <span className="text-[10px] text-slate-500 font-urdu-sans truncate max-w-[120px]" title={lot.vendorPaymentNotes}>
+                                    📝 {lot.vendorPaymentNotes}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenVendorPayment(v.vendorName, Math.max(0, lotNet - lotPaid), lot.id)}
+                                  className="text-[10px] text-emerald-700 hover:text-emerald-900 hover:underline font-bold font-urdu-sans"
+                                >
+                                  {isUrdu ? 'ادائیگی' : 'Pay'}
+                                </button>
+
+                                {onOpenReceipt && (
+                                  <button
+                                    onClick={() => onOpenReceipt(lot.id)}
+                                    className="text-[10px] text-slate-600 hover:text-slate-900 hover:underline font-bold font-urdu-sans"
+                                  >
+                                    {isUrdu ? 'رسید' : 'Receipt'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -786,11 +1580,40 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {/* 3. CUSTOMER REPORT: SUMMARY & TRANSACTIONS PER BUYER */}
       {activeReport === 'customer' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-            <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans flex items-center gap-2">
+          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
               <Users className="w-4 h-4 text-emerald-600" />
-              <span>{t.reportByCustomer} ({customerReports.length} {isUrdu ? 'خریدار' : 'Buyers'})</span>
-            </h3>
+              <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans">
+                <span>{t.reportByCustomer} ({customerReports.length} {isUrdu ? 'خریدار' : 'Buyers'})</span>
+              </h3>
+              <span className="text-[11px] px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold font-urdu-sans">
+                {getDateRangeDetails().label}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Customer Selector Filter */}
+              <select
+                value={selectedCustomerFilter}
+                onChange={(e) => setSelectedCustomerFilter(e.target.value)}
+                className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="all">{isUrdu ? 'تمام گاہک (All Customers)' : 'All Customers'}</option>
+                {allCustomerNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={handlePreviewPDF}
+                className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-xs active:scale-95"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>{isUrdu ? `گاہک رپورٹ پی ڈی ایف (${getDateRangeDetails().label})` : `Customer PDF (${getDateRangeDetails().label})`}</span>
+              </button>
+            </div>
           </div>
 
           {customerReports.length === 0 ? (
@@ -823,7 +1646,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       <div className="text-start sm:text-end">
                         <span className="text-xs text-slate-500 font-urdu-sans block">کل خریداری:</span>
                         <span className="text-sm font-bold text-slate-900 font-numbers block">
@@ -842,6 +1665,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           {formatPKR(c.creditPending, settings.currencySymbol, settings.language)}
                         </span>
                       </div>
+                      {/* Individual Customer PDF Report Preview Button */}
+                      <button
+                        onClick={() => {
+                          sound.playTick();
+                          const preview = buildSingleCustomerReportPDF(c, settings, getDateRangeDetails().label);
+                          setPdfPreview(preview);
+                        }}
+                        className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1 shadow-2xs"
+                        title="اس خریدار کا کھاتہ پی ڈی ایف دیکھیں یا ڈاؤن لوڈ کریں"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>کھاتہ پی ڈی ایف</span>
+                      </button>
                     </div>
                   </div>
 
@@ -896,11 +1732,40 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {/* 4. PRODUCT REPORT: COMMODITY ANALYSIS */}
       {activeReport === 'product' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-            <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans flex items-center gap-2">
+          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
               <Package className="w-4 h-4 text-emerald-600" />
-              <span>{t.reportByProduct} ({productReports.length} {isUrdu ? 'اجناس' : 'Products'})</span>
-            </h3>
+              <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans">
+                <span>{t.reportByProduct} ({productReports.length} {isUrdu ? 'اجناس' : 'Products'})</span>
+              </h3>
+              <span className="text-[11px] px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold font-urdu-sans">
+                {getDateRangeDetails().label}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Product Selector Filter */}
+              <select
+                value={selectedProductFilter}
+                onChange={(e) => setSelectedProductFilter(e.target.value)}
+                className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="all">{isUrdu ? 'تمام اجناس (All Products)' : 'All Products'}</option>
+                {allProducts.map((p) => (
+                  <option key={p.en} value={p.en}>
+                    {p.emoji} {p.urdu} ({p.en})
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={handlePreviewPDF}
+                className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-xs active:scale-95"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>{isUrdu ? `جنس رپورٹ پی ڈی ایف (${getDateRangeDetails().label})` : `Product PDF (${getDateRangeDetails().label})`}</span>
+              </button>
+            </div>
           </div>
 
           {productReports.length === 0 ? (
@@ -956,17 +1821,55 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs pt-1">
-                    <span className="text-slate-500 font-urdu-sans">کمیشن منافع:</span>
-                    <span className="font-bold text-emerald-800 font-numbers">
-                      {formatPKR(p.commissionEarned, settings.currencySymbol, settings.language)}
-                    </span>
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
+                    <div>
+                      <span className="text-slate-500 font-urdu-sans">کمیشن منافع: </span>
+                      <span className="font-bold text-emerald-800 font-numbers">
+                        {formatPKR(p.commissionEarned, settings.currencySymbol, settings.language)}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        sound.playTick();
+                        const preview = buildSingleProductReportPDF(p, settings, getDateRangeDetails().label);
+                        setPdfPreview(preview);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-[11px] font-bold font-urdu-sans transition flex items-center gap-1 shadow-2xs"
+                      title="اس جنس کی مکمل رپورٹ پی ڈی ایف دیکھیں یا ڈاؤن لوڈ کریں"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>پی ڈی ایف رپورٹ</span>
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {/* CONSOLIDATED ALL-PRODUCTS BILL MODAL (تمام اجناس کا مشترکہ بل) */}
+      {consolidatedBillVendor && (
+        <VendorConsolidatedBillModal
+          isOpen={!!consolidatedBillVendor}
+          vendorName={consolidatedBillVendor.vendorName}
+          vendorPhone={consolidatedBillVendor.vendorPhone}
+          vendorCity={consolidatedBillVendor.vendorCity}
+          lots={consolidatedBillVendor.lots}
+          dateLabel={consolidatedBillVendor.dateLabel}
+          settings={settings}
+          onClose={() => setConsolidatedBillVendor(null)}
+        />
+      )}
+
+      {/* PDF REPORT INTERACTIVE PREVIEW MODAL (دیکھیں یا ڈاؤن لوڈ کریں) */}
+      {pdfPreview && (
+        <ReportPDFPreviewModal
+          previewData={pdfPreview}
+          onClose={() => setPdfPreview(null)}
+          isUrdu={isUrdu}
+        />
       )}
     </div>
   );

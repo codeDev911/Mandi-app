@@ -122,9 +122,12 @@ export const translations = {
     inProgress: 'بولی جاری ہے',
 
     // Units
-    unitCrates: 'کریٹ',
     unitBori: 'بوری',
-    unitTheli: 'تھیلی / ٹیلی',
+    unitTora: 'توڑہ / تورڑہ',
+    unitKainchi: 'کینچی',
+    unitShopper: 'شاپر',
+    unitCrates: 'کریٹ',
+    unitTheli: 'تھیلی',
     unitPeti: 'پیٹی',
     unitKg: 'کلوگرام',
     unitNag: 'نگ / عدد',
@@ -343,8 +346,11 @@ export const translations = {
     inProgress: 'Bolli in Progress',
 
     // Units
-    unitCrates: 'Crates',
     unitBori: 'Bori (Sacks)',
+    unitTora: 'Tora (Bundles)',
+    unitKainchi: 'Kainchi (Frames)',
+    unitShopper: 'Shopper (Bags)',
+    unitCrates: 'Crates',
     unitTheli: 'Theli (Bags)',
     unitPeti: 'Peti (Boxes)',
     unitKg: 'Kg',
@@ -446,9 +452,12 @@ export const translations = {
 };
 
 export const unitLabels: Record<UnitType, { ur: string; en: string }> = {
-  crates: { ur: 'کریٹ', en: 'Crates' },
   bori: { ur: 'بوری', en: 'Bori (Sack)' },
-  theli: { ur: 'تھیلی / ٹیلی', en: 'Theli (Bag)' },
+  tora: { ur: 'توڑہ / تورڑہ', en: 'Tora (Bundle)' },
+  kainchi: { ur: 'کینچی', en: 'Kainchi (Frame)' },
+  shopper: { ur: 'شاپر', en: 'Shopper (Bag)' },
+  crates: { ur: 'کریٹ', en: 'Crates' },
+  theli: { ur: 'تھیلی', en: 'Theli (Bag)' },
   peti: { ur: 'پیٹی', en: 'Peti (Box)' },
   kg: { ur: 'کلوگرام', en: 'Kg' },
   nag: { ur: 'نگ / عدد', en: 'Pieces' },
@@ -463,16 +472,18 @@ export interface ProductPreset {
 }
 
 export const commonMandiProducts: ProductPreset[] = [
-  { nameEn: 'Tomatoes', nameUrdu: 'ٹماٹر (Tomato)', emoji: '🍅', defaultUnit: 'crates', defaultAvgRate: 2800 },
-  { nameEn: 'Onions', nameUrdu: 'پیاز (Onion)', emoji: '🧅', defaultUnit: 'bori', defaultAvgRate: 3500 },
   { nameEn: 'Potatoes', nameUrdu: 'آلو (Potato)', emoji: '🥔', defaultUnit: 'bori', defaultAvgRate: 3200 },
+  { nameEn: 'Onions', nameUrdu: 'پیاز (Onion)', emoji: '🧅', defaultUnit: 'bori', defaultAvgRate: 3500 },
+  { nameEn: 'Tomatoes', nameUrdu: 'ٹماٹر (Tomato)', emoji: '🍅', defaultUnit: 'kainchi', defaultAvgRate: 2800 },
+  { nameEn: 'Green Chili', nameUrdu: 'سبز مرچ (Green Chili)', emoji: '🌶️', defaultUnit: 'shopper', defaultAvgRate: 2200 },
+  { nameEn: 'Cabbage', nameUrdu: 'بند گوبھی (Cabbage)', emoji: '🥬', defaultUnit: 'tora', defaultAvgRate: 1400 },
+  { nameEn: 'Cauliflower', nameUrdu: 'پھول گوبھی (Cauliflower)', emoji: '🥦', defaultUnit: 'tora', defaultAvgRate: 1800 },
   { nameEn: 'Apples', nameUrdu: 'سیب (Apple)', emoji: '🍎', defaultUnit: 'peti', defaultAvgRate: 4500 },
   { nameEn: 'Bananas', nameUrdu: 'کیلا (Banana)', emoji: '🍌', defaultUnit: 'peti', defaultAvgRate: 1800 },
   { nameEn: 'Mangoes', nameUrdu: 'آم (Mango)', emoji: '🥭', defaultUnit: 'peti', defaultAvgRate: 5000 },
-  { nameEn: 'Green Chili', nameUrdu: 'سبز مرچ (Green Chili)', emoji: '🌶️', defaultUnit: 'theli', defaultAvgRate: 2200 },
-  { nameEn: 'Cucumber', nameUrdu: 'کھیرا (Cucumber)', emoji: '🥒', defaultUnit: 'theli', defaultAvgRate: 1500 },
-  { nameEn: 'Eggplant', nameUrdu: 'بینگن (Eggplant)', emoji: '🍆', defaultUnit: 'theli', defaultAvgRate: 1200 },
-  { nameEn: 'Garlic', nameUrdu: 'لہسن (Garlic)', emoji: '🧄', defaultUnit: 'theli', defaultAvgRate: 6500 },
-  { nameEn: 'Ginger', nameUrdu: 'ادرک (Ginger)', emoji: '🫚', defaultUnit: 'theli', defaultAvgRate: 8000 },
-  { nameEn: 'Lemon', nameUrdu: 'لیمو (Lemon)', emoji: '🍋', defaultUnit: 'theli', defaultAvgRate: 2400 },
+  { nameEn: 'Cucumber', nameUrdu: 'کھیرا (Cucumber)', emoji: '🥒', defaultUnit: 'tora', defaultAvgRate: 1500 },
+  { nameEn: 'Eggplant', nameUrdu: 'بینگن (Eggplant)', emoji: '🍆', defaultUnit: 'tora', defaultAvgRate: 1200 },
+  { nameEn: 'Garlic', nameUrdu: 'لہسن (Garlic)', emoji: '🧄', defaultUnit: 'bori', defaultAvgRate: 6500 },
+  { nameEn: 'Ginger', nameUrdu: 'ادرک (Ginger)', emoji: '🫚', defaultUnit: 'bori', defaultAvgRate: 8000 },
+  { nameEn: 'Lemon', nameUrdu: 'لیمو (Lemon)', emoji: '🍋', defaultUnit: 'shopper', defaultAvgRate: 2400 },
 ];

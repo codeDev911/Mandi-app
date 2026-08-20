@@ -1,4 +1,16 @@
-export type UnitType = 'crates' | 'bori' | 'theli' | 'peti' | 'kg' | 'nag';
+export type UnitType = 'bori' | 'tora' | 'kainchi' | 'shopper' | 'crates' | 'peti' | 'theli' | 'kg' | 'nag';
+
+export interface UnitMazdooriRates {
+  bori: number;      // بوری (e.g. Rs 30/bori)
+  tora: number;      // توڑہ / تورڑہ (e.g. Rs 25/tora)
+  kainchi: number;   // کینچی (e.g. Rs 20/kainchi)
+  shopper: number;   // شاپر (e.g. Rs 15/shopper)
+  crates?: number;   // کریٹ
+  peti?: number;     // پیٹی
+  theli?: number;    // تھیلی
+  kg?: number;       // کلوگرام
+  nag?: number;      // نگ / عدد
+}
 
 export type PaymentStatus = 'cash' | 'credit' | 'partial';
 
@@ -67,6 +79,22 @@ export interface LotSummary {
   percentSold: number;
 }
 
+export type VendorPaymentStatus = 'pending' | 'paid' | 'partial';
+
+export interface VendorPaymentRecord {
+  id: string;
+  vendorName?: string;
+  vendorPhone?: string;
+  lotId?: string;
+  lotNumber?: string;
+  amount: number;
+  paymentDate?: string;
+  date?: string;
+  paymentMethod?: 'cash' | 'online' | 'cheque';
+  notes?: string;
+  timestamp?: string;
+}
+
 export interface VendorLot {
   id: string;
   lotNumber: string;
@@ -81,6 +109,11 @@ export interface VendorLot {
   vehicleNumber?: string;
   arrivalDate: string;
   status: 'active' | 'completed';
+  vendorPaymentStatus?: VendorPaymentStatus; // 'pending' | 'paid' | 'partial'
+  vendorPaymentAmount?: number;
+  vendorPaymentDate?: string;
+  vendorPaymentNotes?: string;
+  vendorPaymentMethod?: 'cash' | 'online' | 'cheque';
   sales: BolliSale[];
   expenses: LotExpenses;
   summary: LotSummary;
@@ -94,6 +127,7 @@ export interface AppSettings {
   currencySymbol: 'Rs.' | '₨' | 'روپے';
   defaultCommissionPercent: number;
   defaultMazdooriPerUnit: number;
+  unitMazdooriRates?: UnitMazdooriRates;
   defaultMarketFeePerUnit: number;
   defaultMunshiana: number;
   shopNameUrdu: string;
@@ -113,6 +147,8 @@ export interface SavedVendor {
   phone?: string;
   city?: string;
   notes?: string;
+  openingBalance?: number;
+  payments?: VendorPaymentRecord[];
   createdAt?: string;
   updatedAt?: string;
 }

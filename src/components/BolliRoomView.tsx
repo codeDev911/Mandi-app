@@ -6,6 +6,7 @@ import { sound } from '../utils/sound';
 import confetti from 'canvas-confetti';
 import { AddBidSaleModal } from './AddBidSaleModal';
 import { AllLotsModal } from './AllLotsModal';
+import { VoiceBidAssistant } from './VoiceBidAssistant';
 import {
   Gavel,
   Plus,
@@ -23,6 +24,8 @@ import {
   ChevronRight,
   LayoutGrid,
   Layers,
+  Mic,
+  Volume2,
 } from 'lucide-react';
 
 interface BolliRoomViewProps {
@@ -45,6 +48,7 @@ interface BolliRoomViewProps {
   onReopenLot: (lotId: string) => void;
   onOpenExpenseSlip: (lotId: string) => void;
   onOpenReceipt: (lotId: string) => void;
+  onToggleVendorPaymentStatus?: (lotId: string, customStatus?: 'pending' | 'paid') => void;
   onOpenNewLot: () => void;
   settings: AppSettings;
   customers?: CustomerBuyer[];
@@ -61,6 +65,7 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
   onReopenLot,
   onOpenExpenseSlip,
   onOpenReceipt,
+  onToggleVendorPaymentStatus,
   onOpenNewLot,
   settings,
   customers = [],
@@ -72,6 +77,7 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
   const [isAddBidOpen, setIsAddBidOpen] = useState(false);
   const [isAllLotsOpen, setIsAllLotsOpen] = useState(false);
   const [filterTab, setFilterTab] = useState<'active' | 'completed' | 'all'>('active');
+  const [showVoiceAssistant, setShowVoiceAssistant] = useState(true);
 
   const selectedLot = lots.find((l) => l.id === selectedLotId) || lots[0];
 
@@ -206,7 +212,7 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
         </div>
 
         {/* Scrollable Lot Cards */}
-        <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar">
+        <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar items-stretch">
           {displayedLots.map((lot) => {
             const isSelected = selectedLot && selectedLot.id === lot.id;
             const isCompleted = lot.status === 'completed' || lot.summary.remainingQuantity === 0;
@@ -254,6 +260,28 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
               </button>
             );
           })}
+
+          {/* "View All" Button Card after showing 4 lots */}
+          {lots.length > 4 && (
+            <button
+              type="button"
+              onClick={() => {
+                sound.playTick();
+                setIsAllLotsOpen(true);
+              }}
+              className="flex-shrink-0 min-w-[150px] max-w-[180px] p-3 rounded-xl border border-dashed border-emerald-400 bg-emerald-50/60 hover:bg-emerald-100/80 text-emerald-900 transition flex flex-col items-center justify-center gap-1.5 text-center group active:scale-95 cursor-pointer shadow-2xs"
+            >
+              <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-xs">
+                <Layers className="w-4 h-4" />
+              </div>
+              <div className="font-bold text-xs font-urdu-nastaliq text-emerald-950">
+                {isUrdu ? 'تمام لاٹس دیکھیں' : 'View All Lots'}
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-bold font-numbers">
+                {lots.length} {isUrdu ? 'کل مال' : 'Total'}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -296,6 +324,36 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
 
               {/* Status Badge & Direct Fast Action buttons */}
               <div className="flex items-center gap-2 flex-wrap">
+                {onToggleVendorPaymentStatus && (
+                  <button
+                    onClick={() => {
+                      sound.playTick();
+                      onToggleVendorPaymentStatus(selectedLot.id);
+                    }}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 border shadow-2xs active:scale-95 ${
+                      selectedLot.vendorPaymentStatus === 'paid'
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300 hover:bg-emerald-200'
+                        : 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                    }`}
+                    title={
+                      selectedLot.vendorPaymentStatus === 'paid'
+                        ? 'ادائیگی ہو چکی ہے - کلک کر کے بقایا کریں'
+                        : 'ادائیگی بقایا ہے - کلک کر کے ادا شدہ کریں'
+                    }
+                  >
+                    {selectedLot.vendorPaymentStatus === 'paid' ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                    ) : (
+                      <Clock className="w-3.5 h-3.5 text-amber-700" />
+                    )}
+                    <span>
+                      {selectedLot.vendorPaymentStatus === 'paid'
+                        ? (isUrdu ? 'ادا شدہ (Paid)' : 'Paid')
+                        : (isUrdu ? 'ادائیگی بقایا (Pending)' : 'Pending')}
+                    </span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => onOpenExpenseSlip(selectedLot.id)}
                   className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition flex items-center gap-1.5 border border-slate-200 font-urdu-sans"
@@ -397,6 +455,23 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playPop();
+                  setShowVoiceAssistant(!showVoiceAssistant);
+                }}
+                className={`px-3.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-1.5 border shadow-2xs active:scale-95 font-urdu-sans ${
+                  showVoiceAssistant
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/30'
+                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                }`}
+                title="آواز سے اندراج آن/آف کریں"
+              >
+                <Mic className="w-4 h-4" />
+                <span>{showVoiceAssistant ? (isUrdu ? '🎙️ وائس موڈ آن' : 'Voice ON') : (isUrdu ? '🎙️ وائس موڈ' : 'Voice Bolli')}</span>
+              </button>
+
               {selectedLot.summary.remainingQuantity > 0 ? (
                 <button
                   onClick={() => setIsAddBidOpen(true)}
@@ -416,6 +491,19 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
               )}
             </div>
           </div>
+
+          {/* Live Urdu Voice Bid Assistant Bar */}
+          {showVoiceAssistant && selectedLot.summary.remainingQuantity > 0 && (
+            <VoiceBidAssistant
+              onAddSale={handleSaleAdded}
+              existingBuyers={recentBuyers}
+              settings={settings}
+              remainingLotQuantity={selectedLot.summary.remainingQuantity}
+              lotProductUrdu={selectedLot.productUrdu}
+              unitLabelUrdu={unitLabel}
+              onClose={() => setShowVoiceAssistant(false)}
+            />
+          )}
 
           {/* Sales Breakdown / Split Transactions Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">

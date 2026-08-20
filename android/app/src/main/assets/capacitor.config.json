@@ -1,0 +1,21 @@
+{
+	"appId": "com.mandibolli.commission",
+	"appName": "Mandi Bolli & Commission Manager",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https",
+		"cleartext": true
+	},
+	"android": {
+		"allowMixedContent": true,
+		"captureInput": true,
+		"webContentsDebuggingEnabled": true
+	},
+	"plugins": {
+		"StatusBar": {
+			"overlaysWebView": false,
+			"style": "DARK",
+			"backgroundColor": "#022c22"
+		}
+	}
+}

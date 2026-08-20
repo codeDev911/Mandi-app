@@ -5,7 +5,18 @@ export const defaultSettings: AppSettings = {
   language: 'ur',
   currencySymbol: '₨',
   defaultCommissionPercent: 6.0,
-  defaultMazdooriPerUnit: 20,
+  defaultMazdooriPerUnit: 30,
+  unitMazdooriRates: {
+    bori: 30,     // بوری: Rs. 30 per bori (as requested by user)
+    tora: 25,     // توڑہ / تورڑہ: Rs. 25 per tora
+    kainchi: 20,  // کینچی: Rs. 20 per kainchi
+    shopper: 15,  // شاپر: Rs. 15 per shopper
+    crates: 20,   // کریٹ: Rs. 20 per crate
+    peti: 25,     // پیٹی: Rs. 25 per peti
+    theli: 15,    // تھیلی: Rs. 15 per theli
+    kg: 2,        // کلوگرام: Rs. 2 per kg
+    nag: 5,       // نگ / عدد: Rs. 5 per piece
+  },
   defaultMarketFeePerUnit: 5,
   defaultMunshiana: 30,
   shopNameUrdu: 'بسم اللہ فروٹ اینڈ سبزی کمیشن شاپ',
@@ -126,6 +137,7 @@ export const sampleLots: VendorLot[] = [
     vehicleNumber: 'LES-4210 (شہزور)',
     arrivalDate: new Date().toISOString().slice(0, 10),
     status: 'active',
+    vendorPaymentStatus: 'pending',
     sales: [
       {
         id: 'sale-1',
@@ -231,6 +243,8 @@ export const sampleLots: VendorLot[] = [
     vehicleNumber: 'FDN-9080 (ٹرک)',
     arrivalDate: new Date().toISOString().slice(0, 10),
     status: 'completed',
+    vendorPaymentStatus: 'paid',
+    vendorPaymentDate: new Date().toISOString().slice(0, 10),
     sales: [
       {
         id: 'sale-4',
@@ -325,6 +339,8 @@ export const sampleLots: VendorLot[] = [
     vehicleNumber: 'LEA-5566 (مزدا)',
     arrivalDate: new Date(Date.now() - 86400000).toISOString().slice(0, 10), // yesterday
     status: 'completed',
+    vendorPaymentStatus: 'paid',
+    vendorPaymentDate: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
     sales: [
       {
         id: 'sale-7',

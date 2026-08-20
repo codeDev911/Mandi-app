@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   VendorLot,
   AppSettings,
   ActiveTab,
   PaymentStatus,
+  VendorPaymentStatus,
   CustomerBuyer,
   BuyerPaymentRecord,
   SavedVendor,
@@ -11,6 +12,13 @@ import {
 import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors } from './utils/sampleData';
 import { calculateLotSummary } from './utils/calculations';
 import { sound } from './utils/sound';
+import {
+  loadInitialApplicationData,
+  saveLotsAsync,
+  saveCustomersAsync,
+  saveVendorsAsync,
+  saveSettingsAsync,
+} from './utils/storageEngine';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { BolliRoomView } from './components/BolliRoomView';
@@ -21,6 +29,10 @@ import { ReportsView } from './components/ReportsView';
 import { DailyHistoryView } from './components/DailyHistoryView';
 import { SettingsView } from './components/SettingsView';
 import { NewLotModal } from './components/NewLotModal';
+import { CloudSyncModal } from './components/CloudSyncModal';
+import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { App as CapApp } from '@capacitor/app';
 
 const STORAGE_KEY_LOTS = 'mandi_bolli_lots_v1';
 const STORAGE_KEY_SETTINGS = 'mandi_bolli_settings_v1';
@@ -76,44 +88,75 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('bolli');
   const [selectedLotId, setSelectedLotId] = useState<string>(() => lots[0]?.id || '');
   const [isNewLotOpen, setIsNewLotOpen] = useState(false);
+  const [isCloudSyncOpen, setIsCloudSyncOpen] = useState(false);
 
-  // Sync settings with local storage and sound engine
+  // Initial High-Speed IndexedDB bootstrap
+  const isLoadedFromDbRef = useRef(false);
+
+  // Native Android Capacitor Setup (StatusBar, Haptics, Hardware Back Button)
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-    } catch {
-      // ignore
+    if (Capacitor.isNativePlatform()) {
+      // Set immersive status bar color matching Mandi Bolli branding
+      StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+      StatusBar.setBackgroundColor({ color: '#022c22' }).catch(() => {});
+
+      // Handle Android hardware back button
+      const backListener = CapApp.addListener('backButton', ({ canGoBack }) => {
+        if (isNewLotOpen) {
+          setIsNewLotOpen(false);
+        } else if (isCloudSyncOpen) {
+          setIsCloudSyncOpen(false);
+        } else if (activeTab !== 'bolli') {
+          setActiveTab('bolli');
+        } else if (canGoBack) {
+          window.history.back();
+        } else {
+          CapApp.exitApp();
+        }
+      });
+
+      return () => {
+        backListener.then((l) => l.remove()).catch(() => {});
+      };
     }
+  }, [isNewLotOpen, isCloudSyncOpen, activeTab]);
+
+  useEffect(() => {
+    loadInitialApplicationData().then((data) => {
+      if (!isLoadedFromDbRef.current) {
+        if (data.lots && data.lots.length > 0) {
+          setLots(data.lots);
+          if (data.lots[0]) setSelectedLotId(data.lots[0].id);
+        }
+        if (data.settings) setSettings(data.settings);
+        if (data.customers && data.customers.length > 0) setCustomers(data.customers);
+        if (data.vendors && data.vendors.length > 0) setVendors(data.vendors);
+        isLoadedFromDbRef.current = true;
+      }
+    });
+  }, []);
+
+  // Sync settings with storage engine and sound
+  useEffect(() => {
+    saveSettingsAsync(settings);
     sound.setEnabled(settings.soundEnabled);
     document.documentElement.dir = settings.language === 'ur' ? 'rtl' : 'ltr';
     document.documentElement.lang = settings.language;
   }, [settings]);
 
-  // Sync lots with local storage
+  // Sync lots with high-capacity IndexedDB storage engine
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_LOTS, JSON.stringify(lots));
-    } catch {
-      // ignore
-    }
+    saveLotsAsync(lots);
   }, [lots]);
 
-  // Sync customers with local storage
+  // Sync customers with storage engine
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_CUSTOMERS, JSON.stringify(customers));
-    } catch {
-      // ignore
-    }
+    saveCustomersAsync(customers);
   }, [customers]);
 
-  // Sync vendors with local storage
+  // Sync vendors with storage engine
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_VENDORS, JSON.stringify(vendors));
-    } catch {
-      // ignore
-    }
+    saveVendorsAsync(vendors);
   }, [vendors]);
 
   // Make sure selectedLotId is valid
@@ -157,20 +200,53 @@ export default function App() {
     });
   };
 
+  const handleDeleteVendor = (vendorId: string) => {
+    sound.playTick();
+    setVendors((prev) => prev.filter((v) => v.id !== vendorId));
+  };
+
   const handleRecordCustomerPayment = (customerId: string, payment: BuyerPaymentRecord) => {
-    setCustomers((prev) =>
-      prev.map((c) => {
-        if (c.id !== customerId) return c;
-        const updatedPayments = [payment, ...(c.payments || [])];
-        const newBalance = Math.max(0, c.balance - payment.amount);
-        return {
-          ...c,
-          balance: newBalance,
-          payments: updatedPayments,
+    sound.playCashChime();
+    setCustomers((prev) => {
+      const existing = prev.find((c) => c.id === customerId);
+      if (existing) {
+        return prev.map((c) => {
+          if (c.id !== customerId) return c;
+          const updatedPayments = [payment, ...(c.payments || [])];
+          return {
+            ...c,
+            payments: updatedPayments,
+            updatedAt: new Date().toISOString(),
+          };
+        });
+      } else {
+        const newCust: CustomerBuyer = {
+          id: customerId,
+          name: payment.buyerName || customerId,
+          balance: 0,
+          payments: [payment],
+          createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-      })
-    );
+        return [newCust, ...prev];
+      }
+    });
+  };
+
+  const handleApplyCloudData = (data: {
+    settings?: AppSettings;
+    lots: VendorLot[];
+    customers: CustomerBuyer[];
+    vendors: SavedVendor[];
+  }) => {
+    sound.playCashChime();
+    if (data.lots && data.lots.length > 0) {
+      setLots(data.lots);
+      if (data.lots[0]) setSelectedLotId(data.lots[0].id);
+    }
+    if (data.customers) setCustomers(data.customers);
+    if (data.vendors) setVendors(data.vendors);
+    if (data.settings) setSettings(data.settings);
   };
 
   const handleSaveNewLot = (newLot: VendorLot) => {
@@ -299,6 +375,89 @@ export default function App() {
     );
   };
 
+  const handleToggleVendorPaymentStatus = (lotId: string, customStatus?: 'pending' | 'paid') => {
+    sound.playCashChime();
+    setLots((prev) =>
+      prev.map((lot) => {
+        if (lot.id !== lotId) return lot;
+        const currentStatus = lot.vendorPaymentStatus || 'pending';
+        const nextStatus: 'pending' | 'paid' = customStatus || (currentStatus === 'paid' ? 'pending' : 'paid');
+        return {
+          ...lot,
+          vendorPaymentStatus: nextStatus,
+          vendorPaymentAmount: nextStatus === 'paid' ? lot.summary.netPayableToVendor : 0,
+          vendorPaymentDate: nextStatus === 'paid' ? (lot.vendorPaymentDate || new Date().toISOString().slice(0, 10)) : undefined,
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    );
+  };
+
+  const handleRecordVendorPayment = (
+    vendorName: string,
+    payment: {
+      lotId?: string;
+      amount: number;
+      notes?: string;
+      paymentDate?: string;
+      paymentMethod?: 'cash' | 'online' | 'cheque';
+      status?: VendorPaymentStatus;
+    }
+  ) => {
+    sound.playCashChime();
+    const paymentDate = payment.paymentDate || new Date().toISOString().slice(0, 10);
+
+    setLots((prev) => {
+      // 1. If a specific lot is targeted:
+      if (payment.lotId) {
+        return prev.map((lot) => {
+          if (lot.id !== payment.lotId) return lot;
+          const totalNet = lot.summary.netPayableToVendor;
+          const paidAmount = payment.amount;
+          const status: VendorPaymentStatus =
+            payment.status || (paidAmount >= totalNet ? 'paid' : paidAmount > 0 ? 'partial' : 'pending');
+          return {
+            ...lot,
+            vendorPaymentStatus: status,
+            vendorPaymentAmount: paidAmount,
+            vendorPaymentDate: paymentDate,
+            vendorPaymentNotes: payment.notes || lot.vendorPaymentNotes,
+            vendorPaymentMethod: payment.paymentMethod || lot.vendorPaymentMethod || 'cash',
+            updatedAt: new Date().toISOString(),
+          };
+        });
+      }
+
+      // 2. If recorded for the vendor across all lots:
+      let remainingToDistribute = payment.amount;
+      return prev.map((lot) => {
+        if (lot.vendorName !== vendorName) return lot;
+
+        let lotPaid = 0;
+        if (remainingToDistribute >= lot.summary.netPayableToVendor) {
+          lotPaid = lot.summary.netPayableToVendor;
+          remainingToDistribute -= lotPaid;
+        } else {
+          lotPaid = Math.max(0, remainingToDistribute);
+          remainingToDistribute = 0;
+        }
+
+        const status: VendorPaymentStatus =
+          lotPaid >= lot.summary.netPayableToVendor ? 'paid' : lotPaid > 0 ? 'partial' : 'pending';
+
+        return {
+          ...lot,
+          vendorPaymentStatus: status,
+          vendorPaymentAmount: lotPaid,
+          vendorPaymentDate: paymentDate,
+          vendorPaymentNotes: payment.notes || lot.vendorPaymentNotes,
+          vendorPaymentMethod: payment.paymentMethod || lot.vendorPaymentMethod || 'cash',
+          updatedAt: new Date().toISOString(),
+        };
+      });
+    });
+  };
+
   const handleOpenExpenseSlip = (lotId: string) => {
     setSelectedLotId(lotId);
     setActiveTab('expenses');
@@ -324,9 +483,30 @@ export default function App() {
 
   const currentSelectedLot = lots.find((l) => l.id === selectedLotId) || lots[0];
 
-  const activeLotsCount = lots.filter((l) => l.status === 'active').length;
-  const totalTodaySales = lots.reduce((acc, l) => acc + l.summary.grossSales, 0);
-  const totalTodayProfit = lots.reduce((acc, l) => acc + l.summary.arhtiProfitCommission, 0);
+  // Today's date in YYYY-MM-DD
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  // Filter lots that arrived today or have sales today
+  const todayLots = lots.filter((l) => {
+    if (l.arrivalDate === todayStr) return true;
+    return l.sales.some((s) => s.timestamp.slice(0, 10) === todayStr);
+  });
+
+  // Calculate active lots for today and today's sales & profit
+  const activeLotsCount = lots.filter((l) => l.status === 'active' && (l.arrivalDate === todayStr || l.createdAt?.slice(0, 10) === todayStr || !l.createdAt)).length || lots.filter((l) => l.status === 'active').length;
+  
+  // Calculate today's sales from sales that occurred today (or on today's lots)
+  const todaySalesList = lots.flatMap((l) => 
+    l.sales.filter((s) => s.timestamp.slice(0, 10) === todayStr || l.arrivalDate === todayStr)
+  );
+  
+  const totalTodaySales = todayLots.length > 0 
+    ? todayLots.reduce((acc, l) => acc + l.summary.grossSales, 0)
+    : todaySalesList.reduce((acc, s) => acc + s.totalAmount, 0);
+
+  const totalTodayProfit = todayLots.length > 0
+    ? todayLots.reduce((acc, l) => acc + l.summary.arhtiProfitCommission, 0)
+    : lots.reduce((acc, l) => acc + l.summary.arhtiProfitCommission, 0);
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-urdu-sans text-slate-900 selection:bg-emerald-200">
@@ -335,6 +515,7 @@ export default function App() {
         settings={settings}
         onUpdateSettings={handleUpdateSettings}
         onOpenNewLot={() => setIsNewLotOpen(true)}
+        onOpenCloudSync={() => setIsCloudSyncOpen(true)}
         activeLotsCount={activeLotsCount}
         totalTodaySales={totalTodaySales}
         totalTodayProfit={totalTodayProfit}
@@ -363,6 +544,7 @@ export default function App() {
             onDeleteSale={handleDeleteSale}
             onMarkLotCompleted={handleMarkLotCompleted}
             onReopenLot={handleReopenLot}
+            onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onOpenExpenseSlip={handleOpenExpenseSlip}
             onOpenReceipt={handleOpenReceipt}
             onOpenNewLot={() => setIsNewLotOpen(true)}
@@ -377,6 +559,7 @@ export default function App() {
             lot={currentSelectedLot}
             onUpdateLotExpenses={handleUpdateLotExpenses}
             onOpenReceipt={handleOpenReceipt}
+            onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onBackToBolli={() => setActiveTab('bolli')}
             settings={settings}
           />
@@ -387,6 +570,7 @@ export default function App() {
             lot={currentSelectedLot}
             lots={lots}
             onSelectLot={setSelectedLotId}
+            onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onBackToBolli={() => setActiveTab('bolli')}
             onOpenExpenseSlip={handleOpenExpenseSlip}
             settings={settings}
@@ -397,10 +581,17 @@ export default function App() {
           <BuyersKhataView
             lots={lots}
             customers={customers}
+            vendors={vendors}
             onSaveCustomer={handleSaveCustomer}
             onDeleteCustomer={handleDeleteCustomer}
             onRecordCustomerPayment={handleRecordCustomerPayment}
             onToggleSalePaymentStatus={handleToggleSalePaymentStatus}
+            onSaveVendor={handleSaveVendor}
+            onDeleteVendor={handleDeleteVendor}
+            onRecordVendorPayment={handleRecordVendorPayment}
+            onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
+            onOpenReceipt={handleOpenReceipt}
+            onOpenExpenseSlip={handleOpenExpenseSlip}
             settings={settings}
           />
         )}
@@ -410,6 +601,8 @@ export default function App() {
             lots={lots}
             customers={customers}
             settings={settings}
+            onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
+            onRecordVendorPayment={handleRecordVendorPayment}
             onOpenReceipt={handleOpenReceipt}
             onOpenExpenseSlip={handleOpenExpenseSlip}
           />
@@ -418,8 +611,14 @@ export default function App() {
         {activeTab === 'history' && (
           <DailyHistoryView
             lots={lots}
+            onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onOpenExpenseSlip={handleOpenExpenseSlip}
             onOpenReceipt={handleOpenReceipt}
+            onSelectLot={(id) => {
+              setSelectedLotId(id);
+              setActiveTab('bolli');
+            }}
+            onOpenNewLot={() => setIsNewLotOpen(true)}
             settings={settings}
           />
         )}
@@ -427,8 +626,13 @@ export default function App() {
         {activeTab === 'settings' && (
           <SettingsView
             settings={settings}
+            lots={lots}
+            customers={customers}
+            vendors={vendors}
             onUpdateSettings={handleUpdateSettings}
             onResetData={handleResetData}
+            onOpenCloudSync={() => setIsCloudSyncOpen(true)}
+            onRestoreBackup={handleApplyCloudData}
           />
         )}
       </main>
@@ -442,6 +646,17 @@ export default function App() {
         existingLotsCount={lots.length}
         savedVendors={vendors}
         onSaveVendor={handleSaveVendor}
+      />
+
+      {/* Cloud Sync & Multi-Device Backup Modal */}
+      <CloudSyncModal
+        isOpen={isCloudSyncOpen}
+        onClose={() => setIsCloudSyncOpen(false)}
+        lots={lots}
+        customers={customers}
+        vendors={vendors}
+        settings={settings}
+        onApplyCloudData={handleApplyCloudData}
       />
     </div>
   );
