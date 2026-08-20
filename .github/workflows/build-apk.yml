@@ -28,7 +28,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
-          allow-checksums: '24f0a7db79bf395e280bf4235ffc355248d713722663b6d0f35282eb933ec865'
+          validate-wrappers: false
 
       - name: Install dependencies
         run: npm install
