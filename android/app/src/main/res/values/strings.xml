@@ -1,7 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Mandi Bolli &amp; Commission Manager</string>
-    <string name="title_activity_main">Mandi Bolli &amp; Commission Manager</string>
+    <string name="app_name">Mandi Bolli</string>
+    <string name="title_activity_main">Mandi Bolli</string>
     <string name="package_name">com.mandibolli.commission</string>
     <string name="custom_url_scheme">com.mandibolli.commission</string>
 </resources>
+
