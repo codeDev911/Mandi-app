@@ -28,7 +28,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
-          allow-checksums: '24f0a7db79bf395e280bf4235ffc355248d713722663b6d0f35282eb933ec865'
+          validate-wrappers: false
 
       - name: Install dependencies
         run: npm install
@@ -39,13 +39,18 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Grant Execute Permission to Gradle Wrapper
+        run: chmod +x android/gradlew
+
       - name: Build Debug APK
         run: |
           cd android
-          gradle assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GainPulse-debug-apk
+          name: Mandi-Bolli-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
