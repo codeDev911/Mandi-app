@@ -44,6 +44,7 @@ interface BolliRoomViewProps {
     }
   ) => void;
   onDeleteSale: (lotId: string, saleId: string) => void;
+  onDeleteLot?: (lotId: string) => void;
   onMarkLotCompleted: (lotId: string) => void;
   onReopenLot: (lotId: string) => void;
   onOpenExpenseSlip: (lotId: string) => void;
@@ -61,6 +62,7 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
   onSelectLot,
   onAddSaleToLot,
   onDeleteSale,
+  onDeleteLot,
   onMarkLotCompleted,
   onReopenLot,
   onOpenExpenseSlip,
@@ -619,6 +621,7 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
           onOpenNewLot={onOpenNewLot}
           onOpenExpenseSlip={onOpenExpenseSlip}
           onOpenReceipt={onOpenReceipt}
+          onDeleteLot={onDeleteLot}
           onClose={() => setIsAllLotsOpen(false)}
           settings={settings}
         />

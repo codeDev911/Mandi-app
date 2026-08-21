@@ -29,7 +29,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   return (
     <>
       {/* Top Desktop Tabs (when on wider screen) */}
-      <div className="bg-white border-b border-slate-200 shadow-xs hidden sm:block sticky top-[82px] z-20">
+      <div className="bg-white border-b border-slate-200 shadow-xs hidden sm:block">
         <div className="max-w-6xl mx-auto px-4 flex items-center justify-between overflow-x-auto">
           <div className="flex space-x-1.5 sm:space-x-2 rtl:space-x-reverse py-2">
             {navItems.map((item) => {

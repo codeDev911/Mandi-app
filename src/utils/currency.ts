@@ -4,7 +4,7 @@
 
 export function formatPKR(
   amount: number | undefined | null,
-  symbol: 'Rs.' | '₨' | 'روپے' = 'Rs.',
+  symbol: string = 'Rs.',
   language: 'ur' | 'en' = 'ur'
 ): string {
   if (amount === undefined || amount === null || isNaN(amount)) {

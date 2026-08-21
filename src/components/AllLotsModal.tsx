@@ -14,6 +14,7 @@ import {
   Gavel,
   Receipt,
   FileText,
+  Trash2,
 } from 'lucide-react';
 
 interface AllLotsModalProps {
@@ -23,6 +24,7 @@ interface AllLotsModalProps {
   onOpenNewLot?: () => void;
   onOpenExpenseSlip: (lotId: string) => void;
   onOpenReceipt: (lotId: string) => void;
+  onDeleteLot?: (lotId: string) => void;
   onClose: () => void;
   settings: AppSettings;
 }
@@ -36,6 +38,7 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
   onSelectLot,
   onOpenExpenseSlip,
   onOpenReceipt,
+  onDeleteLot,
   onClose,
   settings,
 }) => {
@@ -455,6 +458,30 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
                         <FileText className="w-3.5 h-3.5 text-blue-600" />
                         <span className="hidden sm:inline">{t.tabReceipt}</span>
                       </button>
+
+                      {/* Delete option if no bids are placed on this entry */}
+                      {lot.sales.length === 0 && onDeleteLot && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (
+                              confirm(
+                                isUrdu
+                                  ? `کیا آپ واقعی اس لاٹ (${lot.lotNumber} - ${lot.vendorName}) کو حذف کرنا چاہتے ہیں؟`
+                                  : `Delete lot ${lot.lotNumber} (${lot.vendorName})?`
+                              )
+                            ) {
+                              sound.playTick();
+                              onDeleteLot(lot.id);
+                            }
+                          }}
+                          title={isUrdu ? 'لاٹ حذف کریں (کوئی بولی نہیں)' : 'Delete lot (no bids)'}
+                          className="py-1.5 px-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition flex items-center gap-1 font-urdu-sans border border-rose-200 active:scale-95 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                          <span className="hidden sm:inline">{isUrdu ? 'حذف کریں' : 'Delete'}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

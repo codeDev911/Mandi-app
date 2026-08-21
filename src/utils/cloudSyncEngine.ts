@@ -102,6 +102,48 @@ export function formatSyncDateTime(isoString?: string | null, isUrdu = false): s
   }
 }
 
+async function safeFetchJson<T = any>(
+  url: string,
+  options: RequestInit,
+  endpointName: string
+): Promise<{ ok: boolean; status: number; data?: T; errorText?: string }> {
+  try {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get('content-type') || '';
+    const text = await res.text();
+
+    if (!text || text.trim().startsWith('<!') || text.trim().startsWith('<html') || !contentType.includes('application/json')) {
+      return {
+        ok: false,
+        status: res.status,
+        errorText: `سرور سے درست JSON جواب موصول نہیں ہوا۔ (موبائل / براؤزر میں API سرور بند ہے یا لوکل موڈ میں چل رہا ہے)`,
+      };
+    }
+
+    try {
+      const data = JSON.parse(text);
+      return {
+        ok: res.ok,
+        status: res.status,
+        data,
+        errorText: !res.ok ? data?.message || `Server returned ${res.status}` : undefined,
+      };
+    } catch {
+      return {
+        ok: false,
+        status: res.status,
+        errorText: `سرور کا جواب درست JSON فارمیٹ میں نہیں تھا`,
+      };
+    }
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 0,
+      errorText: err?.message || 'نیٹ ورک رابطہ ممکن نہیں ہو سکا',
+    };
+  }
+}
+
 /**
  * Test PostgreSQL Database connection via server endpoint
  */
@@ -111,21 +153,33 @@ export async function testPostgresConnection(customUrl?: string): Promise<{
   serverTime?: string;
   version?: string;
 }> {
-  try {
-    const res = await fetch('/api/db/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionUrl: customUrl?.trim() || undefined }),
-    });
-
-    const data = await res.json();
-    return data;
-  } catch (err: any) {
+  const cleanUrl = (customUrl || getStoredCloudConfig().postgresUrl || '').trim();
+  if (!cleanUrl) {
     return {
       success: false,
-      message: `سرور یا نیٹ ورک سے رابطہ نہیں ہو سکا: ${err?.message || 'Server Offline'}`,
+      message: 'براہ کرم پہلے سیٹنگز یا کلاؤڈ سنک میں PostgreSQL ڈیٹا بیس کا URL درج کریں۔',
     };
   }
+
+  const result = await safeFetchJson<{
+    success: boolean;
+    message: string;
+    serverTime?: string;
+    version?: string;
+  }>('/api/db/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ connectionUrl: cleanUrl }),
+  }, 'db/test');
+
+  if (result.ok && result.data) {
+    return result.data;
+  }
+
+  return {
+    success: false,
+    message: result.errorText || 'PostgreSQL کنکشن ٹیسٹ ناکام رہا۔',
+  };
 }
 
 /**
@@ -150,15 +204,21 @@ export async function uploadDataToCloud(
     };
   }
 
+  const cleanPostgresUrl = config.postgresUrl?.trim() || getStoredCloudConfig().postgresUrl?.trim() || undefined;
+
   try {
     // 1. Try server PostgreSQL sync endpoint first
-    const res = await fetch('/api/db/sync-upload', {
+    const fetchResult = await safeFetchJson<{
+      success: boolean;
+      message?: string;
+      lastUploadedAt?: string;
+    }>('/api/db/sync-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         shopId: config.shopCloudId.trim().toUpperCase(),
         pin: config.shopPin.trim(),
-        connectionUrl: config.postgresUrl?.trim() || undefined,
+        connectionUrl: cleanPostgresUrl,
         payload: {
           settings: data.settings,
           lots: data.lots,
@@ -166,10 +226,10 @@ export async function uploadDataToCloud(
           vendors: data.vendors,
         },
       }),
-    });
+    }, 'db/sync-upload');
 
-    if (res.ok) {
-      const json = await res.json();
+    if (fetchResult.ok && fetchResult.data) {
+      const json = fetchResult.data;
       const updatedConfig: CloudSyncMetadata = {
         ...config,
         lastUploadedAt: json.lastUploadedAt || timestamp,
@@ -194,8 +254,7 @@ export async function uploadDataToCloud(
       };
     }
 
-    const errJson = await res.json().catch(() => null);
-    throw new Error(errJson?.message || `Server returned ${res.status}`);
+    throw new Error(fetchResult.errorText || 'سرور سے رابطہ ناکام رہا');
   } catch (serverErr: any) {
     console.warn('Server PostgreSQL upload failed, storing offline vault backup:', serverErr);
 
@@ -234,6 +293,7 @@ export async function downloadDataFromCloud(
   const timestamp = new Date().toISOString();
   const cleanShopId = shopCloudId.trim().toUpperCase();
   const cleanPin = shopPin.trim();
+  const cleanPostgresUrl = (postgresUrl || getStoredCloudConfig().postgresUrl || '').trim() || undefined;
 
   if (!cleanShopId) {
     return {
@@ -245,18 +305,27 @@ export async function downloadDataFromCloud(
 
   try {
     // 1. Try server PostgreSQL sync endpoint first
-    const res = await fetch('/api/db/sync-download', {
+    const fetchResult = await safeFetchJson<{
+      success: boolean;
+      message?: string;
+      lastUploadedAt?: string;
+      lastDownloadedAt?: string;
+      lotsCount?: number;
+      customersCount?: number;
+      vendorsCount?: number;
+      data?: any;
+    }>('/api/db/sync-download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         shopId: cleanShopId,
         pin: cleanPin,
-        connectionUrl: postgresUrl?.trim() || undefined,
+        connectionUrl: cleanPostgresUrl,
       }),
-    });
+    }, 'db/sync-download');
 
-    if (res.ok) {
-      const json = await res.json();
+    if (fetchResult.ok && fetchResult.data) {
+      const json = fetchResult.data;
       const currentConfig = getStoredCloudConfig();
       const updatedConfig: CloudSyncMetadata = {
         ...currentConfig,
@@ -282,15 +351,15 @@ export async function downloadDataFromCloud(
       };
     }
 
-    const errJson = await res.json().catch(() => null);
-    if (res.status === 404 || res.status === 401) {
+    if (fetchResult.status === 404 || fetchResult.status === 401) {
       return {
         success: false,
-        message: errJson?.message || 'کوئی ریکارڈ نہیں ملا یا غلط پن کوڈ درج کیا گیا ہے۔',
+        message: fetchResult.errorText || 'کوئی ریکارڈ نہیں ملا یا غلط پن کوڈ درج کیا گیا ہے۔',
         timestamp,
       };
     }
-    throw new Error(errJson?.message || `Server returned ${res.status}`);
+
+    throw new Error(fetchResult.errorText || 'سرور سے رابطہ ناکام رہا');
   } catch (serverErr: any) {
     console.warn('Server PostgreSQL download failed, checking offline vault:', serverErr);
 

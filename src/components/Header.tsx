@@ -49,9 +49,9 @@ export const Header: React.FC<HeaderProps> = ({
   });
 
   return (
-    <header className="bg-emerald-600 text-white shadow-md sticky top-0 z-30 transition-all border-b border-emerald-500/80">
+    <header className="relative w-full bg-emerald-800 text-white shadow-md transition-all border-b border-emerald-700 pt-[max(env(safe-area-inset-top,0px),2.25rem)] sm:pt-3">
       {/* Top Bar */}
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
         {/* Shop Name & Logo */}
         <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
           <div className="w-9 h-9 sm:w-12 sm:h-12 bg-white/20 rounded-xl flex items-center justify-center text-xl sm:text-2xl shadow-inner flex-shrink-0 backdrop-blur-xs">

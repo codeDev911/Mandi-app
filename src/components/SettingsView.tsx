@@ -69,7 +69,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setTimeout(() => setSavedSuccess(false), 2500);
   };
 
-  const handleExportJSON = () => {
+  const handleExportJSON = async () => {
     sound.playTick();
     const exportPayload = {
       version: '2.0.0',
@@ -79,15 +79,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       customers,
       vendors,
     };
-    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sabzi-mandi-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const jsonStr = JSON.stringify(exportPayload, null, 2);
+    const fileName = `sabzi-mandi-backup-${new Date().toISOString().split('T')[0]}.json`;
+
+    try {
+      // Direct browser / web download
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+      sound.playCashChime();
+    } catch (err) {
+      // Fallback data URI
+      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonStr);
+      const a = document.createElement('a');
+      a.href = dataUri;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      sound.playCashChime();
+    }
   };
 
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -97,20 +116,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
-        if (parsed.lots && Array.isArray(parsed.lots)) {
+        const text = event.target?.result as string;
+        const parsed = JSON.parse(text);
+        if (parsed && (Array.isArray(parsed.lots) || parsed.settings || Array.isArray(parsed.customers))) {
+          const lotsCount = Array.isArray(parsed.lots) ? parsed.lots.length : 0;
+          const custCount = Array.isArray(parsed.customers) ? parsed.customers.length : 0;
           if (
             confirm(
               isUrdu
-                ? `کیا آپ یہ بیک اپ بحال کرنا چاہتے ہیں؟ (${parsed.lots.length} لاٹس، ${parsed.customers?.length || 0} خریدار)`
-                : `Restore backup with ${parsed.lots.length} lots?`
+                ? `کیا آپ یہ بیک اپ بحال کرنا چاہتے ہیں؟ (${lotsCount} لاٹس، ${custCount} خریدار)`
+                : `Restore backup with ${lotsCount} lots and ${custCount} buyers?`
             )
           ) {
             sound.playCashChime();
-            onRestoreBackup?.(parsed);
+            onRestoreBackup?.({
+              settings: parsed.settings || settings,
+              lots: Array.isArray(parsed.lots) ? parsed.lots : [],
+              customers: Array.isArray(parsed.customers) ? parsed.customers : [],
+              vendors: Array.isArray(parsed.vendors) ? parsed.vendors : [],
+            });
+            alert(isUrdu ? 'بیک اپ کامیابی سے بحال ہو گیا ہے!' : 'Backup successfully restored!');
           }
         } else {
-          alert(isUrdu ? 'غلط بیک اپ فائل' : 'Invalid backup file format');
+          alert(isUrdu ? 'غلط بیک اپ فائل فارمیٹ' : 'Invalid backup file format');
         }
       } catch (err) {
         alert(isUrdu ? 'فائل پڑھنے میں غلطی' : 'Error reading backup file');

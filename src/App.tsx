@@ -96,9 +96,10 @@ export default function App() {
   // Native Android Capacitor Setup (StatusBar, Haptics, Hardware Back Button)
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
-      // Set immersive status bar color matching Mandi Bolli branding
+      // Ensure status bar does not overlay webview so header starts below system icons
+      StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
       StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-      StatusBar.setBackgroundColor({ color: '#022c22' }).catch(() => {});
+      StatusBar.setBackgroundColor({ color: '#047857' }).catch(() => {});
 
       // Handle Android hardware back button
       const backListener = CapApp.addListener('backButton', ({ canGoBack }) => {
@@ -321,6 +322,17 @@ export default function App() {
     );
   };
 
+  const handleDeleteLot = (lotId: string) => {
+    sound.playTick();
+    setLots((prev) => {
+      const filtered = prev.filter((l) => l.id !== lotId);
+      if (selectedLotId === lotId) {
+        setSelectedLotId(filtered[0]?.id || '');
+      }
+      return filtered;
+    });
+  };
+
   const handleUpdateLotExpenses = (lotId: string, updatedExpenses: VendorLot['expenses']) => {
     setLots((prev) =>
       prev.map((lot) => {
@@ -413,13 +425,21 @@ export default function App() {
         return prev.map((lot) => {
           if (lot.id !== payment.lotId) return lot;
           const totalNet = lot.summary.netPayableToVendor;
-          const paidAmount = payment.amount;
+          const currentAlreadyPaid =
+            lot.vendorPaymentAmount !== undefined
+              ? lot.vendorPaymentAmount
+              : lot.vendorPaymentStatus === 'paid'
+              ? totalNet
+              : 0;
+
+          const newTotalPaid = Math.min(totalNet, currentAlreadyPaid + payment.amount);
           const status: VendorPaymentStatus =
-            payment.status || (paidAmount >= totalNet ? 'paid' : paidAmount > 0 ? 'partial' : 'pending');
+            payment.status || (newTotalPaid >= totalNet ? 'paid' : newTotalPaid > 0 ? 'partial' : 'pending');
+
           return {
             ...lot,
             vendorPaymentStatus: status,
-            vendorPaymentAmount: paidAmount,
+            vendorPaymentAmount: newTotalPaid,
             vendorPaymentDate: paymentDate,
             vendorPaymentNotes: payment.notes || lot.vendorPaymentNotes,
             vendorPaymentMethod: payment.paymentMethod || lot.vendorPaymentMethod || 'cash',
@@ -428,30 +448,49 @@ export default function App() {
         });
       }
 
-      // 2. If recorded for the vendor across all lots:
+      // 2. If recorded for the vendor across all lots incrementally:
       let remainingToDistribute = payment.amount;
-      return prev.map((lot) => {
-        if (lot.vendorName !== vendorName) return lot;
 
-        let lotPaid = 0;
-        if (remainingToDistribute >= lot.summary.netPayableToVendor) {
-          lotPaid = lot.summary.netPayableToVendor;
-          remainingToDistribute -= lotPaid;
-        } else {
-          lotPaid = Math.max(0, remainingToDistribute);
-          remainingToDistribute = 0;
+      // Sort vendor lots by date ascending (oldest first) or unpaid lots first
+      const vendorLotIds = prev
+        .filter((l) => l.vendorName === vendorName)
+        .map((l) => l.id);
+
+      return prev.map((lot) => {
+        if (!vendorLotIds.includes(lot.id)) return lot;
+
+        const totalNet = lot.summary.netPayableToVendor;
+        const currentAlreadyPaid =
+          lot.vendorPaymentAmount !== undefined
+            ? lot.vendorPaymentAmount
+            : lot.vendorPaymentStatus === 'paid'
+            ? totalNet
+            : 0;
+
+        const unPaidOnThisLot = Math.max(0, totalNet - currentAlreadyPaid);
+
+        let additionalPaidForThisLot = 0;
+        if (remainingToDistribute > 0 && unPaidOnThisLot > 0) {
+          if (remainingToDistribute >= unPaidOnThisLot) {
+            additionalPaidForThisLot = unPaidOnThisLot;
+            remainingToDistribute -= unPaidOnThisLot;
+          } else {
+            additionalPaidForThisLot = remainingToDistribute;
+            remainingToDistribute = 0;
+          }
         }
 
+        const newTotalPaid = currentAlreadyPaid + additionalPaidForThisLot;
         const status: VendorPaymentStatus =
-          lotPaid >= lot.summary.netPayableToVendor ? 'paid' : lotPaid > 0 ? 'partial' : 'pending';
+          newTotalPaid >= totalNet ? 'paid' : newTotalPaid > 0 ? 'partial' : 'pending';
 
         return {
           ...lot,
           vendorPaymentStatus: status,
-          vendorPaymentAmount: lotPaid,
-          vendorPaymentDate: paymentDate,
-          vendorPaymentNotes: payment.notes || lot.vendorPaymentNotes,
-          vendorPaymentMethod: payment.paymentMethod || lot.vendorPaymentMethod || 'cash',
+          vendorPaymentAmount: newTotalPaid,
+          vendorPaymentDate: additionalPaidForThisLot > 0 ? paymentDate : lot.vendorPaymentDate,
+          vendorPaymentNotes: additionalPaidForThisLot > 0 && payment.notes ? payment.notes : lot.vendorPaymentNotes,
+          vendorPaymentMethod: additionalPaidForThisLot > 0 && payment.paymentMethod ? payment.paymentMethod : lot.vendorPaymentMethod || 'cash',
           updatedAt: new Date().toISOString(),
         };
       });
@@ -542,6 +581,7 @@ export default function App() {
             onSelectLot={setSelectedLotId}
             onAddSaleToLot={handleAddSaleToLot}
             onDeleteSale={handleDeleteSale}
+            onDeleteLot={handleDeleteLot}
             onMarkLotCompleted={handleMarkLotCompleted}
             onReopenLot={handleReopenLot}
             onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
