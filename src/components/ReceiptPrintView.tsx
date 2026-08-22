@@ -5,6 +5,7 @@ import { translations, unitLabels } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { generateMandiInvoiceCanvas, printThermalPOSReceipt } from '../utils/receiptGenerator';
+import { printSingleLotReceiptA4 } from '../utils/printHelper';
 import {
   Printer,
   Share2,
@@ -80,14 +81,14 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
     printThermalPOSReceipt(lot, settings);
   };
 
-  // Full Page A4 Print Fallback
+  // Full Page A4 Print Engine
   const handleFullPagePrint = (e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
     sound.playTick();
-    window.print();
+    printSingleLotReceiptA4(lot, settings);
   };
 
   // Helper to safely render receipt into a PNG DataURL and Blob
@@ -149,9 +150,9 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
     try {
       const { blob } = await getReceiptImage();
       const sanitizedVendor = lot.vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
-      triggerBrowserDownload(blob, `Mandi_POS_Bill_${sanitizedVendor}_Lot_${lot.lotNumber}.png`);
+      triggerBrowserDownload(blob, `Mandi_Vendor_Bill_${sanitizedVendor}_${lot.arrivalDate}.png`);
 
-      setShareSuccessToast(isUrdu ? 'رسید کی تصویر کامیابی سے محفوظ ہو گئی!' : 'POS Receipt image downloaded successfully!');
+      setShareSuccessToast(isUrdu ? 'رسید کی تصویر کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill image downloaded successfully!');
       setTimeout(() => setShareSuccessToast(null), 4000);
     } catch (err) {
       console.error('Error saving receipt image:', err);
@@ -181,7 +182,6 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
     let msg = `*${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}*\n`;
     msg += `🧾 *${isUrdu ? 'پکی پرچی رسید برائے زمیندار (POS Bill)' : 'Vendor POS Invoice'}*\n`;
     msg += `━━━━━━━━━━━━━━━━━\n`;
-    msg += `📋 *بل نمبر:* #${lot.lotNumber}\n`;
     msg += `📅 *تاریخ:* ${lot.arrivalDate}\n`;
     msg += `👤 *زمیندار:* ${lot.vendorName} ${lot.vendorCity ? `(${lot.vendorCity})` : ''}\n`;
     if (lot.vehicleNumber) msg += `🚚 *گاڑی نمبر:* ${lot.vehicleNumber}\n`;
@@ -328,7 +328,7 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
             >
               {lots.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.vendorName} - {l.productUrdu} (#{l.lotNumber})
+                  {l.vendorName} - {l.productUrdu} ({l.arrivalDate})
                 </option>
               ))}
             </select>
@@ -361,7 +361,18 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
             title="80mm تھرمل پرنٹر پر فوری پرچی پرنٹ کریں (Zero Margins, POS Thermal Roll)"
           >
             <Printer className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>{isUrdu ? '🖨️ 80mm POS تھرمل پرنٹ' : '🖨️ 80mm POS Thermal Print'}</span>
+            <span>{isUrdu ? '80mm POS پرنٹ' : '80mm POS Print'}</span>
+          </button>
+
+          {/* Full Page A4 Print Button */}
+          <button
+            type="button"
+            onClick={handleFullPagePrint}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-md border border-emerald-500"
+            title="A4 سائز پر مکمل بل پرنٹ کریں"
+          >
+            <FileText className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>{isUrdu ? 'A4 بل پرنٹ' : 'A4 Bill Print'}</span>
           </button>
 
           {/* Paper View Toggle (80mm POS vs A4 Standard) */}
@@ -484,11 +495,6 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
           {/* Bill Metadata */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="space-y-0.5 text-start">
-              <span className="text-[10px] text-slate-500 font-bold block">بل نمبر:</span>
-              <strong className="font-mono text-xs text-slate-900 block font-bold">#{lot.lotNumber}</strong>
-            </div>
-
-            <div className="space-y-0.5 text-start">
               <span className="text-[10px] text-slate-500 font-bold block">تاریخ آمد:</span>
               <strong className="font-numbers text-xs text-slate-900 block font-bold">{lot.arrivalDate}</strong>
             </div>
@@ -500,7 +506,7 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
               </strong>
             </div>
 
-            <div className="space-y-0.5 text-start">
+            <div className="space-y-0.5 text-start col-span-2 sm:col-span-1">
               <span className="text-[10px] text-slate-500 font-bold block">کل جنس / آمد:</span>
               <strong className="text-xs text-slate-950 block font-bold">
                 {lot.productUrdu} ({lot.totalQuantity} {unitLabel})

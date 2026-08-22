@@ -229,6 +229,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        {/* PostgreSQL Database URL from Form Input */}
+        <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-bold text-slate-300 font-urdu-sans flex items-center gap-1.5">
+              <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{isUrdu ? 'PostgreSQL ڈیٹا بیس کنکشن URL (براہ راست ان پٹ):' : 'PostgreSQL Database URL (Direct Input):'}</span>
+            </label>
+            <span className="text-[10px] text-slate-400 font-mono">Form Input</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              dir="ltr"
+              value={cloudConfig.postgresUrl || ''}
+              placeholder="postgresql://user:password@host:5432/mandidb?sslmode=require"
+              onChange={(e) => {
+                const updated = { ...cloudConfig, postgresUrl: e.target.value };
+                try {
+                  localStorage.setItem('mandi_postgres_sync_config_v3', JSON.stringify(updated));
+                } catch {
+                  // ignore
+                }
+              }}
+              className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-emerald-300 placeholder:text-slate-600 focus:ring-2 focus:ring-emerald-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                sound.playPop();
+                onOpenCloudSync?.();
+              }}
+              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-urdu-sans rounded-xl transition active:scale-95 whitespace-nowrap"
+            >
+              {isUrdu ? 'ٹیسٹ و سنک' : 'Test & Sync'}
+            </button>
+          </div>
+          <p className="text-[10px] text-slate-400 font-urdu-sans">
+            {isUrdu
+              ? 'ڈیٹا بیس URL براہ راست اس ان پٹ سے پڑھا جاتا ہے (کوئی .env پر انحصار نہیں)'
+              : 'Database URL is read directly from this input (no .env dependency required)'}
+          </p>
+        </div>
+
         {/* Offline High-Speed Storage Engine Info */}
         <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 font-urdu-sans">
           <span className="flex items-center gap-1.5">

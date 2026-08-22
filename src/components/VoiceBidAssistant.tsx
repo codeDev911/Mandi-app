@@ -16,6 +16,8 @@ import {
   Plus,
   Minus,
   Check,
+  Zap,
+  WifiOff,
 } from 'lucide-react';
 
 interface VoiceBidAssistantProps {
@@ -40,17 +42,22 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
   existingBuyers = [],
   settings,
   remainingLotQuantity = 999,
-  lotProductUrdu = 'مال',
-  unitLabelUrdu = 'پیٹی / بوری',
+  lotProductUrdu = 'Item',
+  unitLabelUrdu = 'Units',
   onClose,
 }) => {
-  const isUrdu = settings.language === 'ur';
-
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [parsedBid, setParsedBid] = useState<ParsedVoiceBid | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastAddedBid, setLastAddedBid] = useState<string | null>(null);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+
+  // Fast-tap manual state for instant offline entry
+  const [fastBuyer, setFastBuyer] = useState(existingBuyers[0] || 'Walk-in Buyer');
+  const [fastQty, setFastQty] = useState(1);
+  const [fastRate, setFastRate] = useState(1000);
+  const [fastPayment, setFastPayment] = useState<PaymentStatus>('credit');
 
   const listenerRef = useRef<VoiceBolliListener | null>(null);
 
@@ -59,9 +66,23 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
     const listener = new VoiceBolliListener('ur-PK');
     listenerRef.current = listener;
 
+    const handleOnlineStatus = () => {
+      setIsOfflineMode(!navigator.onLine);
+    };
+
+    if (typeof window !== 'undefined') {
+      setIsOfflineMode(!navigator.onLine);
+      window.addEventListener('online', handleOnlineStatus);
+      window.addEventListener('offline', handleOnlineStatus);
+    }
+
     return () => {
       if (listenerRef.current) {
         listenerRef.current.stopListening();
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnlineStatus);
+        window.removeEventListener('offline', handleOnlineStatus);
       }
     };
   }, []);
@@ -87,7 +108,6 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
             sound.playKeyClick();
           }
 
-          // When speech segment finishes, stop listening and let user review before hitting save
           if (isFinal) {
             if (listenerRef.current) {
               listenerRef.current.stopListening();
@@ -98,6 +118,7 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
         (err) => {
           setErrorMessage(err);
           setIsListening(false);
+          setIsOfflineMode(true);
         },
         (listeningState) => {
           setIsListening(listeningState);
@@ -105,11 +126,8 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
       );
 
       if (!started && !listenerRef.current.isSupported()) {
-        setErrorMessage(
-          isUrdu
-            ? 'آپ کے براؤزر میں وائس فیچر کی اجازت درکار ہے یا سپورٹڈ نہیں ہے'
-            : 'Speech recognition is not supported in this browser. Use Chrome/Safari/Edge.'
-        );
+        setErrorMessage('Speech recognition is not supported on this browser. Use Chrome, Safari, or the Quick Tap pad below.');
+        setIsOfflineMode(true);
       }
     }
   };
@@ -149,10 +167,8 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
     });
   };
 
-  // Explicit Save / Commit action triggered by user clicking the Save button
   const executeCommitSale = (bidToCommit: ParsedVoiceBid) => {
     if (!bidToCommit.isValid) return;
-
     sound.playCashChime();
 
     onAddSale({
@@ -160,39 +176,59 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
       quantity: bidToCommit.quantity,
       ratePerUnit: bidToCommit.ratePerUnit,
       paymentStatus: bidToCommit.paymentStatus,
-      notes: `🎙️ وائس: "${bidToCommit.rawText}"`,
+      notes: `Voice Bid: "${bidToCommit.rawText || ''}"`,
     });
 
-    const statusLabel = bidToCommit.paymentStatus === 'cash' ? 'نقد' : 'ادھار';
-    const summaryText = `${bidToCommit.buyerName} • ${bidToCommit.quantity} ${unitLabelUrdu} @ ${bidToCommit.ratePerUnit} (${statusLabel}) = ₨${bidToCommit.totalAmount.toLocaleString('en-US')}`;
+    const statusLabel = bidToCommit.paymentStatus === 'cash' ? 'Cash' : 'Credit';
+    const summaryText = `${bidToCommit.buyerName} • ${bidToCommit.quantity} ${unitLabelUrdu} @ Rs.${bidToCommit.ratePerUnit.toLocaleString()} (${statusLabel}) = Rs.${bidToCommit.totalAmount.toLocaleString()}`;
     setLastAddedBid(summaryText);
     setTranscript('');
     setParsedBid(null);
   };
 
+  const handleQuickAddSale = () => {
+    if (!fastBuyer.trim() || fastQty <= 0 || fastRate <= 0) return;
+    sound.playCashChime();
+
+    const total = fastQty * fastRate;
+    onAddSale({
+      buyerName: fastBuyer.trim(),
+      quantity: fastQty,
+      ratePerUnit: fastRate,
+      paymentStatus: fastPayment,
+      notes: 'Quick Tap Sale',
+    });
+
+    const statusLabel = fastPayment === 'cash' ? 'Cash' : 'Credit';
+    setLastAddedBid(`${fastBuyer} • ${fastQty} ${unitLabelUrdu} @ Rs.${fastRate.toLocaleString()} (${statusLabel}) = Rs.${total.toLocaleString()}`);
+  };
+
   return (
-    <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white rounded-2xl p-3.5 sm:p-4 border border-emerald-500/40 shadow-xl space-y-3 animate-in fade-in duration-200">
+    <div className="bg-slate-900 text-white rounded-2xl p-3.5 sm:p-4 border border-slate-700 shadow-xl space-y-3">
       {/* Header Bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-md transition-all ${
-            isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-emerald-500 text-slate-950'
-          }`}>
+          <div
+            className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-md transition-all ${
+              isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-emerald-500 text-slate-950'
+            }`}
+          >
             {isListening ? <Radio className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h4 className="text-xs sm:text-sm font-bold font-urdu-nastaliq text-emerald-300">
-                {isUrdu ? 'آواز سے بولی اندراج (بولیں اور محفوظ کریں)' : 'Voice Bolli Assistant (Speak & Save)'}
+              <h4 className="text-xs sm:text-sm font-bold text-emerald-300">
+                Voice Bolli & Quick-Bid Assistant
               </h4>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
-                {isUrdu ? 'نقد (nakaq) یا ادھار (uddar)' : 'Cash / Credit'}
-              </span>
+              {isOfflineMode && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30 flex items-center gap-1">
+                  <WifiOff className="w-3 h-3" />
+                  <span>Offline Fast Mode</span>
+                </span>
+              )}
             </div>
-            <p className="text-[11px] text-slate-300 font-urdu-sans">
-              {isUrdu
-                ? 'مثال: "اسلم 2 2300 نقد (nakaq)" یا "طارق 5 1200 ادھار (uddar)"'
-                : 'Say e.g.: "Aslam 2 2300 cash" or "Tariq 5 1200 credit"'}
+            <p className="text-[11px] text-slate-300">
+              Speak: Buyer name, quantity, rate, cash or credit (e.g. "Aslam 5 2200 cash")
             </p>
           </div>
         </div>
@@ -203,7 +239,7 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
               type="button"
               onClick={onClose}
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-              title="بند کریں"
+              title="Close"
             >
               <X className="w-4 h-4" />
             </button>
@@ -212,13 +248,13 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
       </div>
 
       {/* Main Interactive Listening & Parsing Box */}
-      <div className="bg-slate-950/80 rounded-xl p-3 border border-slate-800 space-y-2.5">
+      <div className="bg-slate-950 rounded-xl p-3 border border-slate-800 space-y-2.5">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           {/* Big Toggle Mic Button */}
           <button
             type="button"
             onClick={handleToggleListening}
-            className={`py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm font-urdu-sans flex items-center justify-center gap-2 transition shadow-md active:scale-95 ${
+            className={`py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow-md active:scale-95 ${
               isListening
                 ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
                 : 'bg-emerald-600 hover:bg-emerald-500 text-white'
@@ -227,32 +263,41 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
             {isListening ? (
               <>
                 <MicOff className="w-4 h-4" />
-                <span>سن رہا ہے... (روکنے کے لیے کلک کریں)</span>
+                <span>Listening... (Click to Stop)</span>
               </>
             ) : (
               <>
                 <Mic className="w-4 h-4" />
-                <span>مائیک آن کریں (Start Voice)</span>
+                <span>Start Microphone</span>
               </>
             )}
           </button>
 
           {/* Live Transcript Display */}
           <div className="flex-1 min-w-0 bg-slate-900 px-3 py-2 rounded-xl border border-slate-800 text-xs">
-            <span className="text-slate-400 block text-[10px] font-urdu-sans">
-              {isListening ? '🎙️ آواز سن رہا ہے:' : 'موصولہ آواز:'}
+            <span className="text-slate-400 block text-[10px]">
+              {isListening ? '🎙️ Speech Detected:' : 'Voice Input:'}
             </span>
-            <span className="font-urdu-nastaliq text-amber-300 font-bold truncate block">
-              {transcript || (isListening ? 'بولیں: نام، تعداد، ریٹ، نقد/ادھار...' : 'مائیک بند ہے (کلک کر کے بولیں)')}
+            <span className="text-amber-300 font-bold truncate block">
+              {transcript || (isListening ? 'Listening for buyer, qty, rate, cash/credit...' : 'Microphone idle (Click Start Microphone to speak)')}
             </span>
           </div>
         </div>
 
-        {/* Error message */}
+        {/* Error / Offline Helper */}
         {errorMessage && (
-          <div className="p-2 bg-red-950/80 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-center gap-2 font-urdu-sans">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-400" />
-            <span>{errorMessage}</span>
+          <div className="p-2.5 bg-amber-950/80 border border-amber-800/60 rounded-xl text-amber-200 text-xs flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-400" />
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsOfflineMode(true)}
+              className="text-[11px] font-bold text-emerald-400 underline"
+            >
+              Use Quick-Tap Pad
+            </button>
           </div>
         )}
 
@@ -260,51 +305,49 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
         {parsedBid && (
           <div className="p-3 bg-emerald-950/70 border-2 border-emerald-500/60 rounded-xl space-y-2.5 animate-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <span className="text-xs text-emerald-300 font-bold font-urdu-sans flex items-center gap-1.5">
+              <span className="text-xs text-emerald-300 font-bold flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>سمجھا گیا سودا — براہِ کرم جائزہ لیں اور محفوظ کریں:</span>
+                <span>Parsed Bid — Review & Confirm:</span>
               </span>
 
               {/* Payment Type Badges / Switcher */}
-              <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-700">
+              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700">
                 <button
                   type="button"
                   onClick={() => handleSetPaymentStatus('cash')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
                     parsedBid.paymentStatus === 'cash'
                       ? 'bg-emerald-600 text-white shadow-xs'
                       : 'text-slate-400 hover:text-white'
                   }`}
-                  title="نقد (nakaq / cash)"
                 >
                   <Banknote className="w-3.5 h-3.5" />
-                  <span>نقد (Nakaq/Cash)</span>
+                  <span>Cash</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSetPaymentStatus('credit')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
                     parsedBid.paymentStatus === 'credit'
                       ? 'bg-amber-600 text-white shadow-xs'
                       : 'text-slate-400 hover:text-white'
                   }`}
-                  title="ادھار (uddar / credit)"
                 >
                   <CreditCard className="w-3.5 h-3.5" />
-                  <span>ادھار (Uddar/Credit)</span>
+                  <span>Credit</span>
                 </button>
               </div>
             </div>
 
             {/* Grid of values */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs font-urdu-sans">
-              <div className="bg-slate-900/90 p-2 rounded-xl border border-slate-800 flex flex-col justify-center">
-                <span className="text-[10px] text-slate-400 block mb-0.5">خریدار (Buyer)</span>
-                <strong className="text-white font-urdu-nastaliq text-sm truncate">{parsedBid.buyerName}</strong>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+              <div className="bg-slate-900 p-2 rounded-xl border border-slate-800 flex flex-col justify-center">
+                <span className="text-[10px] text-slate-400 block mb-0.5">Buyer</span>
+                <strong className="text-white text-sm truncate">{parsedBid.buyerName}</strong>
               </div>
 
-              <div className="bg-slate-900/90 p-2 rounded-xl border border-slate-800 flex flex-col justify-between">
-                <span className="text-[10px] text-slate-400 block mb-0.5">تعداد ({unitLabelUrdu})</span>
+              <div className="bg-slate-900 p-2 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <span className="text-[10px] text-slate-400 block mb-0.5">Qty ({unitLabelUrdu})</span>
                 <div className="flex items-center justify-center gap-1.5">
                   <button
                     type="button"
@@ -313,7 +356,7 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
                   >
                     -
                   </button>
-                  <strong className="text-amber-300 font-numbers text-base">{parsedBid.quantity}</strong>
+                  <strong className="text-amber-300 text-base">{parsedBid.quantity}</strong>
                   <button
                     type="button"
                     onClick={() => handleAdjustQuantity(1)}
@@ -324,47 +367,47 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
                 </div>
               </div>
 
-              <div className="bg-slate-900/90 p-2 rounded-xl border border-slate-800 flex flex-col justify-between">
-                <span className="text-[10px] text-slate-400 block mb-0.5">ریٹ فی یونٹ</span>
+              <div className="bg-slate-900 p-2 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <span className="text-[10px] text-slate-400 block mb-0.5">Rate / Unit</span>
                 <div className="flex items-center justify-center gap-1">
                   <button
                     type="button"
                     onClick={() => handleAdjustRate(-50)}
-                    className="px-1 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-numbers"
+                    className="px-1 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]"
                   >
                     -50
                   </button>
-                  <strong className="text-amber-300 font-numbers text-sm">
-                    {formatPKR(parsedBid.ratePerUnit, settings.currencySymbol, settings.language)}
+                  <strong className="text-amber-300 text-sm">
+                    Rs.{parsedBid.ratePerUnit.toLocaleString()}
                   </strong>
                   <button
                     type="button"
                     onClick={() => handleAdjustRate(50)}
-                    className="px-1 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-numbers"
+                    className="px-1 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]"
                   >
                     +50
                   </button>
                 </div>
               </div>
 
-              <div className="bg-emerald-900/90 p-2 rounded-xl border border-emerald-500/60 flex flex-col justify-center">
-                <span className="text-[10px] text-emerald-200 block mb-0.5">کل رقم (Total)</span>
-                <strong className="text-emerald-300 font-numbers text-base font-black">
-                  {formatPKR(parsedBid.totalAmount, settings.currencySymbol, settings.language)}
+              <div className="bg-emerald-900 p-2 rounded-xl border border-emerald-500/60 flex flex-col justify-center">
+                <span className="text-[10px] text-emerald-200 block mb-0.5">Total Amount</span>
+                <strong className="text-emerald-300 text-base font-black">
+                  Rs.{parsedBid.totalAmount.toLocaleString()}
                 </strong>
               </div>
             </div>
 
-            {/* Explicit User Action: Confirm & Save Button */}
+            {/* Confirm & Save Button */}
             {parsedBid.isValid ? (
               <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => executeCommitSale(parsedBid)}
-                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 active:scale-98 text-slate-950 rounded-xl font-extrabold text-sm sm:text-base font-urdu-sans transition flex items-center justify-center gap-2 shadow-lg cursor-pointer border border-emerald-400"
+                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 active:scale-98 text-slate-950 rounded-xl font-extrabold text-sm sm:text-base transition flex items-center justify-center gap-2 shadow-lg cursor-pointer border border-emerald-400"
                 >
                   <CheckCircle2 className="w-5 h-5 text-slate-950" />
-                  <span>سودا محفوظ کریں (Save & Add Bid)</span>
+                  <span>Confirm & Save Bid</span>
                 </button>
 
                 <button
@@ -374,28 +417,150 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
                     setParsedBid(null);
                     setTranscript('');
                   }}
-                  className="w-full sm:w-auto px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold font-urdu-sans transition"
+                  className="w-full sm:w-auto px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition"
                 >
-                  منسوخ (Cancel)
+                  Cancel
                 </button>
               </div>
             ) : (
-              <div className="text-xs text-amber-300 text-center font-urdu-sans p-1.5 bg-amber-950/60 rounded-lg border border-amber-800/60">
-                ⚠️ {parsedBid.validationError || 'براہِ کرم نام، تعداد اور ریٹ واضح بولیں'}
+              <div className="text-xs text-amber-300 text-center p-1.5 bg-amber-950/60 rounded-lg border border-amber-800/60">
+                ⚠️ {parsedBid.validationError || 'Please speak buyer name, quantity, and rate clearly'}
               </div>
             )}
           </div>
         )}
 
-        {/* Recently Added Confirmation Pill */}
+        {/* Offline 1-Tap Fast Pad */}
+        <div className="pt-2 border-t border-slate-800 space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span className="font-bold flex items-center gap-1.5 text-slate-200">
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <span>Offline Rapid Entry Pad (Works 100% with no Internet):</span>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+            {/* Buyer Selection */}
+            <div>
+              <label className="block text-[10px] text-slate-400 mb-1">Buyer Name</label>
+              <input
+                type="text"
+                value={fastBuyer}
+                onChange={(e) => setFastBuyer(e.target.value)}
+                placeholder="Buyer Name"
+                className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
+              />
+              {existingBuyers.length > 0 && (
+                <div className="flex gap-1 overflow-x-auto pt-1 pb-0.5">
+                  {existingBuyers.slice(0, 4).map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => setFastBuyer(b)}
+                      className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] whitespace-nowrap"
+                    >
+                      {b}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Qty Selection with +1, +5, +10 */}
+            <div>
+              <label className="block text-[10px] text-slate-400 mb-1">Quantity</label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min="1"
+                  max={remainingLotQuantity}
+                  value={fastQty}
+                  onChange={(e) => setFastQty(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-center text-white"
+                />
+              </div>
+              <div className="flex gap-1 pt-1">
+                {[1, 5, 10, 25].map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => setFastQty(q)}
+                    className="flex-1 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px]"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Rate Selection */}
+            <div>
+              <label className="block text-[10px] text-slate-400 mb-1">Rate (Rs.)</label>
+              <input
+                type="number"
+                min="10"
+                step="50"
+                value={fastRate}
+                onChange={(e) => setFastRate(Math.max(0, Number(e.target.value) || 0))}
+                className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-center text-white"
+              />
+              <div className="flex gap-1 pt-1">
+                {[-100, -50, +50, +100].map((delta) => (
+                  <button
+                    key={delta}
+                    type="button"
+                    onClick={() => setFastRate((r) => Math.max(0, r + delta))}
+                    className="flex-1 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px]"
+                  >
+                    {delta > 0 ? `+${delta}` : delta}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Payment & Add Button */}
+            <div className="flex flex-col justify-end gap-1">
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setFastPayment('credit')}
+                  className={`flex-1 py-1 rounded text-[10px] font-bold ${
+                    fastPayment === 'credit' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  Credit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFastPayment('cash')}
+                  className={`flex-1 py-1 rounded text-[10px] font-bold ${
+                    fastPayment === 'cash' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  Cash
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleQuickAddSale}
+                className="w-full py-1.5 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold text-xs rounded-lg shadow-sm transition"
+              >
+                + Add Sale (Rs.{(fastQty * fastRate).toLocaleString()})
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Recently Added Confirmation */}
         {lastAddedBid && (
-          <div className="p-2.5 bg-emerald-900/40 border border-emerald-600/30 rounded-xl text-emerald-300 text-xs flex items-center justify-between font-urdu-sans">
+          <div className="p-2.5 bg-emerald-950 border border-emerald-600/30 rounded-xl text-emerald-300 text-xs flex items-center justify-between">
             <div className="flex items-center gap-1.5 truncate">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <span className="truncate">کامیابی سے محفوظ ہو گیا: <strong>{lastAddedBid}</strong></span>
+              <span className="truncate">Saved Sale: <strong>{lastAddedBid}</strong></span>
             </div>
             <span className="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-full font-bold flex-shrink-0">
-              محفوظ شد ✅
+              Saved
             </span>
           </div>
         )}
@@ -403,4 +568,3 @@ export const VoiceBidAssistant: React.FC<VoiceBidAssistantProps> = ({
     </div>
   );
 };
-

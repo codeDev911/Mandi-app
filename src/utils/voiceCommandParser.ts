@@ -367,57 +367,83 @@ export class VoiceBolliListener {
   private onResultCallback: ((transcript: string, isFinal: boolean) => void) | null = null;
   private onErrorCallback: ((error: string) => void) | null = null;
   private onStateChangeCallback: ((isListening: boolean) => void) | null = null;
+  private currentLanguage: string = 'ur-PK';
 
   constructor(language: 'ur-PK' | 'en-US' = 'ur-PK') {
+    this.currentLanguage = language;
+    this.initRecognition(language);
+  }
+
+  private initRecognition(lang: string) {
     if (typeof window !== 'undefined') {
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
       if (SpeechRecognition) {
-        this.recognition = new SpeechRecognition();
-        this.recognition.continuous = true;
-        this.recognition.interimResults = true;
-        this.recognition.lang = language;
-        this.recognition.maxAlternatives = 2;
+        try {
+          this.recognition = new SpeechRecognition();
+          // continuous = false is much more compatible with offline on-device speech engines
+          this.recognition.continuous = false;
+          this.recognition.interimResults = true;
+          this.recognition.lang = lang;
+          this.recognition.maxAlternatives = 3;
 
-        this.recognition.onresult = (event: any) => {
-          let interimTranscript = '';
-          let finalTranscript = '';
+          this.recognition.onresult = (event: any) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
 
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            const transcript = event.results[i][0].transcript;
-            if (event.results[i].isFinal) {
-              finalTranscript += transcript;
-            } else {
-              interimTranscript += transcript;
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              const transcript = event.results[i][0].transcript;
+              if (event.results[i].isFinal) {
+                finalTranscript += transcript;
+              } else {
+                interimTranscript += transcript;
+              }
             }
-          }
 
-          const activeText = finalTranscript || interimTranscript;
-          if (this.onResultCallback && activeText.trim()) {
-            this.onResultCallback(activeText, !!finalTranscript);
-          }
-        };
+            const activeText = finalTranscript || interimTranscript;
+            if (this.onResultCallback && activeText.trim()) {
+              this.onResultCallback(activeText, !!finalTranscript);
+            }
+          };
 
-        this.recognition.onerror = (event: any) => {
-          console.warn('Speech recognition event error:', event.error);
-          let userMsg = 'آواز سننے میں مسئلہ پیش آیا';
-          if (event.error === 'not-allowed') {
-            userMsg = 'مائیکروفون کی اجازت درکار ہے (Microphone Permission Required)';
-          } else if (event.error === 'no-speech') {
-            userMsg = 'کوئی آواز سنائی نہیں دی';
-          }
-          if (this.onErrorCallback) {
-            this.onErrorCallback(userMsg);
-          }
-        };
+          this.recognition.onerror = (event: any) => {
+            console.warn('Speech recognition event error:', event.error);
+            let userMsg = 'Voice recognition error';
+            if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+              userMsg = 'Microphone permission required';
+            } else if (event.error === 'network') {
+              // Try fallback to device default language for offline model
+              if (this.recognition && this.recognition.lang === 'ur-PK') {
+                try {
+                  console.log('Trying offline system speech language fallback...');
+                  this.recognition.lang = navigator.language || 'en-US';
+                  this.recognition.start();
+                  return;
+                } catch {
+                  userMsg = 'Offline: Please enable on-device voice typing or use Quick Tap';
+                }
+              } else {
+                userMsg = 'Offline voice typing: Use Gboard on-device voice or Quick Tap';
+              }
+            } else if (event.error === 'no-speech') {
+              userMsg = 'No speech detected, please try again';
+            }
 
-        this.recognition.onend = () => {
-          this.isListening = false;
-          if (this.onStateChangeCallback) {
-            this.onStateChangeCallback(false);
-          }
-        };
+            if (this.onErrorCallback) {
+              this.onErrorCallback(userMsg);
+            }
+          };
+
+          this.recognition.onend = () => {
+            this.isListening = false;
+            if (this.onStateChangeCallback) {
+              this.onStateChangeCallback(false);
+            }
+          };
+        } catch (e) {
+          console.warn('Could not initialize SpeechRecognition:', e);
+        }
       }
     }
   }
@@ -427,6 +453,7 @@ export class VoiceBolliListener {
   }
 
   public setLanguage(lang: 'ur-PK' | 'en-US'): void {
+    this.currentLanguage = lang;
     if (this.recognition) {
       this.recognition.lang = lang;
     }
@@ -455,7 +482,23 @@ export class VoiceBolliListener {
       return true;
     } catch (err) {
       console.warn('Recognition start error:', err);
-      return false;
+      try {
+        this.recognition.stop();
+        setTimeout(() => {
+          try {
+            this.recognition.start();
+            this.isListening = true;
+            if (this.onStateChangeCallback) {
+              this.onStateChangeCallback(true);
+            }
+          } catch {
+            // ignore
+          }
+        }, 100);
+        return true;
+      } catch {
+        return false;
+      }
     }
   }
 

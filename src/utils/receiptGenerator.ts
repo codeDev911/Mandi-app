@@ -1,6 +1,7 @@
 import { VendorLot, AppSettings } from '../types';
 import { unitLabels } from './localization';
 import { formatPKR } from './currency';
+import { printHtmlViaIframe } from './printHelper';
 
 /**
  * Ensures custom Urdu fonts (Noto Nastaliq Urdu & Noto Sans Arabic) are
@@ -144,8 +145,8 @@ export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings
   ctx.strokeRect(20, 108, width - 40, 20);
 
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 10.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('پکی پرچی رسید برائے زمیندار (POS Bill)', width / 2, 122);
+  ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText('پکی پرچی بل برائے زمیندار', width / 2, 122);
 
   // Dashed Separator Line Helper
   const drawDashedLine = (y: number) => {
@@ -183,17 +184,10 @@ export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings
   // Right Column
   ctx.fillStyle = '#64748b';
   ctx.font = '10.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('بل نمبر:', width - 25, metaY);
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 12px monospace, sans-serif';
-  ctx.fillText(`#${lot.lotNumber}`, width - 75, metaY);
-
-  ctx.fillStyle = '#64748b';
-  ctx.font = '10.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('زمیندار:', width - 25, metaY + 18);
+  ctx.fillText('زمیندار:', width - 25, metaY);
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 12px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-  ctx.fillText(`${lot.vendorName} ${lot.vendorCity ? `(${lot.vendorCity})` : ''}`, width - 70, metaY + 18);
+  ctx.fillText(`${lot.vendorName} ${lot.vendorCity ? `(${lot.vendorCity})` : ''}`, width - 70, metaY);
 
   if (lot.vehicleNumber) {
     ctx.fillStyle = '#64748b';
@@ -221,9 +215,9 @@ export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings
   ctx.textAlign = 'center';
   ctx.fillText('#', 36, currentY + 16);
   ctx.textAlign = 'right';
-  ctx.fillText('تفصیلِ جنس (Item)', width - 50, currentY + 16);
+  ctx.fillText('تفصیلِ جنس', width - 50, currentY + 16);
   ctx.textAlign = 'center';
-  ctx.fillText(`تعداد بمعہ یونٹ`, width - 200, currentY + 16);
+  ctx.fillText(`تعداد بمعہ پیکنگ`, width - 200, currentY + 16);
   ctx.textAlign = 'right';
   ctx.fillText('ریٹ', width - 290, currentY + 16);
   ctx.fillText('کل رقم', 100, currentY + 16);
@@ -289,7 +283,7 @@ export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 10.5px "Noto Sans Arabic", system-ui, sans-serif';
   ctx.textAlign = 'right';
-  ctx.fillText(`کل فروخت (${lot.summary.totalSoldQuantity} ${unitLabel}):`, width - 35, currentY + 17);
+  ctx.fillText(`مجموعی کل فروخت (${lot.summary.totalSoldQuantity} ${unitLabel}):`, width - 35, currentY + 17);
 
   ctx.font = 'bold 13px system-ui, sans-serif';
   ctx.fillText(`Rs. ${lot.summary.grossSales.toLocaleString()}`, 100, currentY + 18);
@@ -298,11 +292,11 @@ export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings
   drawDashedLine(currentY);
   currentY += 10;
 
-  // 5. Deductions / Expenses Section (کٹوتیاں و اخراجات / Katote)
+  // 5. Deductions / Expenses Section (کٹوتیاں و اخراجات)
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
   ctx.textAlign = 'right';
-  ctx.fillText('منہا کٹوتیاں و اخراجات (Katote):', width - 25, currentY + 2);
+  ctx.fillText('منہا کٹوتیاں و اخراجات:', width - 25, currentY + 2);
 
   currentY += 16;
 
@@ -345,7 +339,7 @@ export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 12px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
   ctx.textAlign = 'right';
-  ctx.fillText('صافی رقم برائے ادائیگی (Net Payable):', width - 35, currentY + 28);
+  ctx.fillText('صافی رقم برائے ادائیگی:', width - 35, currentY + 28);
 
   ctx.font = 'bold 19px system-ui, monospace, sans-serif';
   ctx.textAlign = 'left';
@@ -366,8 +360,8 @@ export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings
   ctx.textAlign = 'right';
   ctx.fillText(
     isPaid
-      ? `✅ ادائیگی کی کیفیت: ادا شدہ (PAID IN FULL)${lot.vendorPaymentDate ? ` - بتاریخ ${lot.vendorPaymentDate}` : ''}`
-      : '⚠️ ادائیگی کی کیفیت: ادائیگی بقایا (PAYMENT PENDING)',
+      ? `✅ ادائیگی کی کیفیت: تمام رقم ادا شدہ ہے${lot.vendorPaymentDate ? ` - بتاریخ ${lot.vendorPaymentDate}` : ''}`
+      : '⚠️ ادائیگی کی کیفیت: ادائیگی بقایا ہے',
     width - 32,
     currentY + 18
   );
@@ -539,7 +533,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
 
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('پکی پرچی بل برائے زمیندار (Vendor Bill Slip)', width / 2, 133);
+  ctx.fillText('پکی پرچی بل برائے زمیندار', width / 2, 133);
 
   // Dashed Separator
   const drawDashedLine = (y: number) => {
@@ -596,12 +590,12 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.textAlign = 'center';
   ctx.fillText('#', 40, currentY + 16);
   ctx.textAlign = 'right';
-  ctx.fillText('تفصیلِ جنس (Item)', width - 55, currentY + 16);
+  ctx.fillText('تفصیلِ جنس', width - 55, currentY + 16);
   ctx.textAlign = 'center';
-  ctx.fillText('تعداد بمعہ یونٹ (Qty)', width - 210, currentY + 16);
+  ctx.fillText('تعداد بمعہ پیکنگ', width - 210, currentY + 16);
   ctx.textAlign = 'right';
   ctx.fillText('ریٹ', width - 310, currentY + 16);
-  ctx.fillText('کل رقم (Total)', 90, currentY + 16);
+  ctx.fillText('کل رقم', 90, currentY + 16);
 
   currentY += 24;
 
@@ -620,7 +614,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
     ctx.fillStyle = '#0f172a';
     ctx.font = 'bold 11px "Noto Sans Arabic", system-ui';
     ctx.textAlign = 'right';
-    ctx.fillText(`${item.productUrdu} (#${item.lotNumber})`, width - 55, currentY + 17);
+    ctx.fillText(item.productUrdu, width - 55, currentY + 17);
 
     ctx.font = 'bold 10.5px system-ui';
     ctx.textAlign = 'center';
@@ -647,7 +641,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
   ctx.textAlign = 'right';
-  ctx.fillText('مجموعی کل فروخت (Gross Total Sales):', width - 36, currentY + 17);
+  ctx.fillText('مجموعی کل فروخت:', width - 36, currentY + 17);
 
   ctx.font = 'bold 13px system-ui';
   ctx.fillText(formatPKR(totalGross, 'Rs.', 'en'), 90, currentY + 17);
@@ -660,7 +654,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
   ctx.textAlign = 'right';
-  ctx.fillText('منہا کٹوتیاں و اخراجات (Katote):', width - 30, currentY + 4);
+  ctx.fillText('منہا کٹوتیاں و اخراجات:', width - 30, currentY + 4);
 
   currentY += 18;
 
@@ -711,7 +705,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 13px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
   ctx.textAlign = 'right';
-  ctx.fillText('صافی رقم برائے ادائیگی (Net Payable):', width - 36, currentY + 30);
+  ctx.fillText('صافی رقم برائے ادائیگی:', width - 36, currentY + 30);
 
   ctx.font = 'bold 20px system-ui, monospace, sans-serif';
   ctx.textAlign = 'left';
@@ -730,7 +724,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
   ctx.textAlign = 'right';
   ctx.fillText(
-    allLotsPaid ? '✅ ادائیگی کی کیفیت: تمام اجناس ادا شدہ (ALL PAID)' : '⚠️ ادائیگی کی کیفیت: ادائیگی بقایا (PAYMENT PENDING)',
+    allLotsPaid ? '✅ ادائیگی کی کیفیت: تمام اجناس ادا شدہ ہیں' : '⚠️ ادائیگی کی کیفیت: ادائیگی بقایا ہے',
     width - 34,
     currentY + 20
   );
@@ -762,30 +756,11 @@ export function generateVendorConsolidatedInvoiceCanvas(
 }
 
 /**
- * Prints an authentic, compact 80mm POS Thermal Receipt for a single Vendor Lot.
- * Isolates receipt inside a hidden iframe with zero margins and roll-cut styling.
+ * Prints an authentic, compact 80mm POS Thermal Receipt for a single lot.
  */
 export function printThermalPOSReceipt(lot: VendorLot, settings: AppSettings): void {
-  const existingIframe = document.getElementById('thermal-pos-print-iframe');
-  if (existingIframe) {
-    existingIframe.remove();
-  }
-
-  const unitLabel = unitLabels[lot.unitType][settings.language];
+  const unitLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
   const isPaid = lot.vendorPaymentStatus === 'paid';
-
-  const iframe = document.createElement('iframe');
-  iframe.id = 'thermal-pos-print-iframe';
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentWindow?.document || iframe.contentDocument;
-  if (!doc) return;
 
   const salesRowsHtml = lot.sales.map((sale, idx) => `
     <tr>
@@ -835,8 +810,7 @@ export function printThermalPOSReceipt(lot: VendorLot, settings: AppSettings): v
     `).join('')}
   `;
 
-  doc.open();
-  doc.write(`
+  const html = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ur">
     <head>
@@ -895,7 +869,7 @@ export function printThermalPOSReceipt(lot: VendorLot, settings: AppSettings): v
 
       <div style="font-size: 10px; line-height: 1.4;">
         <div style="display:flex; justify-content:space-between;">
-          <span>بل نمبر: <b>#${lot.lotNumber}</b></span>
+          <span>رسید برائے زمیندار</span>
           <span>تاریخ: <b>${lot.arrivalDate}</b></span>
         </div>
         <div>زمیندار: <b style="font-size: 11.5px;">${lot.vendorName}</b> ${lot.vendorCity ? `(${lot.vendorCity})` : ''}</div>
@@ -963,24 +937,11 @@ export function printThermalPOSReceipt(lot: VendorLot, settings: AppSettings): v
       <div style="text-align: center; font-size: 8px; margin-top: 6px; color: #444;">
         ڈیجیٹل منڈی منشی سسٹم کمپیوٹرائزڈ پرچی
       </div>
-
-      <script>
-        window.onload = function() {
-          setTimeout(function() {
-            window.focus();
-            window.print();
-          }, 250);
-        };
-      </script>
     </body>
     </html>
-  `);
-  doc.close();
+  `;
 
-  setTimeout(() => {
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
-  }, 400);
+  printHtmlViaIframe(html, `POS_Receipt_${lot.lotNumber}`);
 }
 
 /**
@@ -994,24 +955,6 @@ export function printConsolidatedThermalPOSReceipt(
   settings: AppSettings,
   dateLabel?: string
 ): void {
-  const existingIframe = document.getElementById('thermal-pos-consolidated-iframe');
-  if (existingIframe) {
-    existingIframe.remove();
-  }
-
-  const iframe = document.createElement('iframe');
-  iframe.id = 'thermal-pos-consolidated-iframe';
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentWindow?.document || iframe.contentDocument;
-  if (!doc) return;
-
   // Flatten all products/lots into single unified items
   const allItems: Array<{
     lotNumber: string;
@@ -1034,7 +977,7 @@ export function printConsolidatedThermalPOSReceipt(
 
   const totals = lots.reduce(
     (acc, lot) => {
-      const uLabel = unitLabels[lot.unitType][settings.language];
+      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
       acc.grossSales += lot.summary.grossSales;
       acc.totalExpenses += lot.summary.totalExpenses;
       acc.netPayable += lot.summary.netPayableToVendor;
@@ -1083,7 +1026,7 @@ export function printConsolidatedThermalPOSReceipt(
 
   const itemsRowsHtml = allItems.map((item, idx) => `
     <tr>
-      <td style="text-align: right; padding: 2px 1px;">${idx + 1}. ${item.productUrdu} <small style="color:#555;">(#${item.lotNumber})</small></td>
+      <td style="text-align: right; padding: 2px 1px;">${idx + 1}. ${item.productUrdu}</td>
       <td style="text-align: center; padding: 2px 1px; font-weight: bold;">${item.quantity} ${item.unitLabel}</td>
       <td style="text-align: left; padding: 2px 1px;">Rs.${item.ratePerUnit.toLocaleString()}</td>
       <td style="text-align: left; padding: 2px 1px; font-weight: bold;">Rs.${item.totalAmount.toLocaleString()}</td>
@@ -1099,8 +1042,7 @@ export function printConsolidatedThermalPOSReceipt(
   if (aggregatedExpenses.marketFee > 0) expRowsHtml.push(`<div><span>مارکیٹ فیس:</span> <b>-Rs.${aggregatedExpenses.marketFee.toLocaleString()}</b></div>`);
   if (aggregatedExpenses.customTotal > 0) expRowsHtml.push(`<div><span>دیگر کٹوتیاں:</span> <b>-Rs.${aggregatedExpenses.customTotal.toLocaleString()}</b></div>`);
 
-  doc.open();
-  doc.write(`
+  const html = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ur">
     <head>
@@ -1151,7 +1093,7 @@ export function printConsolidatedThermalPOSReceipt(
         <div style="font-size: 11px;">پروپرائٹر: <b>${settings.arhtiNameUrdu || settings.arhtiNameEn}</b></div>
         <div style="font-size: 9.5px;">📍 ${settings.shopAddressUrdu || settings.shopAddressEn} | 📞 ${settings.shopPhone}</div>
         <div style="font-size: 10px; font-weight: bold; border: 1px solid #000; display: inline-block; padding: 1px 6px; margin-top: 3px;">
-          پکی پرچی بل برائے زمیندار (${lots.length} لاٹس)
+          پکی پرچی بل برائے زمیندار (${lots.length} اجناس)
         </div>
       </div>
 
@@ -1161,7 +1103,7 @@ export function printConsolidatedThermalPOSReceipt(
         <div>زمیندار: <b style="font-size: 12px;">${vendorName}</b> ${vendorCity ? `(${vendorCity})` : ''}</div>
         <div style="display:flex; justify-content:space-between;">
           <span>تاریخ: <b>${displayDate}</b></span>
-          <span>کل اجناس: <b>${lots.length} لاٹس</b></span>
+          <span>کل اجناس: <b>${lots.length} آئٹم</b></span>
         </div>
       </div>
 
@@ -1223,22 +1165,9 @@ export function printConsolidatedThermalPOSReceipt(
       <div style="text-align: center; font-size: 8px; margin-top: 6px; color: #444;">
         ڈیجیٹل منڈی منشی سسٹم کمپیوٹرائزڈ پرچی
       </div>
-
-      <script>
-        window.onload = function() {
-          setTimeout(function() {
-            window.focus();
-            window.print();
-          }, 250);
-        };
-      </script>
     </body>
     </html>
-  `);
-  doc.close();
+  `;
 
-  setTimeout(() => {
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
-  }, 400);
+  printHtmlViaIframe(html, `Consolidated_POS_${vendorName}`);
 }

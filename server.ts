@@ -9,18 +9,23 @@ dotenv.config();
 const { Pool } = pg;
 const PORT = 3000;
 
-// Helper to get PostgreSQL Pool for a connection string or default DATABASE_URL
+// Helper to get PostgreSQL Pool with strict priority for URL from client form input
 function getPostgresPool(customUrl?: string): pg.Pool | null {
-  const connectionString = customUrl?.trim() || process.env.DATABASE_URL?.trim();
-  if (!connectionString) {
+  const rawUrl = customUrl?.trim() || process.env.DATABASE_URL?.trim();
+  if (!rawUrl) {
     return null;
   }
+
+  const connectionString = rawUrl;
+  const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+  const isSslDisabled = connectionString.includes('sslmode=disable');
+
   return new Pool({
     connectionString,
-    ssl: connectionString.includes('sslmode=disable')
+    ssl: isLocal || isSslDisabled
       ? false
-      : { rejectUnauthorized: false }, // Allows Supabase, Neon, AWS RDS, Cloud SQL SSL connections
-    connectionTimeoutMillis: 10000,
+      : { rejectUnauthorized: false }, // Allows Neon, Supabase, Cloud SQL, Railway, Render
+    connectionTimeoutMillis: 8000,
     idleTimeoutMillis: 30000,
     max: 10,
   });

@@ -6,7 +6,6 @@ import { sound } from '../utils/sound';
 import confetti from 'canvas-confetti';
 import { AddBidSaleModal } from './AddBidSaleModal';
 import { AllLotsModal } from './AllLotsModal';
-import { VoiceBidAssistant } from './VoiceBidAssistant';
 import {
   Gavel,
   Plus,
@@ -24,8 +23,6 @@ import {
   ChevronRight,
   LayoutGrid,
   Layers,
-  Mic,
-  Volume2,
 } from 'lucide-react';
 
 interface BolliRoomViewProps {
@@ -79,7 +76,6 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
   const [isAddBidOpen, setIsAddBidOpen] = useState(false);
   const [isAllLotsOpen, setIsAllLotsOpen] = useState(false);
   const [filterTab, setFilterTab] = useState<'active' | 'completed' | 'all'>('active');
-  const [showVoiceAssistant, setShowVoiceAssistant] = useState(true);
 
   const selectedLot = lots.find((l) => l.id === selectedLotId) || lots[0];
 
@@ -457,23 +453,6 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => {
-                  sound.playPop();
-                  setShowVoiceAssistant(!showVoiceAssistant);
-                }}
-                className={`px-3.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-1.5 border shadow-2xs active:scale-95 font-urdu-sans ${
-                  showVoiceAssistant
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/30'
-                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                }`}
-                title="آواز سے اندراج آن/آف کریں"
-              >
-                <Mic className="w-4 h-4" />
-                <span>{showVoiceAssistant ? (isUrdu ? '🎙️ وائس موڈ آن' : 'Voice ON') : (isUrdu ? '🎙️ وائس موڈ' : 'Voice Bolli')}</span>
-              </button>
-
               {selectedLot.summary.remainingQuantity > 0 ? (
                 <button
                   onClick={() => setIsAddBidOpen(true)}
@@ -493,19 +472,6 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
               )}
             </div>
           </div>
-
-          {/* Live Urdu Voice Bid Assistant Bar */}
-          {showVoiceAssistant && selectedLot.summary.remainingQuantity > 0 && (
-            <VoiceBidAssistant
-              onAddSale={handleSaleAdded}
-              existingBuyers={recentBuyers}
-              settings={settings}
-              remainingLotQuantity={selectedLot.summary.remainingQuantity}
-              lotProductUrdu={selectedLot.productUrdu}
-              unitLabelUrdu={unitLabel}
-              onClose={() => setShowVoiceAssistant(false)}
-            />
-          )}
 
           {/* Sales Breakdown / Split Transactions Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">

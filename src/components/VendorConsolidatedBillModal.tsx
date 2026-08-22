@@ -5,6 +5,7 @@ import { translations, unitLabels } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt, generateVendorConsolidatedInvoiceCanvas } from '../utils/receiptGenerator';
+import { printVendorBillSlipA4 } from '../utils/printHelper';
 import {
   Printer,
   Copy,
@@ -16,6 +17,7 @@ import {
   X,
   Layers,
   Sparkles,
+  FileText,
 } from 'lucide-react';
 
 interface VendorConsolidatedBillModalProps {
@@ -348,17 +350,35 @@ ${productListText}
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95"
-            title="بند کریں"
+            className="w-9 h-9 rounded-xl bg-rose-600/90 hover:bg-rose-600 active:scale-90 text-white flex items-center justify-center transition shadow-md border border-rose-500"
+            title="بند کریں (Close)"
+            aria-label="Close"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 stroke-[2.5]" />
           </button>
         </div>
 
         {/* Action Toolbar */}
         <div className="bg-slate-900 border-b border-slate-800 p-2 sm:p-3 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 flex-wrap">
-            {/* 80mm POS Thermal Print */}
+            {/* 1. Full Page / A4 Clean Print Engine */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                sound.playTick();
+                printVendorBillSlipA4(vendorName, vendorPhone, vendorCity, lots, settings, displayDate);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 active:scale-95 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition shadow-md border border-slate-700"
+              title="پرنٹ کریں (A4 / معیاری پرنٹر)"
+              aria-label="Print A4"
+            >
+              <Printer className="w-4 h-4 text-emerald-400 stroke-[2.2]" />
+              <span>{isUrdu ? 'پرنٹ' : 'Print'}</span>
+            </button>
+
+            {/* 2. 80mm POS Thermal Print */}
             <button
               type="button"
               onClick={(e) => {
@@ -367,51 +387,63 @@ ${productListText}
                 sound.playTick();
                 printConsolidatedThermalPOSReceipt(vendorName, vendorPhone, vendorCity, lots, settings, displayDate);
               }}
-              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-md border border-amber-400"
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 active:scale-95 text-slate-950 text-xs font-black font-urdu-sans flex items-center gap-1.5 transition shadow-md border border-amber-400"
               title="80mm تھرمل پرنٹر پر پرچی پرنٹ کریں"
+              aria-label="POS Thermal Print"
             >
-              <Printer className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>{isUrdu ? '🖨️ POS پرنٹ' : '🖨️ POS Print'}</span>
+              <FileText className="w-4 h-4 stroke-[2.5]" />
+              <span>{isUrdu ? '80mm تھرمل' : '80mm POS'}</span>
             </button>
 
+            {/* 3. Preview */}
             <button
               type="button"
               onClick={handleOpenPreview}
               disabled={isGeneratingImage}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 border border-slate-700 disabled:opacity-50"
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition border border-slate-700 disabled:opacity-50"
+              title="پیش نظارہ (Preview)"
+              aria-label="Preview"
             >
-              <Eye className="w-3.5 h-3.5 text-sky-400" />
+              <Eye className="w-4 h-4 text-sky-400" />
               <span>{isUrdu ? 'پیش نظارہ' : 'Preview'}</span>
             </button>
 
+            {/* 4. Copy Text */}
             <button
               type="button"
               onClick={handleCopyText}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 border border-slate-700"
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-bold transition border border-slate-700"
+              title={isCopied ? t.copied : t.copyText}
+              aria-label="Copy Text"
             >
-              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-              <span>{isCopied ? t.copied : t.copyText}</span>
+              {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-400" />}
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {/* 5. Download Image */}
             <button
               type="button"
               onClick={handleSaveImage}
               disabled={isGeneratingImage}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-sm transition active:scale-95 disabled:opacity-50"
+              className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 active:scale-95 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-sm transition disabled:opacity-50"
+              title="تصویر ڈاؤن لوڈ کریں (Download Image)"
+              aria-label="Download Image"
             >
-              {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              <span>{isUrdu ? 'تصویر محفوظ' : 'Save Image'}</span>
+              {isGeneratingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 stroke-[2.2]" />}
+              <span>{isUrdu ? 'تصویر' : 'Image'}</span>
             </button>
 
+            {/* 6. WhatsApp Share */}
             <button
               type="button"
               onClick={handleShareWhatsApp}
               disabled={isGeneratingImage}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs font-urdu-sans flex items-center gap-1.5 shadow-md transition active:scale-95 disabled:opacity-50"
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-xs font-urdu-sans flex items-center gap-1.5 shadow-md transition disabled:opacity-50"
+              title="واٹس ایپ پر شیئر کریں (Share WhatsApp)"
+              aria-label="Share WhatsApp"
             >
-              {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageCircle className="w-3.5 h-3.5 fill-current" />}
+              {isGeneratingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4 fill-current" />}
               <span>{isUrdu ? 'واٹس ایپ' : 'WhatsApp'}</span>
             </button>
           </div>
@@ -463,7 +495,7 @@ ${productListText}
               </p>
 
               <div className="inline-block mt-2 px-3 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-bold text-slate-900">
-                پکی پرچی بل برائے زمیندار (Vendor Bill Slip)
+                پکی پرچی بل برائے زمیندار
               </div>
             </div>
 
@@ -482,9 +514,9 @@ ${productListText}
               </div>
 
               <div className="text-start">
-                <span className="text-[10px] text-slate-500 font-bold block">کل اجناس / لاٹس:</span>
+                <span className="text-[10px] text-slate-500 font-bold block">کل اجناس:</span>
                 <strong className="text-slate-800 text-xs block">
-                  {lots.length} لاٹ • {totals.totalQuantity} کل نگ
+                  {lots.length} آئٹم • {totals.totalQuantity} کل نگ
                 </strong>
               </div>
 
@@ -501,7 +533,7 @@ ${productListText}
                   <tr className="bg-slate-100 text-slate-900 border-b border-slate-300 font-bold">
                     <th className="py-2 px-2 text-start w-6">#</th>
                     <th className="py-2 px-2 text-start">تفصیلِ جنس</th>
-                    <th className="py-2 px-2 text-center">تعداد (یونٹ)</th>
+                    <th className="py-2 px-2 text-center">تعداد بمعہ پیکنگ</th>
                     <th className="py-2 px-2 text-end">ریٹ</th>
                     <th className="py-2 px-2.5 text-end">کل رقم</th>
                   </tr>
@@ -512,7 +544,6 @@ ${productListText}
                       <td className="py-1.5 px-2 font-mono text-slate-500">{idx + 1}</td>
                       <td className="py-1.5 px-2 font-bold text-slate-900 font-urdu-nastaliq">
                         {item.productUrdu}
-                        <span className="text-[10px] font-normal text-slate-500 block">لاٹ #{item.lotNumber}</span>
                       </td>
                       <td className="py-1.5 px-2 text-center font-bold text-slate-900">
                         {item.quantity} {item.unitLabel}
@@ -529,7 +560,7 @@ ${productListText}
                 <tfoot>
                   <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-slate-950">
                     <td colSpan={3} className="py-2 px-2 text-start">
-                      مجموعی کل فروخت (Gross Total Sales):
+                      مجموعی کل فروخت:
                     </td>
                     <td colSpan={2} className="py-2 px-2.5 text-end font-mono text-sm">
                       {formatPKR(totals.grossSales, settings.currencySymbol, settings.language)}
@@ -542,7 +573,7 @@ ${productListText}
             {/* ALL EXPENSES / KATOTE (کٹوتیاں) LISTED DIRECTLY BELOW THE TABLE */}
             <div className="bg-rose-50/50 border border-rose-200 rounded-lg p-3 space-y-1.5 text-xs">
               <div className="font-bold text-slate-900 text-xs border-b border-rose-200/80 pb-1 flex justify-between items-center">
-                <span>منہا کٹوتیاں و اخراجات (Katote):</span>
+                <span>منہا کٹوتیاں و اخراجات:</span>
                 <span className="text-rose-700 font-mono font-bold">
                   -{formatPKR(totals.totalExpenses, settings.currencySymbol, settings.language)}
                 </span>
@@ -551,7 +582,7 @@ ${productListText}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-slate-700 text-[11px] pt-1">
                 {totals.expenses.commission > 0 && (
                   <div className="flex justify-between">
-                    <span>کمیشن (Commission):</span>
+                    <span>کمیشن:</span>
                     <span className="font-bold text-slate-900 font-mono">
                       -{formatPKR(totals.expenses.commission, '', 'en')}
                     </span>
@@ -560,7 +591,7 @@ ${productListText}
 
                 {totals.expenses.kiraya > 0 && (
                   <div className="flex justify-between">
-                    <span>کرایہ گاڑی (Freight):</span>
+                    <span>کرایہ گاڑی:</span>
                     <span className="font-bold text-slate-900 font-mono">
                       -{formatPKR(totals.expenses.kiraya, '', 'en')}
                     </span>
@@ -569,7 +600,7 @@ ${productListText}
 
                 {totals.expenses.mazdoori > 0 && (
                   <div className="flex justify-between">
-                    <span>مزدوری (Labor):</span>
+                    <span>مزدوری:</span>
                     <span className="font-bold text-slate-900 font-mono">
                       -{formatPKR(totals.expenses.mazdoori, '', 'en')}
                     </span>
@@ -578,7 +609,7 @@ ${productListText}
 
                 {totals.expenses.munshiana > 0 && (
                   <div className="flex justify-between">
-                    <span>منشیانہ (Munshiana):</span>
+                    <span>منشیانہ:</span>
                     <span className="font-bold text-slate-900 font-mono">
                       -{formatPKR(totals.expenses.munshiana, '', 'en')}
                     </span>
@@ -587,7 +618,7 @@ ${productListText}
 
                 {totals.expenses.naqdAdvance > 0 && (
                   <div className="flex justify-between">
-                    <span>نقد پیشگی (Advance):</span>
+                    <span>نقد پیشگی (ایڈوانس):</span>
                     <span className="font-bold text-slate-900 font-mono">
                       -{formatPKR(totals.expenses.naqdAdvance, '', 'en')}
                     </span>
@@ -596,7 +627,7 @@ ${productListText}
 
                 {totals.expenses.marketFee > 0 && (
                   <div className="flex justify-between">
-                    <span>مارکیٹ فیس (Market Fee):</span>
+                    <span>مارکیٹ فیس:</span>
                     <span className="font-bold text-slate-900 font-mono">
                       -{formatPKR(totals.expenses.marketFee, '', 'en')}
                     </span>
@@ -605,7 +636,7 @@ ${productListText}
 
                 {totals.expenses.customExpensesTotal > 0 && (
                   <div className="flex justify-between">
-                    <span>دیگر اخراجات (Other):</span>
+                    <span>دیگر کٹوتیاں:</span>
                     <span className="font-bold text-slate-900 font-mono">
                       -{formatPKR(totals.expenses.customExpensesTotal, '', 'en')}
                     </span>
@@ -617,7 +648,7 @@ ${productListText}
             {/* PROMINENT NET PAYABLE BOX (صافی میزان برائے ادائیگی) */}
             <div className="border-2 border-slate-900 rounded-lg p-3 text-center bg-slate-50 space-y-1">
               <div className="text-xs font-bold text-slate-700">
-                صافی میزان برائے ادائیگی (Net Payable Amount):
+                صافی رقم برائے ادائیگی:
               </div>
               <div className="text-2xl sm:text-3xl font-black font-numbers text-slate-950">
                 {formatPKR(totals.netPayable, settings.currencySymbol, settings.language)}
@@ -633,7 +664,7 @@ ${productListText}
                     : 'bg-amber-100 text-amber-900 border-amber-300'
                 }`}
               >
-                {isFullyPaid ? '✅ مکمل ادائیگی ہو چکی ہے (PAID)' : '⏳ رقم کی ادائیگی بقایا ہے (PAYMENT PENDING)'}
+                {isFullyPaid ? '✅ تمام رقم ادا شدہ ہے' : '⏳ رقم کی ادائیگی بقایا ہے'}
               </span>
             </div>
 

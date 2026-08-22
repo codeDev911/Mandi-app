@@ -121,7 +121,7 @@ function addPDFHeader(doc: jsPDF, settings: AppSettings, reportTitle: string, pe
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.setTextColor(20, 20, 20);
-  const titleText = settings.shopNameUrdu || settings.shopNameEn || 'SABZI & PHAL MANDI COMMISSION SHOP';
+  const titleText = settings.shopNameEn || 'SABZI & PHAL MANDI COMMISSION SHOP';
   doc.text(titleText, pageWidth / 2, currentY, { align: 'center' });
   currentY += 6;
 
@@ -129,8 +129,8 @@ function addPDFHeader(doc: jsPDF, settings: AppSettings, reportTitle: string, pe
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9.5);
   doc.setTextColor(80, 80, 80);
-  const shopAddr = settings.shopAddressUrdu || settings.shopAddressEn || '';
-  const subText = `${settings.arhtiNameUrdu || settings.arhtiNameEn || 'Arhti'} | Phone: ${settings.shopPhone || ''} ${shopAddr ? `| ${shopAddr}` : ''}`;
+  const shopAddr = settings.shopAddressEn || '';
+  const subText = `${settings.arhtiNameEn || 'Arhti Commission Agent'} | Phone: ${settings.shopPhone || ''} ${shopAddr ? `| ${shopAddr}` : ''}`;
   doc.text(subText, pageWidth / 2, currentY, { align: 'center' });
   currentY += 6;
 
@@ -379,7 +379,6 @@ export function buildReportPDF({
   } else if (reportType === 'date') {
     const tableBody = dateRows.map((row, idx) => [
       idx + 1,
-      row.lotNumber,
       row.date,
       row.vendor,
       row.product,
@@ -391,7 +390,7 @@ export function buildReportPDF({
 
     autoTable(doc, {
       startY: currentY,
-      head: [['#', 'Lot #', 'Arrival Date', 'Vendor (Zamindar)', 'Product', 'Sold/Total', 'Gross Sale', 'Commission', 'Net to Vendor']],
+      head: [['#', 'Date', 'Vendor (Zamindar)', 'Product', 'Sold/Total', 'Gross Sale', 'Commission', 'Net to Vendor']],
       body: tableBody,
       theme: 'grid',
       headStyles: {
@@ -407,17 +406,15 @@ export function buildReportPDF({
       },
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
-        1: { halign: 'center', fontStyle: 'bold' },
-        2: { halign: 'center' },
-        5: { halign: 'center' },
-        6: { halign: 'right', fontStyle: 'bold' },
-        7: { halign: 'right', textColor: [15, 120, 50] },
-        8: { halign: 'right' },
+        1: { halign: 'center' },
+        4: { halign: 'center' },
+        5: { halign: 'right', fontStyle: 'bold' },
+        6: { halign: 'right', textColor: [15, 120, 50] },
+        7: { halign: 'right' },
       },
       foot: [[
         'Total',
-        `${dateRows.length} Lots`,
-        '',
+        `${dateRows.length} Items`,
         '',
         '',
         dateRows.reduce((a, b) => a + b.soldQty, 0),
@@ -636,12 +633,11 @@ export function buildEntireRecordReportPDF({
   doc.setFontSize(10.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 80, 50);
-  doc.text('1. ALL LOTS SUMMARY (ARRIVAL, COMMODITIES & FINANCIALS)', 14, currentY);
+  doc.text('1. ALL COMMODITIES SUMMARY (ARRIVAL, COMMODITIES & FINANCIALS)', 14, currentY);
   currentY += 3;
 
   const lotRows = lots.map((l, idx) => [
     idx + 1,
-    l.lotNumber,
     l.arrivalDate,
     `${l.vendorName} ${l.vendorCity ? `(${l.vendorCity})` : ''}`,
     `${l.productUrdu || l.productName} (${l.unitType})`,
@@ -653,24 +649,22 @@ export function buildEntireRecordReportPDF({
 
   autoTable(doc, {
     startY: currentY,
-    head: [['#', 'Lot #', 'Date', 'Vendor (Zamindar)', 'Commodity', 'Sold / Total', 'Gross Sale', 'Commission', 'Net Payable']],
+    head: [['#', 'Date', 'Vendor (Zamindar)', 'Commodity', 'Sold / Total', 'Gross Sale', 'Commission', 'Net Payable']],
     body: lotRows,
     theme: 'grid',
     headStyles: { fillColor: [15, 80, 50], textColor: 255, fontSize: 8, fontStyle: 'bold' },
     styles: { fontSize: 7.5, cellPadding: 2 },
     columnStyles: {
       0: { cellWidth: 7, halign: 'center' },
-      1: { halign: 'center', fontStyle: 'bold' },
-      2: { halign: 'center' },
-      5: { halign: 'center' },
-      6: { halign: 'right', fontStyle: 'bold' },
-      7: { halign: 'right', textColor: [15, 120, 50] },
-      8: { halign: 'right', fontStyle: 'bold' },
+      1: { halign: 'center' },
+      4: { halign: 'center' },
+      5: { halign: 'right', fontStyle: 'bold' },
+      6: { halign: 'right', textColor: [15, 120, 50] },
+      7: { halign: 'right', fontStyle: 'bold' },
     },
     foot: [[
       'Total',
-      `${lots.length} Lots`,
-      '',
+      `${lots.length} Items`,
       '',
       '',
       `${totalSold} / ${totalUnits}`,
@@ -691,8 +685,8 @@ export function buildEntireRecordReportPDF({
   currentY += 4;
 
   const detailedSalesRows = lots.flatMap((l) =>
-    l.sales.map((s) => [
-      l.lotNumber,
+    l.sales.map((s, sIdx) => [
+      sIdx + 1,
       l.arrivalDate,
       l.productUrdu || l.productName,
       s.buyerName,
@@ -706,13 +700,13 @@ export function buildEntireRecordReportPDF({
 
   autoTable(doc, {
     startY: currentY,
-    head: [['Lot #', 'Date', 'Commodity', 'Buyer (Customer)', 'Qty', 'Rate', 'Total Amount', 'Payment', 'Vendor']],
+    head: [['#', 'Date', 'Commodity', 'Buyer (Customer)', 'Qty', 'Rate', 'Total Amount', 'Payment', 'Vendor']],
     body: detailedSalesRows,
     theme: 'grid',
     headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 8, fontStyle: 'bold' },
     styles: { fontSize: 7.5, cellPadding: 2 },
     columnStyles: {
-      0: { halign: 'center', fontStyle: 'bold' },
+      0: { cellWidth: 7, halign: 'center' },
       1: { halign: 'center' },
       4: { halign: 'center' },
       5: { halign: 'center' },
