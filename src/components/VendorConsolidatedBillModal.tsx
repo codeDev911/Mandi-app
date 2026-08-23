@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import html2canvas from 'html2canvas';
+import React, { useState, useEffect } from 'react';
+import jsPDF from 'jspdf';
 import { VendorLot, AppSettings } from '../types';
 import { translations, unitLabels } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
@@ -13,11 +13,15 @@ import {
   Download,
   Loader2,
   MessageCircle,
-  Eye,
   X,
   Layers,
   Sparkles,
   FileText,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Share2,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface VendorConsolidatedBillModalProps {
@@ -45,13 +49,25 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   const isUrdu = settings.language === 'ur';
 
   const [isCopied, setIsCopied] = useState(false);
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [shareSuccessToast, setShareSuccessToast] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-  const [copiedImageStatus, setCopiedImageStatus] = useState(false);
-  const printableRef = useRef<HTMLDivElement>(null);
+  const [isRenderingCanvas, setIsRenderingCanvas] = useState<boolean>(true);
+  const [zoomLevel, setZoomLevel] = useState<number>(100);
 
-  if (!isOpen || lots.length === 0) return null;
+  const displayDate = dateLabel || lots[0]?.arrivalDate || new Date().toISOString().slice(0, 10);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   // Aggregate totals across all vendor lots
   const totals = lots.reduce(
@@ -106,7 +122,6 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     }
   );
 
-  const displayDate = dateLabel || lots[0]?.arrivalDate || new Date().toISOString().slice(0, 10);
   const isFullyPaid = totals.totalPaid >= totals.netPayable && totals.netPayable > 0;
 
   // Flatten all sales from all lots into single unified line items
@@ -122,7 +137,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   }> = [];
 
   lots.forEach((lot) => {
-    const uLabel = unitLabels[lot.unitType][settings.language];
+    const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
     if (lot.sales && lot.sales.length > 0) {
       lot.sales.forEach((s) => {
         allProductItems.push({
@@ -137,7 +152,6 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
         });
       });
     } else {
-      // If no separate sales rows yet, show the lot as single item
       allProductItems.push({
         lotNumber: lot.lotNumber,
         productName: lot.productName,
@@ -150,31 +164,87 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     }
   });
 
-  // Helper to safely generate PNG DataURL & Blob
-  const getReceiptImage = async (): Promise<{ dataUrl: string; blob: Blob }> => {
-    if (printableRef.current) {
+  // Generate High-Resolution PDF Canvas preview immediately on open / lot change
+  useEffect(() => {
+    if (!isOpen || lots.length === 0) {
+      setPreviewImageUrl(null);
+      return;
+    }
+
+    setIsRenderingCanvas(true);
+
+    const generatePreview = async () => {
       try {
-        const canvas = await html2canvas(printableRef.current, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-        });
-
-        const dataUrl = canvas.toDataURL('image/png');
-        const blob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob((b) => resolve(b), 'image/png', 0.95)
-        );
-
-        if (blob && dataUrl && dataUrl.length > 500) {
-          return { dataUrl, blob };
+        if (document.fonts && document.fonts.ready) {
+          await document.fonts.ready;
         }
-      } catch (domErr) {
-        console.warn('DOM html2canvas fallback to standalone canvas generator:', domErr);
+      } catch {
+        // ignore
+      }
+
+      try {
+        const canvas = generateVendorConsolidatedInvoiceCanvas(
+          vendorName,
+          vendorPhone,
+          vendorCity,
+          lots,
+          settings,
+          displayDate
+        );
+        const dataUrl = canvas.toDataURL('image/png', 0.98);
+        setPreviewImageUrl(dataUrl);
+      } catch (err) {
+        console.error('Error generating vendor bill PDF canvas preview:', err);
+      } finally {
+        setIsRenderingCanvas(false);
+      }
+    };
+
+    const timer = setTimeout(generatePreview, 60);
+    return () => clearTimeout(timer);
+  }, [isOpen, vendorName, vendorPhone, vendorCity, lots, settings, displayDate]);
+
+  if (!isOpen || lots.length === 0) return null;
+
+  const showToast = (msg: string) => {
+    setShareSuccessToast(msg);
+    setTimeout(() => setShareSuccessToast(null), 3500);
+  };
+
+  // Helper to reliably trigger browser / mobile download
+  const triggerSafeDownload = (blob: Blob, downloadFileName: string) => {
+    try {
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.style.display = 'none';
+      link.href = url;
+      link.download = downloadFileName;
+      link.target = '_self';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (document.body.contains(link)) {
+          document.body.removeChild(link);
+        }
+        window.URL.revokeObjectURL(url);
+      }, 4000);
+    } catch (e) {
+      console.error('Trigger safe download error:', e);
+    }
+  };
+
+  // Build A4 PDF from High-Res 2D Canvas with exact Urdu calligraphy
+  const buildVendorBillPDF = async (): Promise<{ pdf: jsPDF; blob: Blob }> => {
+    if (document.fonts && document.fonts.ready) {
+      try {
+        await document.fonts.ready;
+      } catch {
+        // continue
       }
     }
 
-    const directCanvas = generateVendorConsolidatedInvoiceCanvas(
+    const canvas = generateVendorConsolidatedInvoiceCanvas(
       vendorName,
       vendorPhone,
       vendorCity,
@@ -182,54 +252,135 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       settings,
       displayDate
     );
-    const dataUrl = directCanvas.toDataURL('image/png');
-    const blob = await new Promise<Blob | null>((resolve) =>
-      directCanvas.toBlob((b) => resolve(b), 'image/png', 0.95)
-    );
 
-    if (!blob) throw new Error('Image creation failed');
-    return { dataUrl, blob };
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfPageWidth = 210;
+    const pdfPageHeight = 297;
+    const pxPageHeight = Math.floor((canvas.width * pdfPageHeight) / pdfPageWidth);
+    const totalCanvasHeight = canvas.height;
+    let renderedHeight = 0;
+    let pageIndex = 0;
+
+    while (renderedHeight < totalCanvasHeight) {
+      const sliceHeight = Math.min(pxPageHeight, totalCanvasHeight - renderedHeight);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeight;
+      const ctx = pageCanvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+        ctx.drawImage(
+          canvas,
+          0, renderedHeight, canvas.width, sliceHeight,
+          0, 0, canvas.width, sliceHeight
+        );
+      }
+      const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.95);
+      if (pageIndex > 0) {
+        pdf.addPage('a4', 'p');
+      }
+      const renderedSliceMmHeight = (sliceHeight * pdfPageWidth) / canvas.width;
+      pdf.addImage(pageImgData, 'JPEG', 0, 0, pdfPageWidth, renderedSliceMmHeight, undefined, 'FAST');
+      renderedHeight += sliceHeight;
+      pageIndex++;
+    }
+
+    const blob = pdf.output('blob');
+    return { pdf, blob };
   };
 
-  const triggerBrowserDownload = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 2000);
-  };
-
-  const handleSaveImage = async () => {
+  // 1. Direct PDF Download
+  const handleDownloadPDF = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     sound.playCashChime();
-    setIsGeneratingImage(true);
-    try {
-      const { blob } = await getReceiptImage();
-      const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
-      triggerBrowserDownload(blob, `Mandi_Vendor_Bill_${sanitizedName}_${displayDate}.png`);
+    setIsExportingPDF(true);
 
-      setShareSuccessToast(isUrdu ? 'بل کی تصویر محفوظ ہو گئی ہے!' : 'Bill image downloaded!');
-      setTimeout(() => setShareSuccessToast(null), 4000);
+    const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+    const finalPdfName = `Vendor_Bill_${sanitizedName}_${displayDate}.pdf`;
+
+    try {
+      const { pdf, blob } = await buildVendorBillPDF();
+      try {
+        pdf.save(finalPdfName);
+      } catch (saveErr) {
+        console.warn('pdf.save failed, using safe download trigger:', saveErr);
+        triggerSafeDownload(blob, finalPdfName);
+      }
+
+      showToast(isUrdu ? 'پی ڈی ایف بل پرچی کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill PDF downloaded successfully!');
     } catch (err) {
-      console.error('Error saving image:', err);
-      setShareSuccessToast(isUrdu ? 'تصویر تیار کرنے میں خرابی ہوئی' : 'Failed to generate image');
-      setTimeout(() => setShareSuccessToast(null), 3000);
+      console.error('PDF export error:', err);
+      try {
+        const canvas = generateVendorConsolidatedInvoiceCanvas(
+          vendorName,
+          vendorPhone,
+          vendorCity,
+          lots,
+          settings,
+          displayDate
+        );
+        canvas.toBlob((pngBlob) => {
+          if (pngBlob) {
+            triggerSafeDownload(pngBlob, `Vendor_Bill_${sanitizedName}_${displayDate}.png`);
+            showToast(isUrdu ? 'بل پرچی کی تصویر محفوظ کر لی گئی ہے' : 'Bill image downloaded successfully');
+          }
+        }, 'image/png', 0.95);
+      } catch {
+        showToast(isUrdu ? 'پی ڈی ایف ڈاؤن لوڈ میں خرابی پیش آئی' : 'Failed to download PDF');
+      }
     } finally {
-      setIsGeneratingImage(false);
+      setIsExportingPDF(false);
     }
   };
 
-  const handleShareWhatsApp = async () => {
+  // 2. Direct PNG Image Download
+  const handleSaveImage = () => {
     sound.playCashChime();
-    setIsGeneratingImage(true);
+    const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+    const filename = `Vendor_Bill_${sanitizedName}_${displayDate}.png`;
+
+    try {
+      const canvas = generateVendorConsolidatedInvoiceCanvas(
+        vendorName,
+        vendorPhone,
+        vendorCity,
+        lots,
+        settings,
+        displayDate
+      );
+      canvas.toBlob((blob) => {
+        if (blob) {
+          triggerSafeDownload(blob, filename);
+          showToast(isUrdu ? 'بل پرچی کی تصویر محفوظ ہو گئی ہے!' : 'Bill image downloaded!');
+        }
+      }, 'image/png', 0.98);
+    } catch (err) {
+      console.error('Save image error:', err);
+      showToast(isUrdu ? 'تصویر تیار کرنے میں خرابی ہوئی' : 'Failed to generate image');
+    }
+  };
+
+  // 3. Share via Web Share API / WhatsApp
+  const handleShare = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    sound.playCashChime();
+    setIsExportingPDF(true);
+
+    const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+    const finalPdfName = `Vendor_Bill_${sanitizedName}_${displayDate}.pdf`;
 
     const productListText = allProductItems
-      .map((item, idx) => `${idx + 1}. ${item.productUrdu}: ${item.quantity} ${item.unitLabel} @ Rs.${item.ratePerUnit} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`)
+      .map(
+        (item, idx) =>
+          `${idx + 1}. ${item.productUrdu}: ${item.quantity} ${item.unitLabel} @ Rs.${item.ratePerUnit} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`
+      )
       .join('\n');
 
     const messageText = `*${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}*
@@ -257,63 +408,32 @@ ${productListText}
       : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
 
     try {
-      const { blob } = await getReceiptImage();
-      const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
-      const filename = `Mandi_Vendor_Bill_${sanitizedName}_${displayDate}.png`;
+      const { blob } = await buildVendorBillPDF();
+      const pdfFile = new File([blob], finalPdfName, { type: 'application/pdf' });
 
-      try {
-        if (navigator.clipboard && window.ClipboardItem) {
-          const item = new ClipboardItem({ 'image/png': blob });
-          await navigator.clipboard.write([item]);
-          setCopiedImageStatus(true);
-          setTimeout(() => setCopiedImageStatus(false), 4000);
-        }
-      } catch (clipErr) {
-        console.warn('Clipboard write image not allowed, downloading fallback:', clipErr);
-      }
-
-      const file = new File([blob], filename, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
         await navigator.share({
-          files: [file],
+          files: [pdfFile],
           title: `بل رسید - ${vendorName}`,
           text: messageText,
         });
-        setShareSuccessToast(isUrdu ? 'واٹس ایپ پر بل بھیج دیا گیا!' : 'Bill shared successfully!');
-        setTimeout(() => setShareSuccessToast(null), 4000);
+        showToast(isUrdu ? 'پی ڈی ایف بل شیئر کر دیا گیا!' : 'PDF bill shared successfully!');
         return;
       }
 
-      triggerBrowserDownload(blob, filename);
+      // WhatsApp Fallback
+      triggerSafeDownload(blob, finalPdfName);
       window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-
-      setShareSuccessToast(
-        isUrdu
-          ? 'بل تصویر محفوظ ہو گئی ہے اور واٹس ایپ کھل گیا ہے۔'
-          : 'Bill downloaded & WhatsApp opened.'
-      );
-      setTimeout(() => setShareSuccessToast(null), 5000);
+      showToast(isUrdu ? 'پی ڈی ایف محفوظ ہو گئی اور واٹس ایپ کھل گیا ہے۔' : 'PDF downloaded & WhatsApp opened.');
     } catch (err) {
-      console.error('Share failed, opening text chat fallback:', err);
+      console.warn('Share error, opening whatsapp text fallback:', err);
       window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
     } finally {
-      setIsGeneratingImage(false);
+      setIsExportingPDF(false);
     }
   };
 
-  const handleOpenPreview = async () => {
-    sound.playTick();
-    setIsGeneratingImage(true);
-    try {
-      const { dataUrl } = await getReceiptImage();
-      setPreviewImageUrl(dataUrl);
-    } catch (err) {
-      console.error('Error generating preview:', err);
-    } finally {
-      setIsGeneratingImage(false);
-    }
-  };
-
+  // 4. Copy Text Summary
   const handleCopyText = () => {
     sound.playTick();
     const text = `*${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}*
@@ -326,400 +446,269 @@ ${productListText}
     navigator.clipboard.writeText(text);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
+    showToast(isUrdu ? 'متن کاپی ہو گیا!' : 'Text summary copied!');
+  };
+
+  // 5. Clean Universal A4 Print
+  const handlePrint = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    sound.playTick();
+    printVendorBillSlipA4(vendorName, vendorPhone, vendorCity, lots, settings, displayDate);
+  };
+
+  // 6. 80mm POS Thermal Print
+  const handleThermalPrint = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    sound.playTick();
+    printConsolidatedThermalPOSReceipt(vendorName, vendorPhone, vendorCity, lots, settings, displayDate);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm overflow-y-auto p-2 sm:p-4 flex items-center justify-center animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-slate-700 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden my-auto flex flex-col max-h-[96vh]">
-        
-        {/* Modal Top Bar */}
-        <div className="p-3 sm:p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between text-white">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
-              <Layers className="w-4 h-4" />
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex flex-col animate-in fade-in duration-200">
+      {/* Top Header Bar */}
+      <div className="flex-none bg-slate-900 border-b border-slate-800 px-3 sm:px-6 py-2.5 flex items-center justify-between shadow-lg z-20 gap-2">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          {/* Quick Back / Close Button on top-left/start */}
+          <button
+            type="button"
+            onClick={() => {
+              sound.playTick();
+              onClose();
+            }}
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-300 hover:text-white border border-slate-700 flex items-center justify-center transition shadow-xs flex-shrink-0"
+            title="واپس جائیں (Back / Close)"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
+          </button>
+
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shadow-xs flex-shrink-0 hidden sm:flex">
+            <Layers className="w-4 h-4 sm:w-5 sm:h-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <h2 className="text-xs sm:text-base font-black text-amber-300 font-urdu-nastaliq tracking-wide truncate">
+                {isUrdu ? 'پکی پرچی بل برائے زمیندار' : 'Vendor Bill Slip'}
+              </h2>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold flex-shrink-0">
+                {lots.length} {isUrdu ? 'لاٹ' : 'Lots'}
+              </span>
             </div>
-            <div>
-              <h3 className="font-bold text-sm sm:text-base font-urdu-nastaliq text-amber-200">
-                {isUrdu ? 'بل پرچی برائے زمیندار' : 'Vendor Bill Slip'}
-              </h3>
-              <p className="text-[11px] text-slate-400 font-urdu-sans">
-                {vendorName} {vendorCity ? `• ${vendorCity}` : ''} • {displayDate}
-              </p>
-            </div>
+            <p className="text-[11px] sm:text-xs text-slate-400 font-urdu-sans truncate">
+              {vendorName} {vendorCity ? `(${vendorCity})` : ''} • {displayDate}
+            </p>
+          </div>
+        </div>
+
+        {/* Action Controls & Close */}
+        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+          {/* Zoom Controls */}
+          <div className="hidden md:flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 text-slate-300">
+            <button
+              onClick={() => setZoomLevel((z) => Math.max(50, z - 15))}
+              className="p-1.5 hover:bg-slate-800 rounded-lg transition active:scale-95 text-slate-400 hover:text-white"
+              title="چھوٹا کریں (Zoom Out)"
+              aria-label="Zoom Out"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
+            <span className="px-2 text-xs font-mono font-bold text-slate-300 min-w-[3.5rem] text-center">
+              {zoomLevel}%
+            </span>
+            <button
+              onClick={() => setZoomLevel((z) => Math.min(180, z + 15))}
+              className="p-1.5 hover:bg-slate-800 rounded-lg transition active:scale-95 text-slate-400 hover:text-white"
+              title="بڑا کریں (Zoom In)"
+              aria-label="Zoom In"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setZoomLevel(100)}
+              className="p-1.5 hover:bg-slate-800 rounded-lg transition active:scale-95 text-slate-400 hover:text-white border-r border-slate-800"
+              title="ری سیٹ (Reset Zoom)"
+              aria-label="Reset Zoom"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
           </div>
 
+          {/* 1. Print A4 Button */}
           <button
-            onClick={onClose}
-            className="w-9 h-9 rounded-xl bg-rose-600/90 hover:bg-rose-600 active:scale-90 text-white flex items-center justify-center transition shadow-md border border-rose-500"
+            type="button"
+            onClick={handlePrint}
+            className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center transition active:scale-90 shadow-md"
+            title="پرنٹ کریں (Print A4 Slip)"
+            aria-label="Print A4"
+          >
+            <Printer className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.2]" />
+          </button>
+
+          {/* 2. 80mm POS Thermal Print */}
+          <button
+            type="button"
+            onClick={handleThermalPrint}
+            className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 border border-amber-400 text-slate-950 flex items-center justify-center transition active:scale-90 shadow-md font-bold"
+            title="80mm تھرمل پرنٹر (POS Thermal Receipt)"
+            aria-label="Thermal Receipt"
+          >
+            <FileText className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+          </button>
+
+          {/* 3. Download PDF Button */}
+          <button
+            type="button"
+            onClick={handleDownloadPDF}
+            disabled={isExportingPDF}
+            className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 border border-emerald-400 text-white flex items-center justify-center transition active:scale-90 shadow-md disabled:opacity-50"
+            title="پی ڈی ایف ڈاؤن لوڈ کریں (Download PDF Slip)"
+            aria-label="Download PDF"
+          >
+            {isExportingPDF ? (
+              <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+            )}
+          </button>
+
+          {/* 4. WhatsApp / Share Button */}
+          <button
+            type="button"
+            onClick={handleShare}
+            disabled={isExportingPDF}
+            className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-500 hover:bg-emerald-400 border border-emerald-400 text-slate-950 flex items-center justify-center transition active:scale-90 shadow-md disabled:opacity-50"
+            title="واٹس ایپ یا پی ڈی ایف شیئر کریں (Share Bill)"
+            aria-label="Share"
+          >
+            <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 fill-current stroke-none" />
+          </button>
+
+          {/* 5. Copy Text Button */}
+          <button
+            type="button"
+            onClick={handleCopyText}
+            className="hidden sm:flex w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 items-center justify-center transition active:scale-90 shadow-sm"
+            title={isCopied ? t.copied : t.copyText}
+            aria-label="Copy Text"
+          >
+            {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-400" />}
+          </button>
+
+          {/* 6. Highly Visible Close Modal Button */}
+          <button
+            type="button"
+            onClick={() => {
+              sound.playTick();
+              onClose();
+            }}
+            className="h-8 px-2.5 sm:h-10 sm:px-3.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 border border-rose-400 text-white flex items-center justify-center gap-1 transition active:scale-90 shadow-lg font-bold font-urdu-sans text-xs ml-1"
             title="بند کریں (Close)"
             aria-label="Close"
           >
-            <X className="w-5 h-5 stroke-[2.5]" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+            <span className="hidden sm:inline">{isUrdu ? 'بند کریں' : 'Close'}</span>
           </button>
-        </div>
-
-        {/* Action Toolbar */}
-        <div className="bg-slate-900 border-b border-slate-800 p-2 sm:p-3 flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {/* 1. Full Page / A4 Clean Print Engine */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                sound.playTick();
-                printVendorBillSlipA4(vendorName, vendorPhone, vendorCity, lots, settings, displayDate);
-              }}
-              className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 active:scale-95 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition shadow-md border border-slate-700"
-              title="پرنٹ کریں (A4 / معیاری پرنٹر)"
-              aria-label="Print A4"
-            >
-              <Printer className="w-4 h-4 text-emerald-400 stroke-[2.2]" />
-              <span>{isUrdu ? 'پرنٹ' : 'Print'}</span>
-            </button>
-
-            {/* 2. 80mm POS Thermal Print */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                sound.playTick();
-                printConsolidatedThermalPOSReceipt(vendorName, vendorPhone, vendorCity, lots, settings, displayDate);
-              }}
-              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 active:scale-95 text-slate-950 text-xs font-black font-urdu-sans flex items-center gap-1.5 transition shadow-md border border-amber-400"
-              title="80mm تھرمل پرنٹر پر پرچی پرنٹ کریں"
-              aria-label="POS Thermal Print"
-            >
-              <FileText className="w-4 h-4 stroke-[2.5]" />
-              <span>{isUrdu ? '80mm تھرمل' : '80mm POS'}</span>
-            </button>
-
-            {/* 3. Preview */}
-            <button
-              type="button"
-              onClick={handleOpenPreview}
-              disabled={isGeneratingImage}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition border border-slate-700 disabled:opacity-50"
-              title="پیش نظارہ (Preview)"
-              aria-label="Preview"
-            >
-              <Eye className="w-4 h-4 text-sky-400" />
-              <span>{isUrdu ? 'پیش نظارہ' : 'Preview'}</span>
-            </button>
-
-            {/* 4. Copy Text */}
-            <button
-              type="button"
-              onClick={handleCopyText}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-bold transition border border-slate-700"
-              title={isCopied ? t.copied : t.copyText}
-              aria-label="Copy Text"
-            >
-              {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-400" />}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            {/* 5. Download Image */}
-            <button
-              type="button"
-              onClick={handleSaveImage}
-              disabled={isGeneratingImage}
-              className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 active:scale-95 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-sm transition disabled:opacity-50"
-              title="تصویر ڈاؤن لوڈ کریں (Download Image)"
-              aria-label="Download Image"
-            >
-              {isGeneratingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 stroke-[2.2]" />}
-              <span>{isUrdu ? 'تصویر' : 'Image'}</span>
-            </button>
-
-            {/* 6. WhatsApp Share */}
-            <button
-              type="button"
-              onClick={handleShareWhatsApp}
-              disabled={isGeneratingImage}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-xs font-urdu-sans flex items-center gap-1.5 shadow-md transition disabled:opacity-50"
-              title="واٹس ایپ پر شیئر کریں (Share WhatsApp)"
-              aria-label="Share WhatsApp"
-            >
-              {isGeneratingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4 fill-current" />}
-              <span>{isUrdu ? 'واٹس ایپ' : 'WhatsApp'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Toast Notification */}
-        {shareSuccessToast && (
-          <div className="bg-emerald-950 border-b border-emerald-600/40 text-emerald-200 px-4 py-2 text-xs font-bold font-urdu-sans flex items-center justify-between gap-2 animate-in fade-in">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <span>{shareSuccessToast}</span>
-            </div>
-            {copiedImageStatus && (
-              <span className="text-[11px] px-2 py-0.5 bg-emerald-800 text-white rounded-md font-normal">
-                📋 تصویر کاپی ہے
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Scrollable View Area */}
-        <div className="p-3 sm:p-5 overflow-y-auto bg-slate-950/40 space-y-4 flex justify-center">
-          
-          {/* THE SIMPLE VENDOR BILL (ALL PRODUCTS IN ONE TABLE, ALL EXPENSES DIRECTLY BELOW) */}
-          <div
-            ref={printableRef}
-            id="consolidated-mandi-receipt"
-            className="w-full max-w-lg bg-white text-slate-900 rounded-xl border border-slate-300 shadow-xl p-5 sm:p-6 space-y-4 font-urdu-sans print:border-none print:shadow-none print:m-0 print:p-2 print:max-w-none print:w-full"
-            style={{
-              fontFamily: "'Noto Nastaliq Urdu', 'Noto Sans Arabic', Tahoma, sans-serif",
-            }}
-          >
-            {/* Header: Shop Details */}
-            <div className="text-center space-y-1 pb-3 border-b-2 border-slate-900">
-              <div className="font-urdu-nastaliq text-sm font-bold text-slate-900">
-                بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ
-              </div>
-
-              <h1 className="text-2xl font-black font-urdu-nastaliq text-slate-950 leading-tight">
-                {isUrdu ? settings.shopNameUrdu : settings.shopNameEn}
-              </h1>
-
-              <p className="text-xs font-semibold text-slate-800">
-                پروپرائٹر: <span className="font-bold font-urdu-nastaliq">{isUrdu ? settings.arhtiNameUrdu : settings.arhtiNameEn}</span>
-              </p>
-
-              <p className="text-xs text-slate-600">
-                📍 {isUrdu ? settings.shopAddressUrdu : settings.shopAddressEn} • 📞 فون: {settings.shopPhone}
-              </p>
-
-              <div className="inline-block mt-2 px-3 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-bold text-slate-900">
-                پکی پرچی بل برائے زمیندار
-              </div>
-            </div>
-
-            {/* Bill Metadata Grid */}
-            <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-              <div className="text-start">
-                <span className="text-[10px] text-slate-500 font-bold block">زمیندار / کاشتکار:</span>
-                <strong className="text-slate-950 font-bold font-urdu-nastaliq text-sm block truncate">
-                  {vendorName} {vendorCity ? `(${vendorCity})` : ''}
-                </strong>
-              </div>
-
-              <div className="text-start">
-                <span className="text-[10px] text-slate-500 font-bold block">تاریخ حساب:</span>
-                <strong className="text-slate-900 font-mono text-xs font-bold block">{displayDate}</strong>
-              </div>
-
-              <div className="text-start">
-                <span className="text-[10px] text-slate-500 font-bold block">کل اجناس:</span>
-                <strong className="text-slate-800 text-xs block">
-                  {lots.length} آئٹم • {totals.totalQuantity} کل نگ
-                </strong>
-              </div>
-
-              <div className="text-start">
-                <span className="text-[10px] text-slate-500 font-bold block">رابطہ فون:</span>
-                <strong className="text-slate-700 font-mono text-xs block">{vendorPhone || settings.shopPhone}</strong>
-              </div>
-            </div>
-
-            {/* ONE SINGLE TABLE FOR ALL PRODUCTS */}
-            <div className="border border-slate-300 rounded-lg overflow-hidden">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-900 border-b border-slate-300 font-bold">
-                    <th className="py-2 px-2 text-start w-6">#</th>
-                    <th className="py-2 px-2 text-start">تفصیلِ جنس</th>
-                    <th className="py-2 px-2 text-center">تعداد بمعہ پیکنگ</th>
-                    <th className="py-2 px-2 text-end">ریٹ</th>
-                    <th className="py-2 px-2.5 text-end">کل رقم</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {allProductItems.map((item, idx) => (
-                    <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                      <td className="py-1.5 px-2 font-mono text-slate-500">{idx + 1}</td>
-                      <td className="py-1.5 px-2 font-bold text-slate-900 font-urdu-nastaliq">
-                        {item.productUrdu}
-                      </td>
-                      <td className="py-1.5 px-2 text-center font-bold text-slate-900">
-                        {item.quantity} {item.unitLabel}
-                      </td>
-                      <td className="py-1.5 px-2 text-end font-mono text-slate-700">
-                        Rs.{item.ratePerUnit.toLocaleString()}
-                      </td>
-                      <td className="py-1.5 px-2.5 text-end font-bold text-slate-950 font-mono">
-                        {formatPKR(item.totalAmount, '', 'en')}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-slate-950">
-                    <td colSpan={3} className="py-2 px-2 text-start">
-                      مجموعی کل فروخت:
-                    </td>
-                    <td colSpan={2} className="py-2 px-2.5 text-end font-mono text-sm">
-                      {formatPKR(totals.grossSales, settings.currencySymbol, settings.language)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-
-            {/* ALL EXPENSES / KATOTE (کٹوتیاں) LISTED DIRECTLY BELOW THE TABLE */}
-            <div className="bg-rose-50/50 border border-rose-200 rounded-lg p-3 space-y-1.5 text-xs">
-              <div className="font-bold text-slate-900 text-xs border-b border-rose-200/80 pb-1 flex justify-between items-center">
-                <span>منہا کٹوتیاں و اخراجات:</span>
-                <span className="text-rose-700 font-mono font-bold">
-                  -{formatPKR(totals.totalExpenses, settings.currencySymbol, settings.language)}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-slate-700 text-[11px] pt-1">
-                {totals.expenses.commission > 0 && (
-                  <div className="flex justify-between">
-                    <span>کمیشن:</span>
-                    <span className="font-bold text-slate-900 font-mono">
-                      -{formatPKR(totals.expenses.commission, '', 'en')}
-                    </span>
-                  </div>
-                )}
-
-                {totals.expenses.kiraya > 0 && (
-                  <div className="flex justify-between">
-                    <span>کرایہ گاڑی:</span>
-                    <span className="font-bold text-slate-900 font-mono">
-                      -{formatPKR(totals.expenses.kiraya, '', 'en')}
-                    </span>
-                  </div>
-                )}
-
-                {totals.expenses.mazdoori > 0 && (
-                  <div className="flex justify-between">
-                    <span>مزدوری:</span>
-                    <span className="font-bold text-slate-900 font-mono">
-                      -{formatPKR(totals.expenses.mazdoori, '', 'en')}
-                    </span>
-                  </div>
-                )}
-
-                {totals.expenses.munshiana > 0 && (
-                  <div className="flex justify-between">
-                    <span>منشیانہ:</span>
-                    <span className="font-bold text-slate-900 font-mono">
-                      -{formatPKR(totals.expenses.munshiana, '', 'en')}
-                    </span>
-                  </div>
-                )}
-
-                {totals.expenses.naqdAdvance > 0 && (
-                  <div className="flex justify-between">
-                    <span>نقد پیشگی (ایڈوانس):</span>
-                    <span className="font-bold text-slate-900 font-mono">
-                      -{formatPKR(totals.expenses.naqdAdvance, '', 'en')}
-                    </span>
-                  </div>
-                )}
-
-                {totals.expenses.marketFee > 0 && (
-                  <div className="flex justify-between">
-                    <span>مارکیٹ فیس:</span>
-                    <span className="font-bold text-slate-900 font-mono">
-                      -{formatPKR(totals.expenses.marketFee, '', 'en')}
-                    </span>
-                  </div>
-                )}
-
-                {totals.expenses.customExpensesTotal > 0 && (
-                  <div className="flex justify-between">
-                    <span>دیگر کٹوتیاں:</span>
-                    <span className="font-bold text-slate-900 font-mono">
-                      -{formatPKR(totals.expenses.customExpensesTotal, '', 'en')}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* PROMINENT NET PAYABLE BOX (صافی میزان برائے ادائیگی) */}
-            <div className="border-2 border-slate-900 rounded-lg p-3 text-center bg-slate-50 space-y-1">
-              <div className="text-xs font-bold text-slate-700">
-                صافی رقم برائے ادائیگی:
-              </div>
-              <div className="text-2xl sm:text-3xl font-black font-numbers text-slate-950">
-                {formatPKR(totals.netPayable, settings.currencySymbol, settings.language)}
-              </div>
-            </div>
-
-            {/* Payment Status Badge */}
-            <div className="text-center">
-              <span
-                className={`inline-block px-3 py-1 rounded-full text-xs font-bold border ${
-                  isFullyPaid
-                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                    : 'bg-amber-100 text-amber-900 border-amber-300'
-                }`}
-              >
-                {isFullyPaid ? '✅ تمام رقم ادا شدہ ہے' : '⏳ رقم کی ادائیگی بقایا ہے'}
-              </span>
-            </div>
-
-            {/* Signatures */}
-            <div className="pt-6 border-t border-slate-300 flex justify-between items-center text-xs">
-              <div className="text-center">
-                <div className="w-32 border-b border-slate-400 mb-1"></div>
-                <span className="font-bold text-slate-700">دستخط منشی / کیشیئر</span>
-              </div>
-
-              <div className="text-center">
-                <div className="w-32 border-b border-slate-400 mb-1"></div>
-                <span className="font-bold text-slate-700">دستخط و مہر آڑھتی</span>
-              </div>
-            </div>
-
-            <div className="text-center text-[10px] text-slate-400 pt-1 font-mono">
-              Computerized Vendor Bill • Mandi Munshi POS
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Image Preview Modal */}
-      {previewImageUrl && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-4 max-w-lg w-full flex flex-col max-h-[90vh]">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-800 text-white">
-              <h4 className="font-bold text-sm font-urdu-sans">تصویر کا پیش نظارہ</h4>
-              <button
-                onClick={() => setPreviewImageUrl(null)}
-                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto my-3 flex justify-center bg-slate-950 p-2 rounded-xl">
-              <img
-                src={previewImageUrl}
-                alt="Bill Preview"
-                className="max-w-full h-auto rounded shadow-lg"
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-              <button
-                onClick={handleSaveImage}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold font-urdu-sans flex items-center gap-1.5"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>تصویر محفوظ کریں</span>
-              </button>
-            </div>
-          </div>
+      {/* Toast Notification */}
+      {shareSuccessToast && (
+        <div className="bg-emerald-950 border-b border-emerald-600/40 text-emerald-200 px-4 py-2 text-xs font-bold font-urdu-sans flex items-center justify-center gap-2 animate-in fade-in z-30">
+          <Sparkles className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          <span>{shareSuccessToast}</span>
         </div>
       )}
+
+      {/* PDF Canvas Preview Canvas Container */}
+      <div 
+        onClick={(e) => {
+          // If clicked directly on the backdrop container (not the document itself)
+          if (e.target === e.currentTarget) {
+            sound.playTick();
+            onClose();
+          }
+        }}
+        className="flex-1 overflow-y-auto overflow-x-auto p-3 sm:p-8 flex justify-center items-start bg-slate-950/60 cursor-pointer"
+        title="باہر کلک کر کے بند کریں"
+      >
+        {isRenderingCanvas ? (
+          <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3 cursor-default">
+            <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
+            <p className="text-sm font-urdu-sans font-bold text-slate-300">
+              {isUrdu ? 'بل پرچی پی ڈی ایف تیار ہو رہی ہے...' : 'Rendering Bill PDF Preview...'}
+            </p>
+          </div>
+        ) : previewImageUrl ? (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="transition-all duration-150 ease-out flex justify-center max-w-full cursor-default"
+            style={{
+              width: `${zoomLevel}%`,
+              maxWidth: '850px',
+              minWidth: '320px',
+            }}
+          >
+            <div className="bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-300/80 ring-1 ring-black/10">
+              <img
+                src={previewImageUrl}
+                alt={`Vendor Bill - ${vendorName}`}
+                className="w-full h-auto block select-none"
+                style={{ imageRendering: 'high-quality' }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-20 text-slate-400 cursor-default">
+            <p className="text-sm font-urdu-sans">{isUrdu ? 'پیش نظارہ تیار نہیں ہو سکا' : 'Failed to load preview'}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Mobile Floating Action Bar for Quick Printing/PDF */}
+      <div className="sm:hidden flex-none bg-slate-900 border-t border-slate-800 p-2.5 flex items-center justify-between gap-1.5 z-20">
+        <button
+          onClick={handlePrint}
+          className="flex-1 py-2 px-2 rounded-xl bg-slate-950 border border-slate-700 text-emerald-400 font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs"
+        >
+          <Printer className="w-3.5 h-3.5" />
+          <span>{isUrdu ? 'پرنٹ' : 'Print'}</span>
+        </button>
+
+        <button
+          onClick={handleThermalPrint}
+          className="flex-1 py-2 px-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          <span>{isUrdu ? 'تھرمل' : 'POS'}</span>
+        </button>
+
+        <button
+          onClick={handleDownloadPDF}
+          disabled={isExportingPDF}
+          className="flex-1 py-2 px-2 rounded-xl bg-emerald-600 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs disabled:opacity-50"
+        >
+          {isExportingPDF ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+          <span>{isUrdu ? 'پی ڈی ایف' : 'PDF'}</span>
+        </button>
+
+        <button
+          onClick={() => {
+            sound.playTick();
+            onClose();
+          }}
+          className="py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 border border-rose-400 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs"
+          title="بند کریں (Close)"
+        >
+          <X className="w-4 h-4 stroke-[2.5]" />
+          <span>{isUrdu ? 'بند' : 'Close'}</span>
+        </button>
+      </div>
     </div>
   );
 };

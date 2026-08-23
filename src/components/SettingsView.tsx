@@ -611,21 +611,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </label>
           </div>
         </div>
-
-        {/* Reset / Demo Data button */}
-        <div className="pt-2 text-center">
-          <button
-            type="button"
-            onClick={() => {
-              if (confirm(isUrdu ? 'کیا آپ نمونہ ڈیٹا دوبارہ لوڈ کرنا چاہتے ہیں؟' : 'Reload demo Mandi lots?')) {
-                onResetData();
-              }
-            }}
-            className="text-xs text-stone-500 hover:text-stone-800 underline font-urdu-sans"
-          >
-            {t.restoreSampleData}
-          </button>
-        </div>
       </form>
     </div>
   );

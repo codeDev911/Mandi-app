@@ -439,6 +439,22 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
             {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageCircle className="w-3.5 h-3.5 fill-current" />}
             <span>{isUrdu ? 'واٹس ایپ پر بھیجیں' : 'WhatsApp'}</span>
           </button>
+
+          {/* Dedicated Close / Return Button */}
+          {onBackToBolli && (
+            <button
+              type="button"
+              onClick={() => {
+                sound.playTick();
+                onBackToBolli();
+              }}
+              className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-bold text-xs font-urdu-sans flex items-center gap-1 shadow-md transition active:scale-95 border border-rose-400"
+              title="بند کریں اور واپس جائیں"
+            >
+              <X className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>{isUrdu ? 'بند کریں' : 'Close'}</span>
+            </button>
+          )}
         </div>
       </div>
 
