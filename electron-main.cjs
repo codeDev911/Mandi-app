@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, session, dialog } = require('electron');
 const path = require('path');
 
 function createWindow() {
@@ -13,8 +13,19 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      webSecurity: false, // Allows local file downloads, blob URLs, and print previews
     },
     icon: path.join(__dirname, 'public/favicon.ico'),
+  });
+
+  // Handle native file downloads (PDF, JSON, CSV) in Electron
+  mainWindow.webContents.session.on('will-download', (event, item, webContents) => {
+    // Default file name suggested by the app
+    const fileName = item.getFilename();
+    item.setSaveDialogOptions({
+      title: 'Save File - Mandi Bolli App',
+      defaultPath: path.join(app.getPath('downloads'), fileName),
+    });
   });
 
   // Load the built SPA
@@ -25,9 +36,16 @@ function createWindow() {
     return {
       action: 'allow',
       overrideBrowserWindowOptions: {
-        width: 800,
-        height: 900,
+        width: 900,
+        height: 950,
         autoHideMenuBar: true,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: false,
+          webSecurity: false,
+          javascript: true,
+        },
       },
     };
   });
@@ -44,3 +62,4 @@ app.whenReady().then(() => {
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') app.quit();
 });
+

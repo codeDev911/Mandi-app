@@ -6,6 +6,7 @@ import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt, generateVendorConsolidatedInvoiceCanvas } from '../utils/receiptGenerator';
 import { printVendorBillSlipA4 } from '../utils/printHelper';
+import { downloadBlobFile } from '../utils/fileDownloader';
 import {
   Printer,
   Copy,
@@ -304,14 +305,18 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
 
     try {
       const { pdf, blob } = await buildVendorBillPDF();
-      try {
-        pdf.save(finalPdfName);
-      } catch (saveErr) {
-        console.warn('pdf.save failed, using safe download trigger:', saveErr);
-        triggerSafeDownload(blob, finalPdfName);
+      const downloadRes = await downloadBlobFile(blob, finalPdfName);
+      if (downloadRes.success) {
+        showToast(isUrdu ? 'پی ڈی ایف بل پرچی کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill PDF downloaded successfully!');
+      } else {
+        try {
+          pdf.save(finalPdfName);
+          showToast(isUrdu ? 'پی ڈی ایف بل پرچی کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill PDF downloaded successfully!');
+        } catch (saveErr) {
+          triggerSafeDownload(blob, finalPdfName);
+          showToast(isUrdu ? 'پی ڈی ایف بل پرچی کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill PDF downloaded successfully!');
+        }
       }
-
-      showToast(isUrdu ? 'پی ڈی ایف بل پرچی کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill PDF downloaded successfully!');
     } catch (err) {
       console.error('PDF export error:', err);
       try {
@@ -323,9 +328,9 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
           settings,
           displayDate
         );
-        canvas.toBlob((pngBlob) => {
+        canvas.toBlob(async (pngBlob) => {
           if (pngBlob) {
-            triggerSafeDownload(pngBlob, `Vendor_Bill_${sanitizedName}_${displayDate}.png`);
+            await downloadBlobFile(pngBlob, `Vendor_Bill_${sanitizedName}_${displayDate}.png`);
             showToast(isUrdu ? 'بل پرچی کی تصویر محفوظ کر لی گئی ہے' : 'Bill image downloaded successfully');
           }
         }, 'image/png', 0.95);

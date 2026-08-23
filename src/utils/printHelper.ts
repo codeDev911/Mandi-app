@@ -26,8 +26,49 @@ export function printHtmlViaIframe(htmlContent: string, documentTitle: string = 
       try { existingStyles.remove(); } catch {}
     }
 
-    // 1. Inject automatic onload print trigger into the standalone HTML
+    // 1. Inject automatic onload print trigger and sticky interactive action toolbar into the standalone HTML
     let finalHtml = htmlContent;
+    
+    // Inject visible, high-contrast action bar that hides automatically during printing
+    const printActionBarHtml = `
+      <div class="mandi-print-toolbar-header" style="position: sticky; top: 0; left: 0; right: 0; width: 100%; background: #0f172a; color: #f8fafc; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,0.25); border-bottom: 2px solid #10b981; direction: rtl; font-family: system-ui, -apple-system, sans-serif; z-index: 9999999; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 20px;">🖨️</span>
+          <div>
+            <div style="font-weight: 700; font-size: 15px; color: #ffffff;">پرنٹ پریویو (Print Preview)</div>
+            <div style="font-size: 11px; color: #94a3b8;">نیچے دیے گئے بٹن پر کلک کر کے پرنٹ کریں یا PDF محفوظ کریں</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button id="mandi-direct-print-btn" onclick="window.focus(); window.print();" style="background: #10b981; hover:background: #059669; color: #ffffff; border: none; padding: 9px 20px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(16,185,129,0.4);">
+            <span>🖨️</span>
+            <span>پرنٹ کریں (Print Now)</span>
+          </button>
+          <button onclick="window.focus(); window.print();" style="background: #0284c7; color: #ffffff; border: none; padding: 9px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+            <span>📄</span>
+            <span>PDF محفوظ کریں (Save PDF)</span>
+          </button>
+          <button onclick="window.close();" style="background: #334155; color: #e2e8f0; border: none; padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;">
+            ✕ بند کریں (Close)
+          </button>
+        </div>
+      </div>
+      <style>
+        @media print {
+          .mandi-print-toolbar-header, .mandi-print-toolbar-header * {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            max-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+          }
+        }
+      </style>
+    `;
+
     const printScript = `
       <script>
         (function() {
@@ -37,18 +78,25 @@ export function printHtmlViaIframe(htmlContent: string, documentTitle: string = 
                 window.focus();
                 window.print();
               } catch (e) {
-                console.warn('Auto print trigger:', e);
+                console.warn('Auto print trigger error:', e);
               }
-            }, 250);
+            }, 300);
           }
-          if (document.readyState === 'complete') {
+          if (document.readyState === 'complete' || document.readyState === 'interactive') {
             doPrint();
           } else {
+            window.addEventListener('DOMContentLoaded', doPrint);
             window.addEventListener('load', doPrint);
           }
         })();
       </script>
     `;
+
+    if (finalHtml.includes('<body')) {
+      finalHtml = finalHtml.replace(/<body([^>]*)>/i, `<body$1>${printActionBarHtml}`);
+    } else {
+      finalHtml = `${printActionBarHtml}${finalHtml}`;
+    }
 
     if (finalHtml.includes('</body>')) {
       finalHtml = finalHtml.replace('</body>', `${printScript}</body>`);

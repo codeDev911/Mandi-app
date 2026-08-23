@@ -4,6 +4,7 @@ import { sound } from '../utils/sound';
 import { PDFPreviewData } from '../utils/pdfReportGenerator';
 import { generateReportCanvas2D } from '../utils/reportCanvasGenerator';
 import { printDetailedReportDocument } from '../utils/printHelper';
+import { downloadBlobFile } from '../utils/fileDownloader';
 import {
   X,
   Download,
@@ -178,21 +179,25 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
     try {
       const { pdf, blob } = await buildReportPDF();
       
-      try {
-        pdf.save(finalPdfName);
-      } catch (saveErr) {
-        console.warn('pdf.save failed, using blob trigger:', saveErr);
-        triggerSafeDownload(blob, finalPdfName);
+      const downloadRes = await downloadBlobFile(blob, finalPdfName);
+      if (downloadRes.success) {
+        showToast(isUrdu ? 'پی ڈی ایف رپورٹ کامیابی سے محفوظ ہو گئی!' : 'PDF report downloaded successfully!');
+      } else {
+        try {
+          pdf.save(finalPdfName);
+          showToast(isUrdu ? 'پی ڈی ایف رپورٹ کامیابی سے محفوظ ہو گئی!' : 'PDF report downloaded successfully!');
+        } catch (saveErr) {
+          triggerSafeDownload(blob, finalPdfName);
+          showToast(isUrdu ? 'پی ڈی ایف رپورٹ کامیابی سے محفوظ ہو گئی!' : 'PDF report downloaded successfully!');
+        }
       }
-
-      showToast(isUrdu ? 'پی ڈی ایف رپورٹ کامیابی سے محفوظ ہو گئی!' : 'PDF report downloaded successfully!');
     } catch (err) {
       console.error('PDF export error:', err);
       try {
         const canvas = generateReportCanvas2D(previewData);
-        canvas.toBlob((pngBlob) => {
+        canvas.toBlob(async (pngBlob) => {
           if (pngBlob) {
-            triggerSafeDownload(pngBlob, `${finalPdfName.replace('.pdf', '')}.png`);
+            await downloadBlobFile(pngBlob, `${finalPdfName.replace('.pdf', '')}.png`);
             showToast(isUrdu ? 'رپورٹ کی تصویر محفوظ کر لی گئی ہے' : 'Report image downloaded successfully');
           }
         }, 'image/png', 0.95);

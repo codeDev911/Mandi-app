@@ -269,10 +269,15 @@ export async function testPostgresConnection(customUrl?: string): Promise<{
         serverTime: neonRes.rows[0].now,
         version: neonRes.rows[0].version,
       };
+    } else if (neonRes.error) {
+      return {
+        success: false,
+        message: `Neon کلاؤڈ ڈیٹا بیس کی خرابی: ${neonRes.error} (براہ کرم یوزرنیم، پاس ورڈ اور ہوسٹ چیک کریں)`,
+      };
     }
   }
 
-  // 2. Fallback to Server API route
+  // 2. Fallback to Server API route (when running with full-stack Node.js backend)
   const result = await safeFetchJson<{
     success: boolean;
     message: string;
@@ -288,9 +293,10 @@ export async function testPostgresConnection(customUrl?: string): Promise<{
     return result.data;
   }
 
+  // If server is not present (e.g. standalone mobile APK / desktop app without backend server)
   return {
     success: false,
-    message: result.errorText || 'PostgreSQL کنکشن ٹیسٹ ناکام رہا۔ براہ کرم ڈیٹا بیس کا URL چیک کریں۔',
+    message: `ڈیٹا بیس کنکشن ٹیسٹ: ${result.errorText || 'رابطہ ممکن نہیں ہو سکا۔'} موبائل APK اور ڈیسک ٹاپ کے لیے Neon PostgreSQL (neon.tech) کا براہ راست سرور لیس URL تجویز کیا جاتا ہے۔`,
   };
 }
 

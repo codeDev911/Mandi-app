@@ -119,6 +119,89 @@ export async function downloadTextFile(
   };
 }
 
+export async function downloadBlobFile(
+  blob: Blob,
+  fileName: string
+): Promise<{ success: boolean; method: 'download' | 'share' | 'failed'; message: string }> {
+  const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+
+  // 1. Try Web Share API with File (Supported on mobile Chrome/Safari/PWA/Capacitor)
+  if (isMobile && typeof navigator !== 'undefined' && 'share' in navigator && 'canShare' in navigator) {
+    try {
+      const file = new File([blob], fileName, { type: blob.type || 'application/pdf' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: fileName,
+        });
+        return { success: true, method: 'share', message: 'File shared successfully!' };
+      }
+    } catch (shareErr: any) {
+      if (shareErr?.name === 'AbortError') {
+        return { success: true, method: 'share', message: 'Share action completed.' };
+      }
+      console.warn('Web Share failed, falling back to direct download:', shareErr);
+    }
+  }
+
+  // 2. Standard Blob Link Trigger
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = fileName;
+    a.target = '_self';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+
+    setTimeout(() => {
+      if (document.body.contains(a)) {
+        document.body.removeChild(a);
+      }
+      URL.revokeObjectURL(url);
+    }, 2000);
+
+    return { success: true, method: 'download', message: `Saved ${fileName}` };
+  } catch (blobErr) {
+    console.warn('Blob download failed, trying FileReader data URI:', blobErr);
+  }
+
+  // 3. Fallback to FileReader Data URI
+  try {
+    const reader = new FileReader();
+    return new Promise((resolve) => {
+      reader.onloadend = () => {
+        try {
+          const dataUri = reader.result as string;
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = dataUri;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            if (document.body.contains(a)) {
+              document.body.removeChild(a);
+            }
+          }, 1000);
+          resolve({ success: true, method: 'download', message: `Saved ${fileName}` });
+        } catch {
+          resolve({ success: false, method: 'failed', message: 'Failed to download file' });
+        }
+      };
+      reader.onerror = () => {
+        resolve({ success: false, method: 'failed', message: 'FileReader failed' });
+      };
+      reader.readAsDataURL(blob);
+    });
+  } catch (err) {
+    console.error('Data URI download failed:', err);
+    return { success: false, method: 'failed', message: 'Download failed in this browser sandbox' };
+  }
+}
+
 export async function downloadJSONBackup(
   data: any,
   fileNamePrefix: string = 'mandi-backup'
