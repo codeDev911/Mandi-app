@@ -53,7 +53,7 @@ jobs:
 
   build-windows:
     name: Build Windows Desktop App (.exe)
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -64,19 +64,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies with Windows Rollup & Esbuild binaries
-        shell: bash
-        run: |
-          npm install --force
-          npm install --no-save @rollup/rollup-win32-x64-msvc @esbuild/win32-x64 electron electron-builder
+      - name: Install dependencies
+        run: npm install
 
-      - name: Build Web Frontend for Desktop
-        shell: bash
+      - name: Build Web App
         run: npx vite build
 
       - name: Package Windows EXE (NSIS Installer & Portable)
-        shell: bash
-        run: npx electron-builder --win nsis portable --publish never
+        run: npx --yes electron-builder --win nsis portable --publish never
 
       - name: Upload Windows EXE Artifacts
         uses: actions/upload-artifact@v4
