@@ -64,6 +64,12 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install Wine (Required for building Windows EXE on Linux)
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine32 wine64
+
       - name: Install dependencies
         run: npm install
 
@@ -71,7 +77,7 @@ jobs:
         run: npx vite build
 
       - name: Package Windows EXE (NSIS Installer & Portable)
-        run: npx --yes electron-builder --win nsis portable --publish never
+        run: npx electron-builder --win nsis portable --publish never
 
       - name: Upload Windows EXE Artifacts
         uses: actions/upload-artifact@v4
