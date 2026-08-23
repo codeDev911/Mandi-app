@@ -35,7 +35,7 @@ jobs:
         run: npm install
 
       - name: Build Web App
-        run: npm run build
+        run: npx vite build
 
       - name: Sync Capacitor
         run: npx cap sync android
@@ -64,21 +64,24 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install dependencies with Windows Rollup & Esbuild binaries
+        shell: bash
+        run: |
+          npm install --force
+          npm install --no-save @rollup/rollup-win32-x64-msvc @esbuild/win32-x64 electron electron-builder
 
-      - name: Install Electron Build Tools
-        run: npm install --save-dev electron electron-builder
+      - name: Build Web Frontend for Desktop
+        shell: bash
+        run: npx vite build
 
-      - name: Build Web App
-        run: npm run build
+      - name: Package Windows EXE (NSIS Installer & Portable)
+        shell: bash
+        run: npx electron-builder --win nsis portable --publish never
 
-      - name: Package Windows EXE
-        run: npx electron-builder --windows --dir --win nsis zip
-
-      - name: Upload Windows EXE Installer & Portable
+      - name: Upload Windows EXE Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Mandi-Bolli-Windows-x64-exe
-          path: dist-electron/*.exe
+          path: |
+            dist-electron/*.exe
           if-no-files-found: warn
