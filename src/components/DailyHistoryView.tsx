@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { VendorLot, AppSettings } from '../types';
 import { translations, unitLabels } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { AllLotsModal } from './AllLotsModal';
+import { PaginationControls } from './PaginationControls';
 import {
   History,
   TrendingUp,
@@ -42,21 +43,51 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [isAllLotsOpen, setIsAllLotsOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const totalGrossSales = lots.reduce((acc, l) => acc + l.summary.grossSales, 0);
-  const totalCommissionProfit = lots.reduce((acc, l) => acc + l.summary.arhtiProfitCommission, 0);
-  const totalCratesHandled = lots.reduce((acc, l) => acc + l.totalQuantity, 0);
-  const totalCratesSold = lots.reduce((acc, l) => acc + l.summary.totalSoldQuantity, 0);
-  const totalNetToVendors = lots.reduce((acc, l) => acc + l.summary.netPayableToVendor, 0);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
-  const filteredLots = lots.filter((l) => {
-    return (
-      l.vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      l.productUrdu.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      l.lotNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (l.vendorCity && l.vendorCity.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-  });
+  const { totalGrossSales, totalCommissionProfit, totalCratesHandled, totalCratesSold } = useMemo(() => {
+    let gross = 0;
+    let comm = 0;
+    let handled = 0;
+    let sold = 0;
+    for (let i = 0; i < lots.length; i++) {
+      const l = lots[i];
+      gross += l.summary.grossSales || 0;
+      comm += l.summary.arhtiProfitCommission || 0;
+      handled += l.totalQuantity || 0;
+      sold += l.summary.totalSoldQuantity || 0;
+    }
+    return {
+      totalGrossSales: gross,
+      totalCommissionProfit: comm,
+      totalCratesHandled: handled,
+      totalCratesSold: sold,
+    };
+  }, [lots]);
+
+  const filteredLots = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return lots;
+    return lots.filter((l) => {
+      return (
+        l.vendorName.toLowerCase().includes(term) ||
+        l.productUrdu.toLowerCase().includes(term) ||
+        l.lotNumber.toLowerCase().includes(term) ||
+        (l.vendorCity && l.vendorCity.toLowerCase().includes(term))
+      );
+    });
+  }, [lots, searchTerm]);
+
+  const totalPages = Math.ceil(filteredLots.length / pageSize) || 1;
+  const paginatedLots = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredLots.slice(start, start + pageSize);
+  }, [filteredLots, currentPage, pageSize]);
 
   return (
     <div className="space-y-4 pb-16 sm:pb-6">
@@ -140,7 +171,7 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
         </div>
 
         <div className="divide-y divide-stone-100">
-          {filteredLots.map((lot) => {
+          {paginatedLots.map((lot) => {
             const unitLabel = unitLabels[lot.unitType][settings.language];
             const isCompleted = lot.status === 'completed' || lot.summary.remainingQuantity === 0;
 
@@ -244,6 +275,21 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
             );
           })}
         </div>
+
+        {filteredLots.length > 0 && (
+          <div className="p-3 border-t border-stone-200">
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredLots.length}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+              isUrdu={isUrdu}
+              itemName={isUrdu ? 'لاٹس' : 'lots'}
+            />
+          </div>
+        )}
       </div>
 
       {/* All Lots Modal for Lots/History page */}

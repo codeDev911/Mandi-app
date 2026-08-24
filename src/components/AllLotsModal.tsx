@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { VendorLot, AppSettings } from '../types';
 import { translations, unitLabels } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
+import { PaginationControls } from './PaginationControls';
 import {
   Search,
   X,
@@ -109,6 +110,14 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
     });
   }, [lots, searchQuery, statusFilter, dateFilter, customDate, todayStr, yesterdayStr, weekAgoStr]);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, dateFilter, customDate]);
+
   // Counts for tabs
   const notSoldCount = useMemo(() => lots.filter((l) => l.summary.soldQuantity === 0).length, [lots]);
   const partiallySoldCount = useMemo(
@@ -119,6 +128,12 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
     () => lots.filter((l) => l.summary.remainingQuantity === 0 || l.status === 'completed').length,
     [lots]
   );
+
+  const totalPages = Math.ceil(filteredLots.length / pageSize) || 1;
+  const paginatedLots = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredLots.slice(start, start + pageSize);
+  }, [filteredLots, currentPage, pageSize]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-3 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -293,7 +308,7 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {filteredLots.map((lot) => {
+              {paginatedLots.map((lot) => {
                 const isSelected = selectedLotId === lot.id;
                 const unitLabel = unitLabels[lot.unitType][settings.language];
                 const soldQty = lot.summary.soldQuantity;
@@ -486,6 +501,21 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {filteredLots.length > 0 && (
+            <div className="pt-2">
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={filteredLots.length}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={setPageSize}
+                isUrdu={isUrdu}
+                itemName={isUrdu ? 'لاٹس' : 'lots'}
+              />
             </div>
           )}
         </div>

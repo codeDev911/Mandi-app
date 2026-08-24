@@ -35,30 +35,8 @@ export async function downloadTextFile(
   content: string,
   fileName: string,
   mimeType: string = 'text/plain;charset=utf-8'
-): Promise<{ success: boolean; method: 'download' | 'share' | 'clipboard' | 'failed'; message: string }> {
-  const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-
-  // 1. Try Web Share API with File (Supported on mobile Chrome/Safari/PWA)
-  if (isMobile && typeof navigator !== 'undefined' && 'share' in navigator && 'canShare' in navigator) {
-    try {
-      const file = new File([content], fileName, { type: mimeType });
-      if (navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: fileName,
-          text: `Backup file: ${fileName}`,
-        });
-        return { success: true, method: 'share', message: 'File shared successfully!' };
-      }
-    } catch (shareErr: any) {
-      if (shareErr?.name === 'AbortError') {
-        return { success: true, method: 'share', message: 'Share action completed.' };
-      }
-      console.warn('Web Share failed, falling back to direct download:', shareErr);
-    }
-  }
-
-  // 2. Standard Blob Link Trigger
+): Promise<{ success: boolean; method: 'download' | 'clipboard' | 'failed'; message: string }> {
+  // 1. Primary: Standard Blob Link Trigger for Direct File Download
   try {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -76,14 +54,14 @@ export async function downloadTextFile(
         document.body.removeChild(a);
       }
       URL.revokeObjectURL(url);
-    }, 1000);
+    }, 2000);
 
     return { success: true, method: 'download', message: `Saved ${fileName}` };
   } catch (blobErr) {
-    console.warn('Blob download failed, trying data URI:', blobErr);
+    console.warn('Blob direct download failed, trying data URI:', blobErr);
   }
 
-  // 3. Fallback to Data URI
+  // 2. Fallback to Data URI Direct Download
   try {
     const dataUri = `data:${mimeType},` + encodeURIComponent(content);
     const a = document.createElement('a');
@@ -96,13 +74,13 @@ export async function downloadTextFile(
       if (document.body.contains(a)) {
         document.body.removeChild(a);
       }
-    }, 500);
+    }, 1000);
     return { success: true, method: 'download', message: `Saved ${fileName}` };
   } catch (dataUriErr) {
     console.warn('Data URI download failed:', dataUriErr);
   }
 
-  // 4. Ultimate Fallback: Copy to clipboard so data is NEVER lost
+  // 3. Fallback: Copy to clipboard so user data is never lost
   const copied = await copyTextToClipboard(content);
   if (copied) {
     return {
@@ -122,29 +100,8 @@ export async function downloadTextFile(
 export async function downloadBlobFile(
   blob: Blob,
   fileName: string
-): Promise<{ success: boolean; method: 'download' | 'share' | 'failed'; message: string }> {
-  const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-
-  // 1. Try Web Share API with File (Supported on mobile Chrome/Safari/PWA/Capacitor)
-  if (isMobile && typeof navigator !== 'undefined' && 'share' in navigator && 'canShare' in navigator) {
-    try {
-      const file = new File([blob], fileName, { type: blob.type || 'application/pdf' });
-      if (navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: fileName,
-        });
-        return { success: true, method: 'share', message: 'File shared successfully!' };
-      }
-    } catch (shareErr: any) {
-      if (shareErr?.name === 'AbortError') {
-        return { success: true, method: 'share', message: 'Share action completed.' };
-      }
-      console.warn('Web Share failed, falling back to direct download:', shareErr);
-    }
-  }
-
-  // 2. Standard Blob Link Trigger
+): Promise<{ success: boolean; method: 'download' | 'failed'; message: string }> {
+  // 1. Primary: Direct Download via Blob Object URL
   try {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -161,14 +118,14 @@ export async function downloadBlobFile(
         document.body.removeChild(a);
       }
       URL.revokeObjectURL(url);
-    }, 2000);
+    }, 3000);
 
     return { success: true, method: 'download', message: `Saved ${fileName}` };
   } catch (blobErr) {
-    console.warn('Blob download failed, trying FileReader data URI:', blobErr);
+    console.warn('Blob direct download failed, trying FileReader data URI:', blobErr);
   }
 
-  // 3. Fallback to FileReader Data URI
+  // 2. Fallback: FileReader Data URI Download
   try {
     const reader = new FileReader();
     return new Promise((resolve) => {
@@ -185,7 +142,7 @@ export async function downloadBlobFile(
             if (document.body.contains(a)) {
               document.body.removeChild(a);
             }
-          }, 1000);
+          }, 1500);
           resolve({ success: true, method: 'download', message: `Saved ${fileName}` });
         } catch {
           resolve({ success: false, method: 'failed', message: 'Failed to download file' });
@@ -200,6 +157,36 @@ export async function downloadBlobFile(
     console.error('Data URI download failed:', err);
     return { success: false, method: 'failed', message: 'Download failed in this browser sandbox' };
   }
+}
+
+/**
+ * Dedicated Share API for mobile share sheet when user explicitly clicks Share
+ */
+export async function shareBlobFile(
+  blob: Blob,
+  fileName: string,
+  shareTitle: string = 'Share Document'
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const file = new File([blob], fileName, { type: blob.type || 'application/pdf' });
+    if (typeof navigator !== 'undefined' && 'canShare' in navigator && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        files: [file],
+        title: shareTitle,
+        text: fileName,
+      });
+      return { success: true, message: 'Shared successfully!' };
+    }
+  } catch (shareErr: any) {
+    if (shareErr?.name === 'AbortError') {
+      return { success: true, message: 'Share action cancelled.' };
+    }
+    console.warn('Web Share failed, falling back to direct download:', shareErr);
+  }
+
+  // Fallback to direct download if share is not supported
+  const dlRes = await downloadBlobFile(blob, fileName);
+  return { success: dlRes.success, message: dlRes.message };
 }
 
 export async function downloadJSONBackup(

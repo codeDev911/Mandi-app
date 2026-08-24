@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   VendorLot,
   AppSettings,
@@ -12,6 +12,7 @@ import { translations, unitLabels } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt } from '../utils/receiptGenerator';
+import { PaginationControls } from './PaginationControls';
 import {
   Users,
   Search,
@@ -103,6 +104,12 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   const [selectedCustomerIdForPayment, setSelectedCustomerIdForPayment] = useState<string | null>(null);
   const [expandedCustomerKhatas, setExpandedCustomerKhatas] = useState<Record<string, boolean>>({});
 
+  // Performance / Lazy chunk rendering limits
+  const [visibleCustomersCount, setVisibleCustomersCount] = useState<number>(30);
+  const [visibleVendorsCount, setVisibleVendorsCount] = useState<number>(30);
+  const [visibleTransactionsCount, setVisibleTransactionsCount] = useState<number>(40);
+  const [transactionsDateFilter, setTransactionsDateFilter] = useState<'thismonth' | 'today' | 'last7days' | 'all'>('thismonth');
+
   // Add/Edit Customer Modal State
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CustomerBuyer | null>(null);
@@ -131,6 +138,11 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   const [vendorPaymentDate, setVendorPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [vendorPaymentLotTarget, setVendorPaymentLotTarget] = useState<string>('all');
 
+  // Sub-pagination states for expanded Customer Details and Vendor Details
+  const [customerSalesSubPages, setCustomerSalesSubPages] = useState<Record<string, number>>({});
+  const [customerPaymentsSubPages, setCustomerPaymentsSubPages] = useState<Record<string, number>>({});
+  const [vendorLotsSubPages, setVendorLotsSubPages] = useState<Record<string, number>>({});
+
   // Add/Edit Vendor Modal State
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState<SavedVendor | null>(null);
@@ -141,234 +153,326 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   const [vError, setVError] = useState<string | null>(null);
 
   // -------------------------------------------------------------
-  // 1. CUSTOMER KHATA AGGREGATION
+  // 1. CUSTOMER KHATA AGGREGATION (HIGH PERFORMANCE MEMOIZED)
   // -------------------------------------------------------------
-  const allSales = lots.flatMap((lot) =>
-    lot.sales.map((sale) => ({
-      lotId: lot.id,
-      lotNumber: lot.lotNumber,
-      vendorName: lot.vendorName,
-      productUrdu: lot.productUrdu,
-      unitLabel: unitLabels[lot.unitType][settings.language],
-      saleId: sale.id,
-      buyerName: sale.buyerName,
-      buyerPhone: sale.buyerPhone,
-      quantity: sale.quantity,
-      ratePerUnit: sale.ratePerUnit,
-      totalAmount: sale.totalAmount,
-      paymentStatus: sale.paymentStatus,
-      paidAmount: sale.paidAmount,
-      timestamp: sale.timestamp,
-    }))
+  const allSales = useMemo(() => {
+    return lots.flatMap((lot) =>
+      lot.sales.map((sale) => ({
+        lotId: lot.id,
+        lotNumber: lot.lotNumber,
+        vendorName: lot.vendorName,
+        productUrdu: lot.productUrdu,
+        unitLabel: unitLabels[lot.unitType][settings.language],
+        saleId: sale.id,
+        buyerName: sale.buyerName,
+        buyerPhone: sale.buyerPhone,
+        quantity: sale.quantity,
+        ratePerUnit: sale.ratePerUnit,
+        totalAmount: sale.totalAmount,
+        paymentStatus: sale.paymentStatus,
+        paidAmount: sale.paidAmount,
+        timestamp: sale.timestamp,
+        date: lot.arrivalDate,
+      }))
+    );
+  }, [lots, settings.language]);
+
+  const customerList = useMemo(() => {
+    const customerMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        phone?: string;
+        shopName?: string;
+        address?: string;
+        totalPurchases: number;
+        grossPurchasesAmount: number;
+        cashPaidDirect: number;
+        creditBidsAmount: number;
+        khataPaymentsReceived: number;
+        balance: number;
+        sales: typeof allSales;
+        paymentHistory: BuyerPaymentRecord[];
+      }
+    >();
+
+    customers.forEach((c) => {
+      customerMap.set(c.name, {
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        shopName: c.shopName,
+        address: c.address,
+        totalPurchases: 0,
+        grossPurchasesAmount: c.openingBalance || 0,
+        cashPaidDirect: 0,
+        creditBidsAmount: c.openingBalance || 0,
+        khataPaymentsReceived: c.payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
+        balance: (c.openingBalance || 0) - (c.payments?.reduce((sum, p) => sum + p.amount, 0) || 0),
+        sales: [],
+        paymentHistory: c.payments || [],
+      });
+    });
+
+    allSales.forEach((sale) => {
+      let entry = customerMap.get(sale.buyerName);
+      if (!entry) {
+        entry = {
+          id: `cust-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          name: sale.buyerName,
+          phone: sale.buyerPhone,
+          totalPurchases: 0,
+          grossPurchasesAmount: 0,
+          cashPaidDirect: 0,
+          creditBidsAmount: 0,
+          khataPaymentsReceived: 0,
+          balance: 0,
+          sales: [],
+          paymentHistory: [],
+        };
+        customerMap.set(sale.buyerName, entry);
+      }
+
+      entry.totalPurchases += 1;
+      entry.grossPurchasesAmount += sale.totalAmount;
+      if (sale.paymentStatus === 'cash') {
+        entry.cashPaidDirect += sale.totalAmount;
+      } else {
+        entry.creditBidsAmount += sale.totalAmount;
+      }
+      if (!entry.phone && sale.buyerPhone) {
+        entry.phone = sale.buyerPhone;
+      }
+      entry.sales.push(sale);
+    });
+
+    return Array.from(customerMap.values()).map((c) => {
+      const totalDue = c.creditBidsAmount;
+      const netOutstanding = Math.max(0, totalDue - c.khataPaymentsReceived);
+      return {
+        ...c,
+        balance: netOutstanding,
+      };
+    });
+  }, [allSales, customers]);
+
+  const filteredCustomers = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return customerList.filter((c) => {
+      const matchesSearch =
+        !term ||
+        c.name.toLowerCase().includes(term) ||
+        (c.phone && c.phone.includes(term)) ||
+        (c.shopName && c.shopName.toLowerCase().includes(term));
+
+      if (!matchesSearch) return false;
+      if (filterStatus === 'credit') return c.balance > 0;
+      if (filterStatus === 'cleared') return c.balance === 0;
+      return true;
+    });
+  }, [customerList, searchTerm, filterStatus]);
+
+  const totalOverallCredit = useMemo(
+    () => customerList.reduce((sum, c) => sum + c.balance, 0),
+    [customerList]
+  );
+  const totalCashCollected = useMemo(
+    () => customerList.reduce((sum, c) => sum + c.cashPaidDirect + c.khataPaymentsReceived, 0),
+    [customerList]
   );
 
-  const customerMap = new Map<
-    string,
-    {
-      id: string;
-      name: string;
-      phone?: string;
-      shopName?: string;
-      address?: string;
-      totalPurchases: number;
-      grossPurchasesAmount: number;
-      cashPaidDirect: number;
-      creditBidsAmount: number;
-      khataPaymentsReceived: number;
-      balance: number;
-      sales: typeof allSales;
-      paymentHistory: BuyerPaymentRecord[];
-    }
-  >();
+  // Customer pagination
+  const [customerPage, setCustomerPage] = useState(1);
+  const [customerPageSize, setCustomerPageSize] = useState(20);
+  useEffect(() => {
+    setCustomerPage(1);
+  }, [searchTerm, filterStatus]);
 
-  customers.forEach((c) => {
-    customerMap.set(c.name, {
-      id: c.id,
-      name: c.name,
-      phone: c.phone,
-      shopName: c.shopName,
-      address: c.address,
-      totalPurchases: 0,
-      grossPurchasesAmount: c.openingBalance || 0,
-      cashPaidDirect: 0,
-      creditBidsAmount: c.openingBalance || 0,
-      khataPaymentsReceived: c.payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
-      balance: (c.openingBalance || 0) - (c.payments?.reduce((sum, p) => sum + p.amount, 0) || 0),
-      sales: [],
-      paymentHistory: c.payments || [],
+  const customerTotalPages = Math.ceil(filteredCustomers.length / customerPageSize) || 1;
+  const paginatedCustomers = useMemo(() => {
+    const start = (customerPage - 1) * customerPageSize;
+    return filteredCustomers.slice(start, start + customerPageSize);
+  }, [filteredCustomers, customerPage, customerPageSize]);
+
+  // Filtered sales for transactions view
+  const filteredSalesForTransactions = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const thisMonthPrefix = todayStr.slice(0, 7);
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    const last7DaysStr = d.toISOString().slice(0, 10);
+
+    const term = searchTerm.trim().toLowerCase();
+
+    return allSales.filter((sale) => {
+      const saleDate = sale.date || sale.timestamp?.slice(0, 10) || todayStr;
+      if (transactionsDateFilter === 'today' && saleDate !== todayStr) return false;
+      if (transactionsDateFilter === 'thismonth' && !saleDate.startsWith(thisMonthPrefix)) return false;
+      if (transactionsDateFilter === 'last7days' && saleDate < last7DaysStr) return false;
+
+      if (!term) return true;
+      return (
+        sale.buyerName.toLowerCase().includes(term) ||
+        sale.vendorName.toLowerCase().includes(term) ||
+        sale.productUrdu.includes(term) ||
+        sale.lotNumber.toLowerCase().includes(term)
+      );
     });
-  });
+  }, [allSales, transactionsDateFilter, searchTerm]);
 
-  allSales.forEach((sale) => {
-    let entry = customerMap.get(sale.buyerName);
-    if (!entry) {
-      entry = {
-        id: `cust-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        name: sale.buyerName,
-        phone: sale.buyerPhone,
-        totalPurchases: 0,
-        grossPurchasesAmount: 0,
-        cashPaidDirect: 0,
-        creditBidsAmount: 0,
-        khataPaymentsReceived: 0,
-        balance: 0,
-        sales: [],
-        paymentHistory: [],
-      };
-      customerMap.set(sale.buyerName, entry);
-    }
+  // Transactions pagination
+  const [txPage, setTxPage] = useState(1);
+  const [txPageSize, setTxPageSize] = useState(30);
+  useEffect(() => {
+    setTxPage(1);
+  }, [transactionsDateFilter, searchTerm]);
 
-    entry.totalPurchases += 1;
-    entry.grossPurchasesAmount += sale.totalAmount;
-    if (sale.paymentStatus === 'cash') {
-      entry.cashPaidDirect += sale.totalAmount;
-    } else {
-      entry.creditBidsAmount += sale.totalAmount;
-    }
-    if (!entry.phone && sale.buyerPhone) {
-      entry.phone = sale.buyerPhone;
-    }
-    entry.sales.push(sale);
-  });
-
-  const customerList = Array.from(customerMap.values()).map((c) => {
-    const totalDue = c.creditBidsAmount;
-    const netOutstanding = Math.max(0, totalDue - c.khataPaymentsReceived);
-    return {
-      ...c,
-      balance: netOutstanding,
-    };
-  });
-
-  const filteredCustomers = customerList.filter((c) => {
-    const matchesSearch =
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.phone && c.phone.includes(searchTerm)) ||
-      (c.shopName && c.shopName.toLowerCase().includes(searchTerm.toLowerCase()));
-
-    if (!matchesSearch) return false;
-    if (filterStatus === 'credit') return c.balance > 0;
-    if (filterStatus === 'cleared') return c.balance === 0;
-    return true;
-  });
-
-  const totalOverallCredit = customerList.reduce((sum, c) => sum + c.balance, 0);
-  const totalCashCollected = customerList.reduce((sum, c) => sum + c.cashPaidDirect + c.khataPaymentsReceived, 0);
+  const txTotalPages = Math.ceil(filteredSalesForTransactions.length / txPageSize) || 1;
+  const paginatedTransactions = useMemo(() => {
+    const start = (txPage - 1) * txPageSize;
+    return filteredSalesForTransactions.slice(start, start + txPageSize);
+  }, [filteredSalesForTransactions, txPage, txPageSize]);
 
   // -------------------------------------------------------------
-  // 2. VENDOR KHATA & PAYMENTS AGGREGATION
+  // 2. VENDOR KHATA & PAYMENTS AGGREGATION (HIGH PERFORMANCE MEMOIZED)
   // -------------------------------------------------------------
-  const vendorMap = new Map<
-    string,
-    {
-      id: string;
-      name: string;
-      phone?: string;
-      city?: string;
-      notes?: string;
-      totalLots: number;
-      grossSales: number;
-      totalExpenses: number;
-      netPayable: number;
-      totalPaid: number;
-      remainingDue: number;
-      isAllPaid: boolean;
-      isPartial: boolean;
-      lots: VendorLot[];
-      payments: VendorPaymentRecord[];
-    }
-  >();
+  const vendorList = useMemo(() => {
+    const vendorMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        phone?: string;
+        city?: string;
+        notes?: string;
+        totalLots: number;
+        grossSales: number;
+        totalExpenses: number;
+        netPayable: number;
+        totalPaid: number;
+        remainingDue: number;
+        isAllPaid: boolean;
+        isPartial: boolean;
+        lots: VendorLot[];
+        payments: VendorPaymentRecord[];
+      }
+    >();
 
-  // Pre-seed saved vendors
-  vendors.forEach((v) => {
-    vendorMap.set(v.name, {
-      id: v.id,
-      name: v.name,
-      phone: v.phone,
-      city: v.city,
-      notes: v.notes,
-      totalLots: 0,
-      grossSales: 0,
-      totalExpenses: 0,
-      netPayable: v.openingBalance || 0,
-      totalPaid: v.payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
-      remainingDue: (v.openingBalance || 0) - (v.payments?.reduce((sum, p) => sum + p.amount, 0) || 0),
-      isAllPaid: false,
-      isPartial: false,
-      lots: [],
-      payments: v.payments || [],
-    });
-  });
-
-  // Aggregate lots
-  lots.forEach((lot) => {
-    let entry = vendorMap.get(lot.vendorName);
-    if (!entry) {
-      entry = {
-        id: `vend-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        name: lot.vendorName,
-        phone: lot.vendorPhone,
-        city: lot.vendorCity,
-        notes: '',
+    // Pre-seed saved vendors
+    vendors.forEach((v) => {
+      vendorMap.set(v.name, {
+        id: v.id,
+        name: v.name,
+        phone: v.phone,
+        city: v.city,
+        notes: v.notes,
         totalLots: 0,
         grossSales: 0,
         totalExpenses: 0,
-        netPayable: 0,
-        totalPaid: 0,
-        remainingDue: 0,
+        netPayable: v.openingBalance || 0,
+        totalPaid: v.payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
+        remainingDue: (v.openingBalance || 0) - (v.payments?.reduce((sum, p) => sum + p.amount, 0) || 0),
         isAllPaid: false,
         isPartial: false,
         lots: [],
-        payments: [],
+        payments: v.payments || [],
+      });
+    });
+
+    // Aggregate lots
+    lots.forEach((lot) => {
+      let entry = vendorMap.get(lot.vendorName);
+      if (!entry) {
+        entry = {
+          id: `vend-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          name: lot.vendorName,
+          phone: lot.vendorPhone,
+          city: lot.vendorCity,
+          notes: '',
+          totalLots: 0,
+          grossSales: 0,
+          totalExpenses: 0,
+          netPayable: 0,
+          totalPaid: 0,
+          remainingDue: 0,
+          isAllPaid: false,
+          isPartial: false,
+          lots: [],
+          payments: [],
+        };
+        vendorMap.set(lot.vendorName, entry);
+      }
+
+      entry.totalLots += 1;
+      entry.grossSales += lot.summary.grossSales;
+      entry.totalExpenses += lot.summary.totalExpenses;
+      entry.netPayable += lot.summary.netPayableToVendor;
+
+      const lotPaid =
+        lot.vendorPaymentAmount !== undefined
+          ? lot.vendorPaymentAmount
+          : lot.vendorPaymentStatus === 'paid'
+          ? lot.summary.netPayableToVendor
+          : 0;
+
+      entry.totalPaid += lotPaid;
+      if (!entry.phone && lot.vendorPhone) entry.phone = lot.vendorPhone;
+      if (!entry.city && lot.vendorCity) entry.city = lot.vendorCity;
+      entry.lots.push(lot);
+    });
+
+    return Array.from(vendorMap.values()).map((v) => {
+      const remaining = Math.max(0, v.netPayable - v.totalPaid);
+      const isAllPaid = remaining === 0 && v.netPayable > 0;
+      const isPartial = v.totalPaid > 0 && remaining > 0;
+      return {
+        ...v,
+        remainingDue: remaining,
+        isAllPaid,
+        isPartial,
       };
-      vendorMap.set(lot.vendorName, entry);
-    }
+    });
+  }, [lots, vendors]);
 
-    entry.totalLots += 1;
-    entry.grossSales += lot.summary.grossSales;
-    entry.totalExpenses += lot.summary.totalExpenses;
-    entry.netPayable += lot.summary.netPayableToVendor;
+  const filteredVendors = useMemo(() => {
+    const term = vendorSearchTerm.trim().toLowerCase();
+    return vendorList.filter((v) => {
+      const matchesSearch =
+        !term ||
+        v.name.toLowerCase().includes(term) ||
+        (v.phone && v.phone.includes(term)) ||
+        (v.city && v.city.toLowerCase().includes(term));
 
-    const lotPaid =
-      lot.vendorPaymentAmount !== undefined
-        ? lot.vendorPaymentAmount
-        : lot.vendorPaymentStatus === 'paid'
-        ? lot.summary.netPayableToVendor
-        : 0;
+      if (!matchesSearch) return false;
+      if (vendorFilterStatus === 'pending') return v.remainingDue > 0;
+      if (vendorFilterStatus === 'paid') return v.isAllPaid;
+      return true;
+    });
+  }, [vendorList, vendorSearchTerm, vendorFilterStatus]);
 
-    entry.totalPaid += lotPaid;
-    if (!entry.phone && lot.vendorPhone) entry.phone = lot.vendorPhone;
-    if (!entry.city && lot.vendorCity) entry.city = lot.vendorCity;
-    entry.lots.push(lot);
-  });
-
-  const vendorList = Array.from(vendorMap.values()).map((v) => {
-    const remaining = Math.max(0, v.netPayable - v.totalPaid);
-    const isAllPaid = remaining === 0 && v.netPayable > 0;
-    const isPartial = v.totalPaid > 0 && remaining > 0;
-    return {
-      ...v,
-      remainingDue: remaining,
-      isAllPaid,
-      isPartial,
-    };
-  });
-
-  const filteredVendors = vendorList.filter((v) => {
-    const matchesSearch =
-      v.name.toLowerCase().includes(vendorSearchTerm.toLowerCase()) ||
-      (v.phone && v.phone.includes(vendorSearchTerm)) ||
-      (v.city && v.city.toLowerCase().includes(vendorSearchTerm.toLowerCase()));
-
-    if (!matchesSearch) return false;
-    if (vendorFilterStatus === 'pending') return v.remainingDue > 0;
-    if (vendorFilterStatus === 'paid') return v.isAllPaid;
-    return true;
-  });
-
-  const totalPayableToVendors = vendorList.reduce((sum, v) => sum + v.netPayable, 0);
-  const totalPaidToVendors = vendorList.reduce((sum, v) => sum + v.totalPaid, 0);
+  const totalPayableToVendors = useMemo(
+    () => vendorList.reduce((sum, v) => sum + v.netPayable, 0),
+    [vendorList]
+  );
+  const totalPaidToVendors = useMemo(
+    () => vendorList.reduce((sum, v) => sum + v.totalPaid, 0),
+    [vendorList]
+  );
   const totalRemainingPayable = Math.max(0, totalPayableToVendors - totalPaidToVendors);
+
+  // Vendor pagination
+  const [vendorPage, setVendorPage] = useState(1);
+  const [vendorPageSize, setVendorPageSize] = useState(20);
+  useEffect(() => {
+    setVendorPage(1);
+  }, [vendorSearchTerm, vendorFilterStatus]);
+
+  const vendorTotalPages = Math.ceil(filteredVendors.length / vendorPageSize) || 1;
+  const paginatedVendors = useMemo(() => {
+    const start = (vendorPage - 1) * vendorPageSize;
+    return filteredVendors.slice(start, start + vendorPageSize);
+  }, [filteredVendors, vendorPage, vendorPageSize]);
 
   // -------------------------------------------------------------
   // HANDLERS
@@ -790,7 +894,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                   </p>
                 </div>
               ) : (
-                filteredCustomers.map((cust) => {
+                paginatedCustomers.map((cust) => {
                   const isExpanded = !!expandedCustomerKhatas[cust.name];
                   const isCleared = cust.balance === 0;
 
@@ -971,13 +1075,66 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                         </div>
                       )}
 
-                      {/* Expanded Itemized Sales & Payment History */}
-                      {isExpanded && (
-                        <div className="bg-slate-50 p-3 sm:p-4 border-t border-slate-200 space-y-3 animate-in fade-in duration-150">
+                      {/* Expanded Itemized Sales & Payment History with Sub-Pagination */}
+                      {isExpanded && (() => {
+                        const salesPageSize = 8;
+                        const currentSalesPage = customerSalesSubPages[cust.name] || 1;
+                        const totalSalesPages = Math.ceil(cust.sales.length / salesPageSize) || 1;
+                        const paginatedCustSales = cust.sales.slice(
+                          (currentSalesPage - 1) * salesPageSize,
+                          currentSalesPage * salesPageSize
+                        );
+
+                        const payPageSize = 8;
+                        const currentPayPage = customerPaymentsSubPages[cust.name] || 1;
+                        const totalPayPages = Math.ceil(cust.paymentHistory.length / payPageSize) || 1;
+                        const paginatedCustPayments = cust.paymentHistory.slice(
+                          (currentPayPage - 1) * payPageSize,
+                          currentPayPage * payPageSize
+                        );
+
+                        return (
+                        <div className="bg-slate-50 p-3 sm:p-4 border-t border-slate-200 space-y-4 animate-in fade-in duration-150">
                           <div>
-                            <h4 className="text-xs font-bold text-slate-700 mb-1.5 font-urdu-sans">
-                              {t.salesList} ({cust.sales.length})
-                            </h4>
+                            <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                              <h4 className="text-xs font-bold text-slate-700 font-urdu-sans">
+                                {t.salesList} ({cust.sales.length})
+                              </h4>
+                              {totalSalesPages > 1 && (
+                                <div className="flex items-center gap-1.5 text-[11px] font-urdu-sans">
+                                  <span className="text-slate-500 font-numbers">
+                                    صفحہ {currentSalesPage} از {totalSalesPages}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={currentSalesPage <= 1}
+                                    onClick={() =>
+                                      setCustomerSalesSubPages((prev) => ({
+                                        ...prev,
+                                        [cust.name]: Math.max(1, currentSalesPage - 1),
+                                      }))
+                                    }
+                                    className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                                  >
+                                    ‹ پچھلا
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={currentSalesPage >= totalSalesPages}
+                                    onClick={() =>
+                                      setCustomerSalesSubPages((prev) => ({
+                                        ...prev,
+                                        [cust.name]: Math.min(totalSalesPages, currentSalesPage + 1),
+                                      }))
+                                    }
+                                    className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                                  >
+                                    اگلا ›
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
                             {cust.sales.length === 0 ? (
                               <p className="text-xs text-slate-400 font-urdu-sans">
                                 {isUrdu ? 'کوئی بولی درج نہیں' : 'No bids yet'}
@@ -997,7 +1154,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
-                                    {cust.sales.map((sale) => (
+                                    {paginatedCustSales.map((sale) => (
                                       <tr key={sale.saleId} className="hover:bg-slate-50/80">
                                         <td className="py-1.5 px-2.5 text-slate-500 font-numbers">{sale.lotNumber}</td>
                                         <td className="py-1.5 px-2.5 font-bold text-slate-800">{sale.productUrdu}</td>
@@ -1039,10 +1196,46 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                           {/* Payment History Records */}
                           {cust.paymentHistory.length > 0 && (
                             <div>
-                              <h4 className="text-xs font-bold text-slate-700 mb-1.5 font-urdu-sans flex items-center gap-1.5">
-                                <Banknote className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>وصول شدہ ادائیگیاں (Payment Receipts)</span>
-                              </h4>
+                              <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                                <h4 className="text-xs font-bold text-slate-700 font-urdu-sans flex items-center gap-1.5">
+                                  <Banknote className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>وصول شدہ ادائیگیاں ({cust.paymentHistory.length})</span>
+                                </h4>
+                                {totalPayPages > 1 && (
+                                  <div className="flex items-center gap-1.5 text-[11px] font-urdu-sans">
+                                    <span className="text-slate-500 font-numbers">
+                                      صفحہ {currentPayPage} از {totalPayPages}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      disabled={currentPayPage <= 1}
+                                      onClick={() =>
+                                        setCustomerPaymentsSubPages((prev) => ({
+                                          ...prev,
+                                          [cust.name]: Math.max(1, currentPayPage - 1),
+                                        }))
+                                      }
+                                      className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                                    >
+                                      ‹ پچھلا
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={currentPayPage >= totalPayPages}
+                                      onClick={() =>
+                                        setCustomerPaymentsSubPages((prev) => ({
+                                          ...prev,
+                                          [cust.name]: Math.min(totalPayPages, currentPayPage + 1),
+                                        }))
+                                      }
+                                      className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                                    >
+                                      اگلا ›
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
                               <div className="overflow-x-auto bg-white rounded-xl border border-slate-200">
                                 <table className="w-full text-xs text-start font-urdu-sans">
                                   <thead>
@@ -1053,7 +1246,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
-                                    {cust.paymentHistory.map((pay) => (
+                                    {paginatedCustPayments.map((pay) => (
                                       <tr key={pay.id} className="hover:bg-slate-50/80">
                                         <td className="py-1.5 px-2.5 text-slate-500 font-numbers">{pay.date || '-'}</td>
                                         <td className="py-1.5 px-2.5 text-end font-bold font-numbers text-emerald-700">
@@ -1068,10 +1261,26 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                             </div>
                           )}
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   );
                 })
+              )}
+
+              {filteredCustomers.length > 0 && (
+                <div className="pt-2">
+                  <PaginationControls
+                    currentPage={customerPage}
+                    totalPages={customerTotalPages}
+                    totalItems={filteredCustomers.length}
+                    pageSize={customerPageSize}
+                    onPageChange={setCustomerPage}
+                    onPageSizeChange={setCustomerPageSize}
+                    isUrdu={isUrdu}
+                    itemName={isUrdu ? 'خریدار کھاتے' : 'customer khatas'}
+                  />
+                </div>
               )}
             </div>
           )}
@@ -1095,7 +1304,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {allSales.map((sale) => (
+                    {paginatedTransactions.map((sale) => (
                       <tr key={sale.saleId} className="hover:bg-slate-50/80">
                         <td className="py-2 px-3 font-mono font-bold text-slate-700">#{sale.lotNumber}</td>
                         <td className="py-2 px-3 font-bold text-slate-800">{sale.vendorName}</td>
@@ -1131,6 +1340,21 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                   </tbody>
                 </table>
               </div>
+
+              {filteredSalesForTransactions.length > 0 && (
+                <div className="p-3 border-t border-slate-200">
+                  <PaginationControls
+                    currentPage={txPage}
+                    totalPages={txTotalPages}
+                    totalItems={filteredSalesForTransactions.length}
+                    pageSize={txPageSize}
+                    onPageChange={setTxPage}
+                    onPageSizeChange={setTxPageSize}
+                    isUrdu={isUrdu}
+                    itemName={isUrdu ? 'لین دین' : 'transactions'}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1252,7 +1476,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                 </p>
               </div>
             ) : (
-              filteredVendors.map((vendor) => {
+              paginatedVendors.map((vendor) => {
                 const isExpanded = !!expandedVendorKhatas[vendor.name];
                 const isPaymentFormOpen = selectedVendorForPayment === vendor.name;
 
@@ -1537,13 +1761,58 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                       </div>
                     )}
 
-                    {/* Expanded Lots Table */}
-                    {isExpanded && (
+                    {/* Expanded Lots Table with Sub-Pagination */}
+                    {isExpanded && (() => {
+                      const vendorLotsPageSize = 8;
+                      const currentVendorLotsPage = vendorLotsSubPages[vendor.name] || 1;
+                      const totalVendorLotsPages = Math.ceil(vendor.lots.length / vendorLotsPageSize) || 1;
+                      const paginatedVendorLots = vendor.lots.slice(
+                        (currentVendorLotsPage - 1) * vendorLotsPageSize,
+                        currentVendorLotsPage * vendorLotsPageSize
+                      );
+
+                      return (
                       <div className="bg-slate-50 p-3.5 sm:p-4 border-t border-slate-200 space-y-3">
-                        <h4 className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-2">
-                          <Package className="w-4 h-4 text-amber-600" />
-                          <span>زمیندار کی کل اجناس و لاٹس ({vendor.lots.length})</span>
-                        </h4>
+                        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+                          <h4 className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                            <Package className="w-4 h-4 text-amber-600" />
+                            <span>زمیندار کی کل اجناس و لاٹس ({vendor.lots.length})</span>
+                          </h4>
+
+                          {totalVendorLotsPages > 1 && (
+                            <div className="flex items-center gap-1.5 text-[11px] font-urdu-sans">
+                              <span className="text-slate-500 font-numbers">
+                                صفحہ {currentVendorLotsPage} از {totalVendorLotsPages}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={currentVendorLotsPage <= 1}
+                                onClick={() =>
+                                  setVendorLotsSubPages((prev) => ({
+                                    ...prev,
+                                    [vendor.name]: Math.max(1, currentVendorLotsPage - 1),
+                                  }))
+                                }
+                                className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                              >
+                                ‹ پچھلا
+                              </button>
+                              <button
+                                type="button"
+                                disabled={currentVendorLotsPage >= totalVendorLotsPages}
+                                onClick={() =>
+                                  setVendorLotsSubPages((prev) => ({
+                                    ...prev,
+                                    [vendor.name]: Math.min(totalVendorLotsPages, currentVendorLotsPage + 1),
+                                  }))
+                                }
+                                className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                              >
+                                اگلا ›
+                              </button>
+                            </div>
+                          )}
+                        </div>
 
                         {vendor.lots.length === 0 ? (
                           <p className="text-xs text-slate-400">کوئی لاٹ موجود نہیں</p>
@@ -1564,7 +1833,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100">
-                                {vendor.lots.map((lot) => {
+                                {paginatedVendorLots.map((lot) => {
                                   const isLotPaid = lot.vendorPaymentStatus === 'paid';
                                   const lotUnitLabel = unitLabels[lot.unitType][settings.language];
 
@@ -1629,10 +1898,26 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                           </div>
                         )}
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })
+            )}
+
+            {filteredVendors.length > 0 && (
+              <div className="pt-2">
+                <PaginationControls
+                  currentPage={vendorPage}
+                  totalPages={vendorTotalPages}
+                  totalItems={filteredVendors.length}
+                  pageSize={vendorPageSize}
+                  onPageChange={setVendorPage}
+                  onPageSizeChange={setVendorPageSize}
+                  isUrdu={isUrdu}
+                  itemName={isUrdu ? 'زمیندار کھاتے' : 'vendor khatas'}
+                />
+              </div>
             )}
           </div>
         </div>

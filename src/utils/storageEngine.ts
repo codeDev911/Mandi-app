@@ -116,7 +116,8 @@ export function getIndexedDB(): Promise<IDBDatabase | null> {
 
 /**
  * Loads all persistent data on application bootstrap.
- * Checks IndexedDB first; if empty, checks localStorage migration, then falls back to initial samples.
+ * Checks IndexedDB first; if records exist, loads them with 100% fidelity without sample data overwriting.
+ * If empty, checks localStorage migration, and only seeds initial samples on true first run.
  */
 export async function loadInitialApplicationData(): Promise<{
   settings: AppSettings;
@@ -136,10 +137,16 @@ export async function loadInitialApplicationData(): Promise<{
         getSingleFromStore<AppSettings>(db, STORE_SETTINGS, 'app_settings'),
       ]);
 
-      if (lots && lots.length > 0) {
+      const hasAnyData =
+        (lots && lots.length > 0) ||
+        (customers && customers.length > 0) ||
+        (vendors && vendors.length > 0) ||
+        !!settings;
+
+      if (hasAnyData) {
         return {
           settings: settings || defaultSettings,
-          lots: lots.sort(
+          lots: (lots || []).sort(
             (a, b) =>
               new Date(b.arrivalDate || b.createdAt || 0).getTime() -
               new Date(a.arrivalDate || a.createdAt || 0).getTime()
@@ -155,9 +162,9 @@ export async function loadInitialApplicationData(): Promise<{
 
   // Fallback to LocalStorage
   let initialSettings = defaultSettings;
-  let initialLots = getInitialLots();
-  let initialCustomers = sampleCustomers;
-  let initialVendors = sampleVendors;
+  let initialLots: VendorLot[] | null = null;
+  let initialCustomers: CustomerBuyer[] | null = null;
+  let initialVendors: SavedVendor[] | null = null;
 
   try {
     const savedSettings = localStorage.getItem('mandi_bolli_settings_v1');
@@ -175,19 +182,23 @@ export async function loadInitialApplicationData(): Promise<{
     console.warn('LocalStorage parse error:', e);
   }
 
-  // Seed IndexedDB in the background with existing data so future writes are fast
+  const finalLots = initialLots !== null ? initialLots : getInitialLots();
+  const finalCustomers = initialCustomers !== null ? initialCustomers : sampleCustomers;
+  const finalVendors = initialVendors !== null ? initialVendors : sampleVendors;
+
+  // Seed IndexedDB in the background only on genuine first run
   if (db) {
-    saveLotsToIndexedDB(initialLots).catch(() => {});
-    saveCustomersToIndexedDB(initialCustomers).catch(() => {});
-    saveVendorsToIndexedDB(initialVendors).catch(() => {});
+    saveLotsToIndexedDB(finalLots).catch(() => {});
+    saveCustomersToIndexedDB(finalCustomers).catch(() => {});
+    saveVendorsToIndexedDB(finalVendors).catch(() => {});
     saveSettingsToIndexedDB(initialSettings).catch(() => {});
   }
 
   return {
     settings: initialSettings,
-    lots: initialLots,
-    customers: initialCustomers,
-    vendors: initialVendors,
+    lots: finalLots,
+    customers: finalCustomers,
+    vendors: finalVendors,
   };
 }
 
@@ -225,22 +236,35 @@ function getSingleFromStore<T>(db: IDBDatabase, storeName: string, key: IDBValid
  * Prevents UI freeze by deferring writes until typing/auction activity pauses.
  */
 let saveLotsTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingLotsToSave: VendorLot[] | null = null;
+
 export function saveLotsAsync(lots: VendorLot[]): void {
+  pendingLotsToSave = lots;
   if (saveLotsTimer) clearTimeout(saveLotsTimer);
   saveLotsTimer = setTimeout(() => {
-    saveLotsToIndexedDB(lots);
-    // Also save light mirror to LocalStorage if possible
-    try {
-      if (lots.length <= 150) {
-        localStorage.setItem('mandi_bolli_lots_v1', JSON.stringify(lots));
+    if (pendingLotsToSave) {
+      const data = pendingLotsToSave;
+      pendingLotsToSave = null;
+      saveLotsToIndexedDB(data);
+      // Also save light mirror to LocalStorage ONLY if small dataset
+      try {
+        if (data.length <= 100) {
+          localStorage.setItem('mandi_bolli_lots_v1', JSON.stringify(data));
+        }
+      } catch {
+        // ignore localStorage quota error; IndexedDB is the authoritative store
       }
-    } catch {
-      // ignore localStorage quota error; IndexedDB is the authoritative store
     }
-  }, 250);
+  }, 400);
 }
 
 export async function saveLotsToIndexedDB(lots: VendorLot[]): Promise<void> {
+  if (saveLotsTimer) {
+    clearTimeout(saveLotsTimer);
+    saveLotsTimer = null;
+  }
+  pendingLotsToSave = null;
+
   const db = await getIndexedDB();
   if (!db) return;
 
@@ -249,16 +273,18 @@ export async function saveLotsToIndexedDB(lots: VendorLot[]): Promise<void> {
       const tx = db.transaction(STORE_LOTS, 'readwrite');
       const store = tx.objectStore(STORE_LOTS);
       
-      // Clear and bulk insert
+      // Fast clear & bulk insert using batched put
       const clearReq = store.clear();
       clearReq.onsuccess = () => {
-        for (const lot of lots) {
-          store.put(lot);
+        const len = lots.length;
+        for (let i = 0; i < len; i++) {
+          store.put(lots[i]);
         }
       };
 
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
     } catch (e) {
       reject(e);
     }
@@ -269,21 +295,34 @@ export async function saveLotsToIndexedDB(lots: VendorLot[]): Promise<void> {
  * Customers debounced saver
  */
 let saveCustomersTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingCustomersToSave: CustomerBuyer[] | null = null;
+
 export function saveCustomersAsync(customers: CustomerBuyer[]): void {
+  pendingCustomersToSave = customers;
   if (saveCustomersTimer) clearTimeout(saveCustomersTimer);
   saveCustomersTimer = setTimeout(() => {
-    saveCustomersToIndexedDB(customers);
-    try {
-      if (customers.length <= 300) {
-        localStorage.setItem('mandi_bolli_customers_v1', JSON.stringify(customers));
+    if (pendingCustomersToSave) {
+      const data = pendingCustomersToSave;
+      pendingCustomersToSave = null;
+      saveCustomersToIndexedDB(data);
+      try {
+        if (data.length <= 150) {
+          localStorage.setItem('mandi_bolli_customers_v1', JSON.stringify(data));
+        }
+      } catch {
+        // ignore quota error
       }
-    } catch {
-      // ignore quota error
     }
-  }, 250);
+  }, 400);
 }
 
 export async function saveCustomersToIndexedDB(customers: CustomerBuyer[]): Promise<void> {
+  if (saveCustomersTimer) {
+    clearTimeout(saveCustomersTimer);
+    saveCustomersTimer = null;
+  }
+  pendingCustomersToSave = null;
+
   const db = await getIndexedDB();
   if (!db) return;
 
@@ -292,12 +331,13 @@ export async function saveCustomersToIndexedDB(customers: CustomerBuyer[]): Prom
       const tx = db.transaction(STORE_CUSTOMERS, 'readwrite');
       const store = tx.objectStore(STORE_CUSTOMERS);
       store.clear().onsuccess = () => {
-        for (const c of customers) {
-          store.put(c);
+        for (let i = 0; i < customers.length; i++) {
+          store.put(customers[i]);
         }
       };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
     } catch (e) {
       reject(e);
     }
@@ -308,21 +348,34 @@ export async function saveCustomersToIndexedDB(customers: CustomerBuyer[]): Prom
  * Vendors debounced saver
  */
 let saveVendorsTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingVendorsToSave: SavedVendor[] | null = null;
+
 export function saveVendorsAsync(vendors: SavedVendor[]): void {
+  pendingVendorsToSave = vendors;
   if (saveVendorsTimer) clearTimeout(saveVendorsTimer);
   saveVendorsTimer = setTimeout(() => {
-    saveVendorsToIndexedDB(vendors);
-    try {
-      if (vendors.length <= 300) {
-        localStorage.setItem('mandi_bolli_vendors_v1', JSON.stringify(vendors));
+    if (pendingVendorsToSave) {
+      const data = pendingVendorsToSave;
+      pendingVendorsToSave = null;
+      saveVendorsToIndexedDB(data);
+      try {
+        if (data.length <= 150) {
+          localStorage.setItem('mandi_bolli_vendors_v1', JSON.stringify(data));
+        }
+      } catch {
+        // ignore quota error
       }
-    } catch {
-      // ignore quota error
     }
-  }, 250);
+  }, 400);
 }
 
 export async function saveVendorsToIndexedDB(vendors: SavedVendor[]): Promise<void> {
+  if (saveVendorsTimer) {
+    clearTimeout(saveVendorsTimer);
+    saveVendorsTimer = null;
+  }
+  pendingVendorsToSave = null;
+
   const db = await getIndexedDB();
   if (!db) return;
 
@@ -331,12 +384,13 @@ export async function saveVendorsToIndexedDB(vendors: SavedVendor[]): Promise<vo
       const tx = db.transaction(STORE_VENDORS, 'readwrite');
       const store = tx.objectStore(STORE_VENDORS);
       store.clear().onsuccess = () => {
-        for (const v of vendors) {
-          store.put(v);
+        for (let i = 0; i < vendors.length; i++) {
+          store.put(vendors[i]);
         }
       };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
     } catch (e) {
       reject(e);
     }
@@ -355,6 +409,11 @@ export function saveSettingsAsync(settings: AppSettings): void {
 }
 
 export async function saveSettingsToIndexedDB(settings: AppSettings): Promise<void> {
+  if (saveSettingsTimer) {
+    clearTimeout(saveSettingsTimer);
+    saveSettingsTimer = null;
+  }
+
   try {
     localStorage.setItem('mandi_bolli_settings_v1', JSON.stringify(settings));
   } catch {
@@ -371,6 +430,7 @@ export async function saveSettingsToIndexedDB(settings: AppSettings): Promise<vo
       store.put({ key: 'app_settings', value: settings });
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
     } catch (e) {
       reject(e);
     }
@@ -401,10 +461,19 @@ export function computeDatabaseMetrics(
     }
   }
 
-  // Estimate JSON size in memory
-  const jsonApprox = JSON.stringify({ lots, customers, vendors });
-  const sizeBytes = new Blob([jsonApprox]).size;
-  const estimatedSizeKB = Math.round(sizeBytes / 1024);
+  // Fast estimate memory size without blocking main thread on JSON.stringify
+  const sampleSize = Math.min(lots.length, 50);
+  let avgLotSize = 650;
+  if (sampleSize > 0) {
+    try {
+      const sampleBlob = new Blob([JSON.stringify(lots.slice(0, sampleSize))]);
+      avgLotSize = sampleBlob.size / sampleSize;
+    } catch {
+      avgLotSize = 650;
+    }
+  }
+  const estimatedSizeBytes = (lots.length * avgLotSize) + (customers.length * 400) + (vendors.length * 400);
+  const estimatedSizeKB = Math.round(estimatedSizeBytes / 1024);
 
   const lastBackup = localStorage.getItem('mandi_last_backup_timestamp') || undefined;
 

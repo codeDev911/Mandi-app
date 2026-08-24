@@ -18,6 +18,10 @@ import {
   saveCustomersAsync,
   saveVendorsAsync,
   saveSettingsAsync,
+  saveLotsToIndexedDB,
+  saveCustomersToIndexedDB,
+  saveVendorsToIndexedDB,
+  saveSettingsToIndexedDB,
 } from './utils/storageEngine';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -90,7 +94,8 @@ export default function App() {
   const [isNewLotOpen, setIsNewLotOpen] = useState(false);
   const [isCloudSyncOpen, setIsCloudSyncOpen] = useState(false);
 
-  // Initial High-Speed IndexedDB bootstrap
+  // Initial High-Speed IndexedDB bootstrap state
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
   const isLoadedFromDbRef = useRef(false);
 
   // Native Android Capacitor Setup (StatusBar, Haptics, Hardware Back Button)
@@ -133,32 +138,37 @@ export default function App() {
         if (data.customers && data.customers.length > 0) setCustomers(data.customers);
         if (data.vendors && data.vendors.length > 0) setVendors(data.vendors);
         isLoadedFromDbRef.current = true;
+        setIsDataLoaded(true);
       }
     });
   }, []);
 
   // Sync settings with storage engine and sound
   useEffect(() => {
+    if (!isDataLoaded) return;
     saveSettingsAsync(settings);
     sound.setEnabled(settings.soundEnabled);
     document.documentElement.dir = settings.language === 'ur' ? 'rtl' : 'ltr';
     document.documentElement.lang = settings.language;
-  }, [settings]);
+  }, [settings, isDataLoaded]);
 
   // Sync lots with high-capacity IndexedDB storage engine
   useEffect(() => {
+    if (!isDataLoaded) return;
     saveLotsAsync(lots);
-  }, [lots]);
+  }, [lots, isDataLoaded]);
 
   // Sync customers with storage engine
   useEffect(() => {
+    if (!isDataLoaded) return;
     saveCustomersAsync(customers);
-  }, [customers]);
+  }, [customers, isDataLoaded]);
 
   // Sync vendors with storage engine
   useEffect(() => {
+    if (!isDataLoaded) return;
     saveVendorsAsync(vendors);
-  }, [vendors]);
+  }, [vendors, isDataLoaded]);
 
   // Make sure selectedLotId is valid
   useEffect(() => {
@@ -241,13 +251,25 @@ export default function App() {
     vendors: SavedVendor[];
   }) => {
     sound.playCashChime();
+    setIsDataLoaded(true);
+
     if (data.lots && data.lots.length > 0) {
+      saveLotsToIndexedDB(data.lots).catch(console.error);
       setLots(data.lots);
       if (data.lots[0]) setSelectedLotId(data.lots[0].id);
     }
-    if (data.customers) setCustomers(data.customers);
-    if (data.vendors) setVendors(data.vendors);
-    if (data.settings) setSettings(data.settings);
+    if (data.customers && data.customers.length > 0) {
+      saveCustomersToIndexedDB(data.customers).catch(console.error);
+      setCustomers(data.customers);
+    }
+    if (data.vendors && data.vendors.length > 0) {
+      saveVendorsToIndexedDB(data.vendors).catch(console.error);
+      setVendors(data.vendors);
+    }
+    if (data.settings) {
+      saveSettingsToIndexedDB(data.settings).catch(console.error);
+      setSettings(data.settings);
+    }
   };
 
   const handleSaveNewLot = (newLot: VendorLot) => {

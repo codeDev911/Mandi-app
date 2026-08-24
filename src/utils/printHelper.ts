@@ -4,165 +4,71 @@ import { formatPKR } from './currency';
 import { PDFPreviewData } from './pdfReportGenerator';
 
 /**
- * Universal High-Reliability Print Engine for AI Studio Iframe Environment, WebViews & Mobile Browsers.
- * 1. Embeds automatic window.print() listeners into the target document.
- * 2. Creates a standalone Blob URL and attempts opening in a dedicated top-level print window/tab.
- * 3. Mounts the full styled document to the top window print portal for native window.print() support.
- * 4. Displays an interactive on-screen Print Assistant banner in case iframe sandbox blocks popups.
+ * Universal High-Reliability Isolated Print Engine.
+ * Prints HTML documents via an isolated hidden iframe so that global styles,
+ * CSS rules, fonts, and @page layout inside the print template NEVER leak into
+ * or break the main React application UI/UX.
  */
 export function printHtmlViaIframe(htmlContent: string, documentTitle: string = 'Print'): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   try {
-    const isThermal = htmlContent.includes('80mm') || htmlContent.includes('74mm');
+    // 1. Immediately clean up any previous rogue portals or global styles
+    const rogueElements = document.querySelectorAll(
+      '#mandi-universal-print-portal, #mandi-universal-print-styles, #mandi-print-floating-assistant, #mandi-print-quick-toast'
+    );
+    rogueElements.forEach((el) => {
+      try { el.remove(); } catch {}
+    });
 
-    // Clean up any legacy print portal or styles if they lingered in DOM
-    const existingPortal = document.getElementById('mandi-universal-print-portal');
-    if (existingPortal) {
-      try { existingPortal.remove(); } catch {}
-    }
-    const existingStyles = document.getElementById('mandi-universal-print-styles');
-    if (existingStyles) {
-      try { existingStyles.remove(); } catch {}
-    }
-
-    // 1. Inject automatic onload print trigger and sticky interactive action toolbar into the standalone HTML
-    let finalHtml = htmlContent;
-    
-    // Inject visible, high-contrast action bar that hides automatically during printing
-    const printActionBarHtml = `
-      <div class="mandi-print-toolbar-header" style="position: sticky; top: 0; left: 0; right: 0; width: 100%; background: #0f172a; color: #f8fafc; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,0.25); border-bottom: 2px solid #10b981; direction: rtl; font-family: system-ui, -apple-system, sans-serif; z-index: 9999999; box-sizing: border-box;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span style="font-size: 20px;">🖨️</span>
-          <div>
-            <div style="font-weight: 700; font-size: 15px; color: #ffffff;">پرنٹ پریویو (Print Preview)</div>
-            <div style="font-size: 11px; color: #94a3b8;">نیچے دیے گئے بٹن پر کلک کر کے پرنٹ کریں یا PDF محفوظ کریں</div>
-          </div>
-        </div>
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <button id="mandi-direct-print-btn" onclick="window.focus(); window.print();" style="background: #10b981; hover:background: #059669; color: #ffffff; border: none; padding: 9px 20px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(16,185,129,0.4);">
-            <span>🖨️</span>
-            <span>پرنٹ کریں (Print Now)</span>
-          </button>
-          <button onclick="window.focus(); window.print();" style="background: #0284c7; color: #ffffff; border: none; padding: 9px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-            <span>📄</span>
-            <span>PDF محفوظ کریں (Save PDF)</span>
-          </button>
-          <button onclick="window.close();" style="background: #334155; color: #e2e8f0; border: none; padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;">
-            ✕ بند کریں (Close)
-          </button>
-        </div>
-      </div>
-      <style>
-        @media print {
-          .mandi-print-toolbar-header, .mandi-print-toolbar-header * {
-            display: none !important;
-            height: 0 !important;
-            min-height: 0 !important;
-            max-height: 0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-          }
-        }
-      </style>
-    `;
-
-    const printScript = `
-      <script>
-        (function() {
-          function doPrint() {
-            setTimeout(function() {
-              try {
-                window.focus();
-                window.print();
-              } catch (e) {
-                console.warn('Auto print trigger error:', e);
-              }
-            }, 300);
-          }
-          if (document.readyState === 'complete' || document.readyState === 'interactive') {
-            doPrint();
-          } else {
-            window.addEventListener('DOMContentLoaded', doPrint);
-            window.addEventListener('load', doPrint);
-          }
-        })();
-      </script>
-    `;
-
-    if (finalHtml.includes('<body')) {
-      finalHtml = finalHtml.replace(/<body([^>]*)>/i, `<body$1>${printActionBarHtml}`);
-    } else {
-      finalHtml = `${printActionBarHtml}${finalHtml}`;
+    const existingIframe = document.getElementById('mandi-isolated-print-iframe') as HTMLIFrameElement | null;
+    if (existingIframe) {
+      try { existingIframe.remove(); } catch {}
     }
 
-    if (finalHtml.includes('</body>')) {
-      finalHtml = finalHtml.replace('</body>', `${printScript}</body>`);
-    } else {
-      finalHtml += printScript;
+    // 2. Create a clean, sandboxed hidden iframe
+    const printIframe = document.createElement('iframe');
+    printIframe.id = 'mandi-isolated-print-iframe';
+    printIframe.title = documentTitle;
+    printIframe.setAttribute(
+      'style',
+      'position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; opacity: 0; pointer-events: none; z-index: -99999;'
+    );
+    document.body.appendChild(printIframe);
+
+    const doc = printIframe.contentWindow?.document || printIframe.contentDocument;
+    if (!doc) {
+      console.error('Print error: Could not access isolated iframe document');
+      return;
     }
 
-    // 2. Create standalone Blob URL (100% isolated document context)
-    const blob = new Blob([finalHtml], { type: 'text/html;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
+    // 3. Write complete document inside the iframe's isolated context
+    doc.open();
+    doc.write(htmlContent);
+    doc.close();
 
-    // Clean up any lingering print assistant
-    const existingAssistant = document.getElementById('mandi-print-floating-assistant');
-    if (existingAssistant) {
-      existingAssistant.remove();
-    }
-
-    // 3. Strategy A: Open un-sandboxed tab / window (Bypasses iframe sandboxing without touching parent UI)
-    let openedTab = false;
-    try {
-      const printWin = window.open(blobUrl, '_blank');
-      if (printWin) {
-        printWin.focus();
-        openedTab = true;
-      }
-    } catch (openErr) {
-      console.warn('Direct window.open popup was blocked:', openErr);
-    }
-
-    // 4. Strategy B: Isolated Hidden Iframe (Fallback if popup was blocked)
-    if (!openedTab) {
+    // 4. Trigger print cleanly once the iframe's content is rendered
+    const executePrint = () => {
       try {
-        let printIframe = document.getElementById('mandi-hidden-print-iframe') as HTMLIFrameElement | null;
-        if (printIframe) {
-          try {
-            document.body.removeChild(printIframe);
-          } catch {}
+        if (printIframe.contentWindow) {
+          printIframe.contentWindow.focus();
+          printIframe.contentWindow.print();
         }
-
-        printIframe = document.createElement('iframe');
-        printIframe.id = 'mandi-hidden-print-iframe';
-        printIframe.title = documentTitle;
-        printIframe.setAttribute(
-          'style',
-          'position: fixed; top: 0; left: -9999px; width: 1024px; height: 768px; border: 0; opacity: 0.001; pointer-events: none; z-index: -9999;'
-        );
-        document.body.appendChild(printIframe);
-
-        const doc = printIframe.contentWindow?.document || printIframe.contentDocument;
-        if (doc) {
-          doc.open();
-          doc.write(finalHtml);
-          doc.close();
-
-          setTimeout(() => {
-            try {
-              printIframe?.contentWindow?.focus();
-              printIframe?.contentWindow?.print();
-            } catch (iframeErr) {
-              console.warn('Iframe print failed:', iframeErr);
-            }
-          }, 200);
-        }
-      } catch (err) {
-        console.warn('Iframe setup error:', err);
+      } catch (printErr) {
+        console.warn('Iframe native print trigger notice:', printErr);
       }
+    };
+
+    // Check readyState or listen for load
+    if (doc.readyState === 'complete' || doc.readyState === 'interactive') {
+      setTimeout(executePrint, 150);
+    } else if (printIframe.contentWindow) {
+      printIframe.contentWindow.onload = () => {
+        setTimeout(executePrint, 150);
+      };
+      setTimeout(executePrint, 350);
+    } else {
+      setTimeout(executePrint, 250);
     }
   } catch (globalErr) {
     console.error('Universal print execution error:', globalErr);

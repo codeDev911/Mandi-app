@@ -5,6 +5,7 @@ import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { VendorConsolidatedBillModal } from './VendorConsolidatedBillModal';
 import { ReportPDFPreviewModal } from './ReportPDFPreviewModal';
+import { PaginationControls } from './PaginationControls';
 import {
   PDFPreviewData,
   buildReportPDF,
@@ -111,6 +112,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     lots: VendorLot[];
     dateLabel: string;
   } | null>(null);
+
+  // Sub-pagination states for individual vendor lots and customer transactions inside report cards
+  const [vendorLotsSubPages, setVendorLotsSubPages] = useState<Record<string, number>>({});
+  const [customerTransactionsSubPages, setCustomerTransactionsSubPages] = useState<Record<string, number>>({});
 
   // Date filtering helper
   const isLotInDateRange = (lotDate: string) => {
@@ -523,6 +528,42 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       rangeStr: dateRangeStr,
     };
   };
+
+  // Pagination for Date (Lots) Report
+  const [dateReportPage, setDateReportPage] = useState(1);
+  const [dateReportPageSize, setDateReportPageSize] = useState(25);
+  const dateReportTotalPages = Math.ceil(filteredLotsByDate.length / dateReportPageSize) || 1;
+  const paginatedLotsByDate = useMemo(() => {
+    const start = (dateReportPage - 1) * dateReportPageSize;
+    return filteredLotsByDate.slice(start, start + dateReportPageSize);
+  }, [filteredLotsByDate, dateReportPage, dateReportPageSize]);
+
+  // Pagination for Vendor Report
+  const [vendorReportPage, setVendorReportPage] = useState(1);
+  const [vendorReportPageSize, setVendorReportPageSize] = useState(25);
+  const vendorReportTotalPages = Math.ceil(vendorReports.length / vendorReportPageSize) || 1;
+  const paginatedVendorReports = useMemo(() => {
+    const start = (vendorReportPage - 1) * vendorReportPageSize;
+    return vendorReports.slice(start, start + vendorReportPageSize);
+  }, [vendorReports, vendorReportPage, vendorReportPageSize]);
+
+  // Pagination for Customer Report
+  const [custReportPage, setCustReportPage] = useState(1);
+  const [custReportPageSize, setCustReportPageSize] = useState(25);
+  const custReportTotalPages = Math.ceil(customerReports.length / custReportPageSize) || 1;
+  const paginatedCustomerReports = useMemo(() => {
+    const start = (custReportPage - 1) * custReportPageSize;
+    return customerReports.slice(start, start + custReportPageSize);
+  }, [customerReports, custReportPage, custReportPageSize]);
+
+  // Pagination for Product Report
+  const [prodReportPage, setProdReportPage] = useState(1);
+  const [prodReportPageSize, setProdReportPageSize] = useState(25);
+  const prodReportTotalPages = Math.ceil(productReports.length / prodReportPageSize) || 1;
+  const paginatedProductReports = useMemo(() => {
+    const start = (prodReportPage - 1) * prodReportPageSize;
+    return productReports.slice(start, start + prodReportPageSize);
+  }, [productReports, prodReportPage, prodReportPageSize]);
 
   // Preview PDF for Current Tab Report (Filtered by Selected Date Range)
   const handlePreviewPDF = () => {
@@ -1076,7 +1117,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {filteredLotsByDate.map((lot) => {
+              {paginatedLotsByDate.map((lot) => {
                 return (
                   <div
                     key={lot.id}
@@ -1155,6 +1196,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               })}
             </div>
           )}
+
+          {filteredLotsByDate.length > 0 && (
+            <div className="p-3 border-t border-slate-200">
+              <PaginationControls
+                currentPage={dateReportPage}
+                totalPages={dateReportTotalPages}
+                totalItems={filteredLotsByDate.length}
+                pageSize={dateReportPageSize}
+                onPageChange={setDateReportPage}
+                onPageSizeChange={setDateReportPageSize}
+                isUrdu={isUrdu}
+                itemName={isUrdu ? 'لاٹس' : 'lots'}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -1203,7 +1259,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {vendorReports.map((v) => (
+              {paginatedVendorReports.map((v) => (
                 <div key={v.vendorName} className="p-3.5 sm:p-4 hover:bg-slate-50 transition space-y-3">
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div>
@@ -1450,128 +1506,191 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   )}
 
-                  {/* Micro lots list for this vendor with 'See All Bill' option */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-700 font-urdu-sans flex items-center gap-1.5">
-                        <span>اجناس و لاٹس تفصیل ({v.lots.length}):</span>
-                      </span>
+                  {/* Micro lots list for this vendor with 'See All Bill' option and sub-pagination */}
+                  {(() => {
+                    const vendorLotsPageSize = 6;
+                    const currentVendorLotsPage = vendorLotsSubPages[v.vendorName] || 1;
+                    const totalVendorLotsPages = Math.ceil(v.lots.length / vendorLotsPageSize) || 1;
+                    const paginatedVendorLots = v.lots.slice(
+                      (currentVendorLotsPage - 1) * vendorLotsPageSize,
+                      currentVendorLotsPage * vendorLotsPageSize
+                    );
 
-                      {/* "See All Products Bill" Button requested by user */}
-                      <button
-                        onClick={() => {
-                          sound.playTick();
-                          const dateLabel =
-                            dateFilter === 'today'
-                              ? isUrdu ? 'آج کی تاریخ' : "Today's Date"
-                              : dateFilter === 'yesterday'
-                              ? isUrdu ? 'گزشتہ کل' : 'Yesterday'
-                              : v.lots[0]?.arrivalDate || '';
+                    return (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-bold text-slate-700 font-urdu-sans flex items-center gap-1.5">
+                            <span>اجناس و لاٹس تفصیل ({v.lots.length}):</span>
+                          </span>
 
-                          setConsolidatedBillVendor({
-                            vendorName: v.vendorName,
-                            vendorPhone: v.vendorPhone,
-                            vendorCity: v.vendorCity,
-                            lots: v.lots,
-                            dateLabel,
-                          });
-                        }}
-                        className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-xs transition active:scale-95"
-                      >
-                        <Layers className="w-3.5 h-3.5" />
-                        <span>{isUrdu ? 'تمام اجناس کا بل دیکھیں (کل مشترکہ بل)' : 'See All Products Bill'}</span>
-                      </button>
-                    </div>
-
-                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                      {v.lots.map((lot) => {
-                        const lotNet = lot.summary.netPayableToVendor;
-                        const lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : (lot.vendorPaymentStatus === 'paid' ? lotNet : 0);
-                        const isLotPaid = lot.vendorPaymentStatus === 'paid' || lotPaid >= lotNet;
-                        const isPartial = lot.vendorPaymentStatus === 'partial' || (lotPaid > 0 && lotPaid < lotNet);
-
-                        return (
-                          <div
-                            key={lot.id}
-                            className="bg-white p-2.5 rounded-xl border border-slate-200 flex flex-col justify-between gap-2 shadow-2xs"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="truncate">
-                                <span className="font-bold text-slate-800 font-urdu-sans">
-                                  {lot.productEmoji} {lot.productUrdu}
-                                </span>
-                                <span className="text-[11px] text-slate-400 font-numbers block">
-                                  {lot.lotNumber} • {lot.arrivalDate} ({lot.totalQuantity} {unitLabels[lot.unitType][settings.language]})
-                                </span>
-                              </div>
-
-                              <div className="text-end flex-shrink-0">
-                                <span className="font-bold text-slate-900 font-numbers block">
-                                  {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
-                                </span>
-                                <span className="text-[10px] text-slate-500 font-numbers block">
-                                  {isUrdu ? 'خالص:' : 'Net:'} {formatPKR(lotNet, settings.currencySymbol, settings.language)}
-                                </span>
-                              </div>
+                          {totalVendorLotsPages > 1 && (
+                            <div className="flex items-center gap-1 text-[11px] font-urdu-sans">
+                              <span className="text-slate-500 font-numbers text-[10px]">
+                                ({currentVendorLotsPage}/{totalVendorLotsPages})
+                              </span>
+                              <button
+                                type="button"
+                                disabled={currentVendorLotsPage <= 1}
+                                onClick={() =>
+                                  setVendorLotsSubPages((prev) => ({
+                                    ...prev,
+                                    [v.vendorName]: Math.max(1, currentVendorLotsPage - 1),
+                                  }))
+                                }
+                                className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 disabled:opacity-40 hover:bg-slate-200 text-slate-700 text-[10px]"
+                              >
+                                ‹ پچھلا
+                              </button>
+                              <button
+                                type="button"
+                                disabled={currentVendorLotsPage >= totalVendorLotsPages}
+                                onClick={() =>
+                                  setVendorLotsSubPages((prev) => ({
+                                    ...prev,
+                                    [v.vendorName]: Math.min(totalVendorLotsPages, currentVendorLotsPage + 1),
+                                  }))
+                                }
+                                className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 disabled:opacity-40 hover:bg-slate-200 text-slate-700 text-[10px]"
+                              >
+                                اگلا ›
+                              </button>
                             </div>
+                          )}
+                        </div>
 
-                            {/* Lot payment status and actions */}
-                            <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-[11px]">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {isLotPaid ? (
-                                  <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold font-urdu-sans flex items-center gap-1">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-                                    <span>{isUrdu ? 'ادا شدہ' : 'Paid'}</span>
-                                    {lot.vendorPaymentDate && (
-                                      <span className="text-[9px] text-emerald-700 font-numbers">({lot.vendorPaymentDate})</span>
-                                    )}
-                                  </span>
-                                ) : isPartial ? (
-                                  <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold font-urdu-sans flex items-center gap-1">
-                                    <Clock className="w-3 h-3 text-blue-700" />
-                                    <span>{isUrdu ? 'جزوی ادا' : 'Partial'}</span>
-                                    <span className="text-[9px] text-blue-700 font-numbers">({formatPKR(lotPaid, settings.currencySymbol, settings.language)})</span>
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold font-urdu-sans flex items-center gap-1">
-                                    <Clock className="w-3 h-3 text-amber-700" />
-                                    <span>{isUrdu ? 'ادائیگی بقایا' : 'Pending'}</span>
-                                  </span>
-                                )}
+                        {/* "See All Products Bill" Button requested by user */}
+                        <button
+                          onClick={() => {
+                            sound.playTick();
+                            const dateLabel =
+                              dateFilter === 'today'
+                                ? isUrdu ? 'آج کی تاریخ' : "Today's Date"
+                                : dateFilter === 'yesterday'
+                                ? isUrdu ? 'گزشتہ کل' : 'Yesterday'
+                                : v.lots[0]?.arrivalDate || '';
 
-                                {lot.vendorPaymentNotes && (
-                                  <span className="text-[10px] text-slate-500 font-urdu-sans truncate max-w-[120px]" title={lot.vendorPaymentNotes}>
-                                    📝 {lot.vendorPaymentNotes}
+                            setConsolidatedBillVendor({
+                              vendorName: v.vendorName,
+                              vendorPhone: v.vendorPhone,
+                              vendorCity: v.vendorCity,
+                              lots: v.lots,
+                              dateLabel,
+                            });
+                          }}
+                          className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-xs transition active:scale-95"
+                        >
+                          <Layers className="w-3.5 h-3.5" />
+                          <span>{isUrdu ? 'تمام اجناس کا بل دیکھیں (کل مشترکہ بل)' : 'See All Products Bill'}</span>
+                        </button>
+                      </div>
+
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        {paginatedVendorLots.map((lot) => {
+                          const lotNet = lot.summary.netPayableToVendor;
+                          const lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : (lot.vendorPaymentStatus === 'paid' ? lotNet : 0);
+                          const isLotPaid = lot.vendorPaymentStatus === 'paid' || lotPaid >= lotNet;
+                          const isPartial = lot.vendorPaymentStatus === 'partial' || (lotPaid > 0 && lotPaid < lotNet);
+
+                          return (
+                            <div
+                              key={lot.id}
+                              className="bg-white p-2.5 rounded-xl border border-slate-200 flex flex-col justify-between gap-2 shadow-2xs"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="truncate">
+                                  <span className="font-bold text-slate-800 font-urdu-sans">
+                                    {lot.productEmoji} {lot.productUrdu}
                                   </span>
-                                )}
+                                  <span className="text-[11px] text-slate-400 font-numbers block">
+                                    {lot.lotNumber} • {lot.arrivalDate} ({lot.totalQuantity} {unitLabels[lot.unitType][settings.language]})
+                                  </span>
+                                </div>
+
+                                <div className="text-end flex-shrink-0">
+                                  <span className="font-bold text-slate-900 font-numbers block">
+                                    {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-numbers block">
+                                    {isUrdu ? 'خالص:' : 'Net:'} {formatPKR(lotNet, settings.currencySymbol, settings.language)}
+                                  </span>
+                                </div>
                               </div>
 
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenVendorPayment(v.vendorName, Math.max(0, lotNet - lotPaid), lot.id)}
-                                  className="text-[10px] text-emerald-700 hover:text-emerald-900 hover:underline font-bold font-urdu-sans"
-                                >
-                                  {isUrdu ? 'ادائیگی' : 'Pay'}
-                                </button>
+                              {/* Lot payment status and actions */}
+                              <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-[11px]">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {isLotPaid ? (
+                                    <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold font-urdu-sans flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                      <span>{isUrdu ? 'ادا شدہ' : 'Paid'}</span>
+                                      {lot.vendorPaymentDate && (
+                                        <span className="text-[9px] text-emerald-700 font-numbers">({lot.vendorPaymentDate})</span>
+                                      )}
+                                    </span>
+                                  ) : isPartial ? (
+                                    <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold font-urdu-sans flex items-center gap-1">
+                                      <Clock className="w-3 h-3 text-blue-700" />
+                                      <span>{isUrdu ? 'جزوی ادا' : 'Partial'}</span>
+                                      <span className="text-[9px] text-blue-700 font-numbers">({formatPKR(lotPaid, settings.currencySymbol, settings.language)})</span>
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold font-urdu-sans flex items-center gap-1">
+                                      <Clock className="w-3 h-3 text-amber-700" />
+                                      <span>{isUrdu ? 'ادائیگی بقایا' : 'Pending'}</span>
+                                    </span>
+                                  )}
 
-                                {onOpenReceipt && (
+                                  {lot.vendorPaymentNotes && (
+                                    <span className="text-[10px] text-slate-500 font-urdu-sans truncate max-w-[120px]" title={lot.vendorPaymentNotes}>
+                                      📝 {lot.vendorPaymentNotes}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2">
                                   <button
-                                    onClick={() => onOpenReceipt(lot.id)}
-                                    className="text-[10px] text-slate-600 hover:text-slate-900 hover:underline font-bold font-urdu-sans"
+                                    type="button"
+                                    onClick={() => handleOpenVendorPayment(v.vendorName, Math.max(0, lotNet - lotPaid), lot.id)}
+                                    className="text-[10px] text-emerald-700 hover:text-emerald-900 hover:underline font-bold font-urdu-sans"
                                   >
-                                    {isUrdu ? 'رسید' : 'Receipt'}
+                                    {isUrdu ? 'ادائیگی' : 'Pay'}
                                   </button>
-                                )}
+
+                                  {onOpenReceipt && (
+                                    <button
+                                      onClick={() => onOpenReceipt(lot.id)}
+                                      className="text-[10px] text-slate-600 hover:text-slate-900 hover:underline font-bold font-urdu-sans"
+                                    >
+                                      {isUrdu ? 'رسید' : 'Receipt'}
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
+                    );
+                  })()}
                 </div>
               ))}
+            </div>
+          )}
+
+          {vendorReports.length > 0 && (
+            <div className="p-3 border-t border-slate-200">
+              <PaginationControls
+                currentPage={vendorReportPage}
+                totalPages={vendorReportTotalPages}
+                totalItems={vendorReports.length}
+                pageSize={vendorReportPageSize}
+                onPageChange={setVendorReportPage}
+                onPageSizeChange={setVendorReportPageSize}
+                isUrdu={isUrdu}
+                itemName={isUrdu ? 'زمیندار' : 'vendors'}
+              />
             </div>
           )}
         </div>
@@ -1622,7 +1741,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {customerReports.map((c) => (
+              {paginatedCustomerReports.map((c) => (
                 <div key={c.customerName} className="p-3.5 sm:p-4 hover:bg-slate-50 transition space-y-2.5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
@@ -1681,49 +1800,114 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Transaction Mini Table */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-start font-urdu-sans">
-                      <thead>
-                        <tr className="text-slate-400 border-b border-slate-200 text-[11px]">
-                          <th className="py-1 px-2 text-start font-medium">{t.date}</th>
-                          <th className="py-1 px-2 text-start font-medium">{t.product}</th>
-                          <th className="py-1 px-2 text-center font-medium">{t.qty}</th>
-                          <th className="py-1 px-2 text-center font-medium">{t.rate}</th>
-                          <th className="py-1 px-2 text-end font-medium">{t.totalAmount}</th>
-                          <th className="py-1 px-2 text-center font-medium">{t.status}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {c.transactions.map((tx, idx) => (
-                          <tr key={idx} className="hover:bg-white">
-                            <td className="py-1 px-2 font-numbers text-slate-500">{tx.date}</td>
-                            <td className="py-1 px-2 font-bold text-slate-800">{tx.productUrdu}</td>
-                            <td className="py-1 px-2 text-center font-numbers">{tx.quantity}</td>
-                            <td className="py-1 px-2 text-center font-numbers">
-                              {formatPKR(tx.ratePerUnit, settings.currencySymbol, settings.language)}
-                            </td>
-                            <td className="py-1 px-2 text-end font-bold font-numbers text-slate-900">
-                              {formatPKR(tx.totalAmount, settings.currencySymbol, settings.language)}
-                            </td>
-                            <td className="py-1 px-2 text-center">
-                              <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
-                                  tx.paymentStatus === 'cash'
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-amber-100 text-amber-900'
-                                }`}
-                              >
-                                {tx.paymentStatus === 'cash' ? t.paymentCash : t.paymentCredit}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {/* Transaction Mini Table with Sub-Pagination */}
+                  {(() => {
+                    const txPageSize = 6;
+                    const currentTxPage = customerTransactionsSubPages[c.customerName] || 1;
+                    const totalTxPages = Math.ceil(c.transactions.length / txPageSize) || 1;
+                    const paginatedTransactions = c.transactions.slice(
+                      (currentTxPage - 1) * txPageSize,
+                      currentTxPage * txPageSize
+                    );
+
+                    return (
+                    <div className="space-y-1.5">
+                      {totalTxPages > 1 && (
+                        <div className="flex items-center justify-between text-[11px] font-urdu-sans pt-1">
+                          <span className="text-slate-500 font-numbers text-[10px]">
+                            خریداری تفصیل ({c.transactions.length}) • صفحہ {currentTxPage} از {totalTxPages}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={currentTxPage <= 1}
+                              onClick={() =>
+                                setCustomerTransactionsSubPages((prev) => ({
+                                  ...prev,
+                                  [c.customerName]: Math.max(1, currentTxPage - 1),
+                                }))
+                              }
+                              className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 disabled:opacity-40 hover:bg-slate-200 text-slate-700 text-[10px]"
+                            >
+                              ‹ پچھلا
+                            </button>
+                            <button
+                              type="button"
+                              disabled={currentTxPage >= totalTxPages}
+                              onClick={() =>
+                                setCustomerTransactionsSubPages((prev) => ({
+                                  ...prev,
+                                  [c.customerName]: Math.min(totalTxPages, currentTxPage + 1),
+                                }))
+                              }
+                              className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 disabled:opacity-40 hover:bg-slate-200 text-slate-700 text-[10px]"
+                            >
+                              اگلا ›
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-start font-urdu-sans">
+                          <thead>
+                            <tr className="text-slate-400 border-b border-slate-200 text-[11px]">
+                              <th className="py-1 px-2 text-start font-medium">{t.date}</th>
+                              <th className="py-1 px-2 text-start font-medium">{t.product}</th>
+                              <th className="py-1 px-2 text-center font-medium">{t.qty}</th>
+                              <th className="py-1 px-2 text-center font-medium">{t.rate}</th>
+                              <th className="py-1 px-2 text-end font-medium">{t.totalAmount}</th>
+                              <th className="py-1 px-2 text-center font-medium">{t.status}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {paginatedTransactions.map((tx, idx) => (
+                              <tr key={idx} className="hover:bg-white">
+                                <td className="py-1 px-2 font-numbers text-slate-500">{tx.date}</td>
+                                <td className="py-1 px-2 font-bold text-slate-800">{tx.productUrdu}</td>
+                                <td className="py-1 px-2 text-center font-numbers">{tx.quantity}</td>
+                                <td className="py-1 px-2 text-center font-numbers">
+                                  {formatPKR(tx.ratePerUnit, settings.currencySymbol, settings.language)}
+                                </td>
+                                <td className="py-1 px-2 text-end font-bold font-numbers text-slate-900">
+                                  {formatPKR(tx.totalAmount, settings.currencySymbol, settings.language)}
+                                </td>
+                                <td className="py-1 px-2 text-center">
+                                  <span
+                                    className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                                      tx.paymentStatus === 'cash'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-amber-100 text-amber-900'
+                                    }`}
+                                  >
+                                    {tx.paymentStatus === 'cash' ? t.paymentCash : t.paymentCredit}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    );
+                  })()}
                 </div>
               ))}
+            </div>
+          )}
+
+          {customerReports.length > 0 && (
+            <div className="p-3 border-t border-slate-200">
+              <PaginationControls
+                currentPage={custReportPage}
+                totalPages={custReportTotalPages}
+                totalItems={customerReports.length}
+                pageSize={custReportPageSize}
+                onPageChange={setCustReportPage}
+                onPageSizeChange={setCustReportPageSize}
+                isUrdu={isUrdu}
+                itemName={isUrdu ? 'خریدار' : 'customers'}
+              />
             </div>
           )}
         </div>
@@ -1773,77 +1957,94 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               {t.noReportsFound}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 sm:p-4">
-              {productReports.map((p) => (
-                <div
-                  key={p.productName}
-                  className="bg-slate-50 hover:bg-slate-100/80 p-4 rounded-2xl border border-slate-200 transition space-y-2.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-2xl">{p.emoji}</span>
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-900 font-urdu-sans">
-                          {p.productUrdu}
-                        </h4>
-                        <span className="text-[11px] text-slate-500 font-urdu-sans">
-                          {p.totalLots} {t.totalLotsCount} • {p.totalSold} فروخت شدہ
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 sm:p-4">
+                {paginatedProductReports.map((p) => (
+                  <div
+                    key={p.productName}
+                    className="bg-slate-50 hover:bg-slate-100/80 p-4 rounded-2xl border border-slate-200 transition space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-2xl">{p.emoji}</span>
+                        <div>
+                          <h4 className="font-bold text-sm text-slate-900 font-urdu-sans">
+                            {p.productUrdu}
+                          </h4>
+                          <span className="text-[11px] text-slate-500 font-urdu-sans">
+                            {p.totalLots} {t.totalLotsCount} • {p.totalSold} فروخت شدہ
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-end">
+                        <span className="text-xs text-slate-500 font-urdu-sans block">{t.grossTotal}:</span>
+                        <span className="text-sm sm:text-base font-black text-slate-900 font-numbers block">
+                          {formatPKR(p.grossTurnover, settings.currencySymbol, settings.language)}
                         </span>
                       </div>
                     </div>
-                    <div className="text-end">
-                      <span className="text-xs text-slate-500 font-urdu-sans block">{t.grossTotal}:</span>
-                      <span className="text-sm sm:text-base font-black text-slate-900 font-numbers block">
-                        {formatPKR(p.grossTurnover, settings.currencySymbol, settings.language)}
-                      </span>
-                    </div>
-                  </div>
 
-                  {/* Rate statistics */}
-                  <div className="grid grid-cols-3 gap-2 bg-white p-2.5 rounded-xl border border-slate-200 text-center">
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-urdu-sans block">{t.avgRate}</span>
-                      <span className="text-xs font-bold text-slate-800 font-numbers">
-                        {formatPKR(p.avgRate, settings.currencySymbol, settings.language)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-urdu-sans block">{t.minRate}</span>
-                      <span className="text-xs font-bold text-blue-700 font-numbers">
-                        {formatPKR(p.minRate, settings.currencySymbol, settings.language)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-urdu-sans block">{t.maxRate}</span>
-                      <span className="text-xs font-bold text-emerald-700 font-numbers">
-                        {formatPKR(p.maxRate, settings.currencySymbol, settings.language)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
-                    <div>
-                      <span className="text-slate-500 font-urdu-sans">کمیشن منافع: </span>
-                      <span className="font-bold text-emerald-800 font-numbers">
-                        {formatPKR(p.commissionEarned, settings.currencySymbol, settings.language)}
-                      </span>
+                    {/* Rate statistics */}
+                    <div className="grid grid-cols-3 gap-2 bg-white p-2.5 rounded-xl border border-slate-200 text-center">
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-urdu-sans block">{t.avgRate}</span>
+                        <span className="text-xs font-bold text-slate-800 font-numbers">
+                          {formatPKR(p.avgRate, settings.currencySymbol, settings.language)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-urdu-sans block">{t.minRate}</span>
+                        <span className="text-xs font-bold text-blue-700 font-numbers">
+                          {formatPKR(p.minRate, settings.currencySymbol, settings.language)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-urdu-sans block">{t.maxRate}</span>
+                        <span className="text-xs font-bold text-emerald-700 font-numbers">
+                          {formatPKR(p.maxRate, settings.currencySymbol, settings.language)}
+                        </span>
+                      </div>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        sound.playTick();
-                        const preview = buildSingleProductReportPDF(p, settings, getDateRangeDetails().label);
-                        setPdfPreview(preview);
-                      }}
-                      className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-[11px] font-bold font-urdu-sans transition flex items-center gap-1 shadow-2xs"
-                      title="اس جنس کی مکمل رپورٹ پی ڈی ایف دیکھیں یا ڈاؤن لوڈ کریں"
-                    >
-                      <Eye className="w-3 h-3" />
-                      <span>پی ڈی ایف رپورٹ</span>
-                    </button>
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
+                      <div>
+                        <span className="text-slate-500 font-urdu-sans">کمیشن منافع: </span>
+                        <span className="font-bold text-emerald-800 font-numbers">
+                          {formatPKR(p.commissionEarned, settings.currencySymbol, settings.language)}
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          sound.playTick();
+                          const preview = buildSingleProductReportPDF(p, settings, getDateRangeDetails().label);
+                          setPdfPreview(preview);
+                        }}
+                        className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-[11px] font-bold font-urdu-sans transition flex items-center gap-1 shadow-2xs"
+                        title="اس جنس کی مکمل رپورٹ پی ڈی ایف دیکھیں یا ڈاؤن لوڈ کریں"
+                      >
+                        <Eye className="w-3 h-3" />
+                        <span>پی ڈی ایف رپورٹ</span>
+                      </button>
+                    </div>
                   </div>
+                ))}
+              </div>
+
+              {productReports.length > 0 && (
+                <div className="p-3 border-t border-slate-200">
+                  <PaginationControls
+                    currentPage={prodReportPage}
+                    totalPages={prodReportTotalPages}
+                    totalItems={productReports.length}
+                    pageSize={prodReportPageSize}
+                    onPageChange={setProdReportPage}
+                    onPageSizeChange={setProdReportPageSize}
+                    isUrdu={isUrdu}
+                    itemName={isUrdu ? 'اجناس' : 'products'}
+                  />
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>

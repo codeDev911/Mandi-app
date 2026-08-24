@@ -1,4 +1,5 @@
 import { VendorLot, AppSettings, CustomerBuyer, SavedVendor } from '../types';
+import { neon } from '@neondatabase/serverless';
 
 export interface CloudSyncMetadata {
   shopCloudId: string;
@@ -33,6 +34,43 @@ export interface CloudSyncResult {
 const CLOUD_CONFIG_KEY = 'mandi_postgres_sync_config_v3';
 const LOCAL_VAULT_PREFIX = 'mandi_cloud_server_vault_';
 
+/**
+ * Sanitizes and normalizes a PostgreSQL connection URL
+ * Handles accidental quotes, psql command wrappers, spaces, and ensures SSL query parameter for cloud providers.
+ */
+export function sanitizePostgresUrl(rawUrl?: string): string {
+  if (!rawUrl) return '';
+  let clean = rawUrl.trim();
+
+  // Strip wrapping single or double quotes
+  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+    clean = clean.slice(1, -1).trim();
+  }
+
+  // Strip CLI command prefix e.g. 'psql "postgresql://..."'
+  if (clean.toLowerCase().startsWith('psql ')) {
+    clean = clean.slice(5).trim();
+    if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+      clean = clean.slice(1, -1).trim();
+    }
+  }
+
+  // Ensure protocol
+  if (clean.startsWith('postgres://')) {
+    clean = 'postgresql://' + clean.slice('postgres://'.length);
+  }
+
+  // Auto-append sslmode=require for Cloud databases if missing
+  if (
+    (clean.includes('.neon.tech') || clean.includes('.supabase.co') || clean.includes('.render.com')) &&
+    !clean.includes('sslmode=')
+  ) {
+    clean += clean.includes('?') ? '&sslmode=require' : '?sslmode=require';
+  }
+
+  return clean;
+}
+
 export function getStoredCloudConfig(): CloudSyncMetadata {
   try {
     const saved = localStorage.getItem(CLOUD_CONFIG_KEY);
@@ -41,7 +79,7 @@ export function getStoredCloudConfig(): CloudSyncMetadata {
       return {
         shopCloudId: parsed.shopCloudId || 'MANDI-786',
         shopPin: parsed.shopPin || '1234',
-        postgresUrl: parsed.postgresUrl || '',
+        postgresUrl: sanitizePostgresUrl(parsed.postgresUrl || ''),
         autoSync: parsed.autoSync || false,
         lastUploadedAt: parsed.lastUploadedAt || undefined,
         lastDownloadedAt: parsed.lastDownloadedAt || undefined,
@@ -64,7 +102,11 @@ export function getStoredCloudConfig(): CloudSyncMetadata {
 
 export function saveStoredCloudConfig(config: CloudSyncMetadata): void {
   try {
-    localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
+    const cleanedConfig = {
+      ...config,
+      postgresUrl: sanitizePostgresUrl(config.postgresUrl),
+    };
+    localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cleanedConfig));
   } catch {
     // ignore
   }
@@ -111,80 +153,24 @@ export function isNeonPostgresUrl(url?: string): boolean {
 }
 
 /**
- * Extracts host from a PostgreSQL connection string
- * e.g. postgresql://user:pass@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require
+ * Safe fetch helper that gracefully handles non-JSON server responses
  */
-export function extractNeonHost(connectionString: string): string | null {
-  try {
-    const clean = connectionString.trim();
-    const atIndex = clean.indexOf('@');
-    if (atIndex === -1) return null;
-    const afterAt = clean.slice(atIndex + 1);
-    const slashIndex = afterAt.indexOf('/');
-    const hostPort = slashIndex !== -1 ? afterAt.slice(0, slashIndex) : afterAt;
-    const host = hostPort.split(':')[0];
-    return host || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Executes direct Serverless SQL query on Neon via Neon's official HTTPS /sql endpoint
- * This works natively in all browsers, mobile webviews, and Capacitor APKs without requiring a Node.js server.
- */
-export async function executeNeonHttpQuery<T = any>(
-  connectionString: string,
-  query: string,
-  params: any[] = []
-): Promise<{ ok: boolean; rows?: T[]; error?: string; rowCount?: number }> {
-  const host = extractNeonHost(connectionString);
-  if (!host) {
-    return { ok: false, error: 'Invalid Neon host in connection string' };
-  }
-
-  const endpoint = `https://${host}/sql`;
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Neon-Connection-String': connectionString.trim(),
-      },
-      body: JSON.stringify({
-        query,
-        params,
-      }),
-    });
-
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      return {
-        ok: false,
-        error: data.error || data.message || `Neon HTTP Error (${res.status})`,
-      };
-    }
-
-    return {
-      ok: true,
-      rows: data.rows || [],
-      rowCount: data.rowCount ?? data.rows?.length ?? 0,
-    };
-  } catch (err: any) {
-    return {
-      ok: false,
-      error: err?.message || 'Neon HTTPS direct connection failed',
-    };
-  }
-}
-
 async function safeFetchJson<T = any>(
   url: string,
   options: RequestInit,
   endpointName: string
 ): Promise<{ ok: boolean; status: number; data?: T; errorText?: string }> {
   try {
-    const res = await fetch(url, options);
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 12000) : null;
+
+    const res = await fetch(url, {
+      ...options,
+      signal: controller ? controller.signal : undefined,
+    });
+
+    if (timeoutId) clearTimeout(timeoutId);
+
     const contentType = res.headers.get('content-type') || '';
     const text = await res.text();
 
@@ -192,7 +178,7 @@ async function safeFetchJson<T = any>(
       return {
         ok: false,
         status: res.status,
-        errorText: `سرور سے درست JSON جواب موصول نہیں ہوا۔ (موبائل / براؤزر میں API سرور بند ہے یا لوکل موڈ میں چل رہا ہے)`,
+        errorText: `سرور سے درست جواب موصول نہیں ہوا۔ (${endpointName})`,
       };
     }
 
@@ -221,7 +207,9 @@ async function safeFetchJson<T = any>(
 }
 
 /**
- * Test PostgreSQL Database connection via Direct Neon HTTPS or server endpoint
+ * Multi-Strategy PostgreSQL Database Connection Tester
+ * 1. Tries Backend API Route (/api/db/test via Node pg.Pool)
+ * 2. If backend is unavailable or client is in standalone mode (Capacitor/PWA/Electron), uses official @neondatabase/serverless driver
  */
 export async function testPostgresConnection(customUrl?: string): Promise<{
   success: boolean;
@@ -229,7 +217,7 @@ export async function testPostgresConnection(customUrl?: string): Promise<{
   serverTime?: string;
   version?: string;
 }> {
-  const cleanUrl = (customUrl || getStoredCloudConfig().postgresUrl || '').trim();
+  const cleanUrl = sanitizePostgresUrl(customUrl || getStoredCloudConfig().postgresUrl || '');
   if (!cleanUrl) {
     return {
       success: false,
@@ -237,71 +225,74 @@ export async function testPostgresConnection(customUrl?: string): Promise<{
     };
   }
 
-  // 1. If Neon PostgreSQL, test via direct Serverless HTTPS API first
+  // 1. Strategy A: Try Backend Server API first (Fast, reliable, bypasses browser CORS for all cloud DBs)
+  try {
+    const serverRes = await safeFetchJson<{
+      success: boolean;
+      message: string;
+      serverTime?: string;
+      version?: string;
+    }>('/api/db/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionUrl: cleanUrl }),
+    }, 'db/test');
+
+    if (serverRes.ok && serverRes.data && serverRes.data.success) {
+      return serverRes.data;
+    }
+  } catch (err) {
+    console.warn('Backend /api/db/test attempt bypassed, trying direct Neon driver:', err);
+  }
+
+  // 2. Strategy B: Direct Client-Side Serverless Driver for Neon PostgreSQL
   if (isNeonPostgresUrl(cleanUrl)) {
-    const neonRes = await executeNeonHttpQuery<{ now: string; version: string }>(
-      cleanUrl,
-      'SELECT NOW() as now, version() as version;'
-    );
+    try {
+      const sql = neon(cleanUrl);
+      const rows = (await sql`SELECT NOW() as now, version() as version;`) as any[];
 
-    if (neonRes.ok && neonRes.rows && neonRes.rows.length > 0) {
-      // Auto-ensure schema exists
-      await executeNeonHttpQuery(
-        cleanUrl,
-        `CREATE TABLE IF NOT EXISTS mandi_sync_data (
-          shop_id VARCHAR(100) PRIMARY KEY,
-          shop_pin VARCHAR(50),
-          payload JSONB NOT NULL,
-          lots_count INT DEFAULT 0,
-          customers_count INT DEFAULT 0,
-          vendors_count INT DEFAULT 0,
-          last_uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          last_downloaded_at TIMESTAMP WITH TIME ZONE,
-          client_device TEXT,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );`
-      );
+      if (rows && rows.length > 0) {
+        // Auto-ensure schema exists
+        await sql`
+          CREATE TABLE IF NOT EXISTS mandi_sync_data (
+            shop_id VARCHAR(100) PRIMARY KEY,
+            shop_pin VARCHAR(50),
+            payload JSONB NOT NULL,
+            lots_count INT DEFAULT 0,
+            customers_count INT DEFAULT 0,
+            vendors_count INT DEFAULT 0,
+            last_uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            last_downloaded_at TIMESTAMP WITH TIME ZONE,
+            client_device TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+        `;
 
-      return {
-        success: true,
-        message: 'Neon PostgreSQL (Direct Serverless HTTPS) رابطہ کامیاب رہا! ڈیٹا بیس آن لائن اور تیار ہے۔',
-        serverTime: neonRes.rows[0].now,
-        version: neonRes.rows[0].version,
-      };
-    } else if (neonRes.error) {
+        return {
+          success: true,
+          message: 'Neon PostgreSQL (Direct Serverless) رابطہ کامیاب رہا! ڈیٹا بیس آن لائن اور تیار ہے۔',
+          serverTime: String(rows[0]?.now || new Date().toISOString()),
+          version: String(rows[0]?.version || 'PostgreSQL (Neon Serverless)'),
+        };
+      }
+    } catch (neonErr: any) {
+      console.error('Neon Direct Serverless Connection Error:', neonErr);
       return {
         success: false,
-        message: `Neon کلاؤڈ ڈیٹا بیس کی خرابی: ${neonRes.error} (براہ کرم یوزرنیم، پاس ورڈ اور ہوسٹ چیک کریں)`,
+        message: `Neon کلاؤڈ رابطہ میں خرابی: ${neonErr?.message || 'پاس ورڈ یا ہوسٹ کی تصدیق کریں'} (براہ کرم کنکشن اسٹرنگ چیک کریں)`,
       };
     }
   }
 
-  // 2. Fallback to Server API route (when running with full-stack Node.js backend)
-  const result = await safeFetchJson<{
-    success: boolean;
-    message: string;
-    serverTime?: string;
-    version?: string;
-  }>('/api/db/test', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ connectionUrl: cleanUrl }),
-  }, 'db/test');
-
-  if (result.ok && result.data) {
-    return result.data;
-  }
-
-  // If server is not present (e.g. standalone mobile APK / desktop app without backend server)
   return {
     success: false,
-    message: `ڈیٹا بیس کنکشن ٹیسٹ: ${result.errorText || 'رابطہ ممکن نہیں ہو سکا۔'} موبائل APK اور ڈیسک ٹاپ کے لیے Neon PostgreSQL (neon.tech) کا براہ راست سرور لیس URL تجویز کیا جاتا ہے۔`,
+    message: 'ڈیٹا بیس سے رابطہ ممکن نہیں ہو سکا۔ براہ کرم انٹرنیٹ اور کنکشن اسٹرنگ (یوزر، پاس ورڈ اور ہوسٹ) چیک کریں۔',
   };
 }
 
 /**
- * Uploads local offline data to PostgreSQL database via Direct Neon HTTPS or backend API
+ * Uploads local offline data to PostgreSQL database
  */
 export async function uploadDataToCloud(
   config: CloudSyncMetadata,
@@ -322,91 +313,13 @@ export async function uploadDataToCloud(
     };
   }
 
-  const cleanPostgresUrl = config.postgresUrl?.trim() || getStoredCloudConfig().postgresUrl?.trim() || undefined;
+  const cleanPostgresUrl = sanitizePostgresUrl(config.postgresUrl || getStoredCloudConfig().postgresUrl || '');
   const cleanShopId = config.shopCloudId.trim().toUpperCase();
   const cleanPin = config.shopPin.trim();
   const clientDevice = typeof navigator !== 'undefined' ? navigator.userAgent : 'Client App';
 
-  // 1. If Neon PostgreSQL is used, execute direct Serverless HTTPS upsert
-  if (cleanPostgresUrl && isNeonPostgresUrl(cleanPostgresUrl)) {
-    try {
-      // Ensure table
-      await executeNeonHttpQuery(
-        cleanPostgresUrl,
-        `CREATE TABLE IF NOT EXISTS mandi_sync_data (
-          shop_id VARCHAR(100) PRIMARY KEY,
-          shop_pin VARCHAR(50),
-          payload JSONB NOT NULL,
-          lots_count INT DEFAULT 0,
-          customers_count INT DEFAULT 0,
-          vendors_count INT DEFAULT 0,
-          last_uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          last_downloaded_at TIMESTAMP WITH TIME ZONE,
-          client_device TEXT,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );`
-      );
-
-      const payloadJson = JSON.stringify({
-        settings: data.settings,
-        lots: data.lots,
-        customers: data.customers,
-        vendors: data.vendors,
-      });
-
-      const upsertSql = `
-        INSERT INTO mandi_sync_data (
-          shop_id, shop_pin, payload, lots_count, customers_count, vendors_count, last_uploaded_at, client_device, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, NOW())
-        ON CONFLICT (shop_id) DO UPDATE SET
-          shop_pin = EXCLUDED.shop_pin,
-          payload = EXCLUDED.payload,
-          lots_count = EXCLUDED.lots_count,
-          customers_count = EXCLUDED.customers_count,
-          vendors_count = EXCLUDED.vendors_count,
-          last_uploaded_at = NOW(),
-          client_device = EXCLUDED.client_device,
-          updated_at = NOW()
-        RETURNING last_uploaded_at;
-      `;
-
-      const neonRes = await executeNeonHttpQuery<{ last_uploaded_at: string }>(
-        cleanPostgresUrl,
-        upsertSql,
-        [cleanShopId, cleanPin, payloadJson, data.lots.length, data.customers.length, data.vendors.length, clientDevice]
-      );
-
-      if (neonRes.ok) {
-        const uploadedTime = neonRes.rows?.[0]?.last_uploaded_at || timestamp;
-        const updatedConfig: CloudSyncMetadata = {
-          ...config,
-          lastUploadedAt: uploadedTime,
-          lastSyncedDevice: 'Neon PostgreSQL (Direct HTTPS)',
-          totalSyncedLots: data.lots.length,
-        };
-        saveStoredCloudConfig(updatedConfig);
-        saveLocalBackupVault(config.shopCloudId, config.shopPin, data, uploadedTime);
-
-        return {
-          success: true,
-          message: 'ڈیٹا کامیابی سے Neon PostgreSQL کلاؤڈ پر محفوظ ہو گیا ہے!',
-          timestamp,
-          lastUploadedAt: uploadedTime,
-          lastDownloadedAt: config.lastDownloadedAt,
-          lotsCount: data.lots.length,
-          customersCount: data.customers.length,
-          vendorsCount: data.vendors.length,
-          dbEngine: 'Neon PostgreSQL',
-        };
-      }
-    } catch (neonErr) {
-      console.warn('Neon direct HTTPS upload failed, attempting fallback:', neonErr);
-    }
-  }
-
+  // 1. Try Backend Server API Route first
   try {
-    // 2. Try server PostgreSQL sync endpoint
     const fetchResult = await safeFetchJson<{
       success: boolean;
       message?: string;
@@ -417,7 +330,7 @@ export async function uploadDataToCloud(
       body: JSON.stringify({
         shopId: cleanShopId,
         pin: cleanPin,
-        connectionUrl: cleanPostgresUrl,
+        connectionUrl: cleanPostgresUrl || undefined,
         payload: {
           settings: data.settings,
           lots: data.lots,
@@ -427,17 +340,16 @@ export async function uploadDataToCloud(
       }),
     }, 'db/sync-upload');
 
-    if (fetchResult.ok && fetchResult.data) {
+    if (fetchResult.ok && fetchResult.data && fetchResult.data.success) {
       const json = fetchResult.data;
       const updatedConfig: CloudSyncMetadata = {
         ...config,
+        postgresUrl: cleanPostgresUrl,
         lastUploadedAt: json.lastUploadedAt || timestamp,
         lastSyncedDevice: 'PostgreSQL Server API',
         totalSyncedLots: data.lots.length,
       };
       saveStoredCloudConfig(updatedConfig);
-
-      // Also backup locally as offline snapshot
       saveLocalBackupVault(config.shopCloudId, config.shopPin, data, timestamp);
 
       return {
@@ -452,37 +364,107 @@ export async function uploadDataToCloud(
         dbEngine: 'PostgreSQL',
       };
     }
-
-    throw new Error(fetchResult.errorText || 'سرور سے رابطہ ناکام رہا');
-  } catch (serverErr: any) {
-    console.warn('Server PostgreSQL upload failed, storing offline vault backup:', serverErr);
-
-    // Offline Local Vault fallback
-    saveLocalBackupVault(config.shopCloudId, config.shopPin, data, timestamp);
-
-    const updatedConfig: CloudSyncMetadata = {
-      ...config,
-      lastUploadedAt: timestamp,
-      lastSyncedDevice: 'Local Offline Storage Backup',
-      totalSyncedLots: data.lots.length,
-    };
-    saveStoredCloudConfig(updatedConfig);
-
-    return {
-      success: true,
-      message: `ڈیٹا لوکل والٹ میں محفوظ ہو گیا (PostgreSQL نوٹ: ${serverErr?.message || 'آف لائن موڈ'})`,
-      timestamp,
-      lastUploadedAt: timestamp,
-      lastDownloadedAt: config.lastDownloadedAt,
-      lotsCount: data.lots.length,
-      customersCount: data.customers.length,
-      vendorsCount: data.vendors.length,
-    };
+  } catch (serverErr) {
+    console.warn('Backend upload API failed, trying direct Neon driver if applicable:', serverErr);
   }
+
+  // 2. Direct Neon Serverless Upload for Standalone / Offline-ready Mode
+  if (cleanPostgresUrl && isNeonPostgresUrl(cleanPostgresUrl)) {
+    try {
+      const sql = neon(cleanPostgresUrl);
+      await sql`
+        CREATE TABLE IF NOT EXISTS mandi_sync_data (
+          shop_id VARCHAR(100) PRIMARY KEY,
+          shop_pin VARCHAR(50),
+          payload JSONB NOT NULL,
+          lots_count INT DEFAULT 0,
+          customers_count INT DEFAULT 0,
+          vendors_count INT DEFAULT 0,
+          last_uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          last_downloaded_at TIMESTAMP WITH TIME ZONE,
+          client_device TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
+
+      const payloadObj = {
+        settings: data.settings,
+        lots: data.lots,
+        customers: data.customers,
+        vendors: data.vendors,
+      };
+
+      const rows = (await sql`
+        INSERT INTO mandi_sync_data (
+          shop_id, shop_pin, payload, lots_count, customers_count, vendors_count, last_uploaded_at, client_device, updated_at
+        ) VALUES (
+          ${cleanShopId}, ${cleanPin}, ${payloadObj}, ${data.lots.length}, ${data.customers.length}, ${data.vendors.length}, NOW(), ${clientDevice}, NOW()
+        )
+        ON CONFLICT (shop_id) DO UPDATE SET
+          shop_pin = EXCLUDED.shop_pin,
+          payload = EXCLUDED.payload,
+          lots_count = EXCLUDED.lots_count,
+          customers_count = EXCLUDED.customers_count,
+          vendors_count = EXCLUDED.vendors_count,
+          last_uploaded_at = NOW(),
+          client_device = EXCLUDED.client_device,
+          updated_at = NOW()
+        RETURNING last_uploaded_at;
+      `) as any[];
+
+      const uploadedTime = rows?.[0]?.last_uploaded_at ? String(rows[0].last_uploaded_at) : timestamp;
+      const updatedConfig: CloudSyncMetadata = {
+        ...config,
+        postgresUrl: cleanPostgresUrl,
+        lastUploadedAt: uploadedTime,
+        lastSyncedDevice: 'Neon PostgreSQL (Direct Serverless)',
+        totalSyncedLots: data.lots.length,
+      };
+      saveStoredCloudConfig(updatedConfig);
+      saveLocalBackupVault(config.shopCloudId, config.shopPin, data, uploadedTime);
+
+      return {
+        success: true,
+        message: 'ڈیٹا کامیابی سے Neon PostgreSQL کلاؤڈ پر محفوظ ہو گیا ہے!',
+        timestamp,
+        lastUploadedAt: uploadedTime,
+        lastDownloadedAt: config.lastDownloadedAt,
+        lotsCount: data.lots.length,
+        customersCount: data.customers.length,
+        vendorsCount: data.vendors.length,
+        dbEngine: 'Neon PostgreSQL (Direct Serverless)',
+      };
+    } catch (neonErr: any) {
+      console.error('Neon Direct Serverless Upload Error:', neonErr);
+    }
+  }
+
+  // 3. Fallback to Local Offline Backup Vault
+  saveLocalBackupVault(config.shopCloudId, config.shopPin, data, timestamp);
+  const updatedConfig: CloudSyncMetadata = {
+    ...config,
+    postgresUrl: cleanPostgresUrl,
+    lastUploadedAt: timestamp,
+    lastSyncedDevice: 'Local Offline Storage Backup',
+    totalSyncedLots: data.lots.length,
+  };
+  saveStoredCloudConfig(updatedConfig);
+
+  return {
+    success: true,
+    message: 'ڈیٹا لوکل والٹ میں محفوظ ہو گیا (نوٹ: ڈیٹا بیس کنکشن پر نظرثانی کریں)',
+    timestamp,
+    lastUploadedAt: timestamp,
+    lastDownloadedAt: config.lastDownloadedAt,
+    lotsCount: data.lots.length,
+    customersCount: data.customers.length,
+    vendorsCount: data.vendors.length,
+  };
 }
 
 /**
- * Downloads data from PostgreSQL database via Direct Neon HTTPS or backend API
+ * Downloads data from PostgreSQL database
  */
 export async function downloadDataFromCloud(
   shopCloudId: string,
@@ -492,7 +474,7 @@ export async function downloadDataFromCloud(
   const timestamp = new Date().toISOString();
   const cleanShopId = shopCloudId.trim().toUpperCase();
   const cleanPin = shopPin.trim();
-  const cleanPostgresUrl = (postgresUrl || getStoredCloudConfig().postgresUrl || '').trim() || undefined;
+  const cleanPostgresUrl = sanitizePostgresUrl(postgresUrl || getStoredCloudConfig().postgresUrl || '');
 
   if (!cleanShopId) {
     return {
@@ -502,76 +484,8 @@ export async function downloadDataFromCloud(
     };
   }
 
-  // 1. If Neon PostgreSQL is used, execute direct Serverless HTTPS download
-  if (cleanPostgresUrl && isNeonPostgresUrl(cleanPostgresUrl)) {
-    try {
-      const selectSql = `
-        SELECT shop_id, shop_pin, payload, lots_count, customers_count, vendors_count, last_uploaded_at, last_downloaded_at
-        FROM mandi_sync_data
-        WHERE shop_id = $1;
-      `;
-
-      const neonRes = await executeNeonHttpQuery<{
-        shop_id: string;
-        shop_pin?: string;
-        payload: any;
-        lots_count: number;
-        customers_count: number;
-        vendors_count: number;
-        last_uploaded_at: string;
-        last_downloaded_at?: string;
-      }>(cleanPostgresUrl, selectSql, [cleanShopId]);
-
-      if (neonRes.ok && neonRes.rows && neonRes.rows.length > 0) {
-        const row = neonRes.rows[0];
-
-        // PIN Verification
-        if (row.shop_pin && cleanPin && row.shop_pin !== cleanPin) {
-          return {
-            success: false,
-            message: 'غلط پن کوڈ (Invalid PIN)! اس دکان کا پن درست درج کریں۔',
-            timestamp,
-          };
-        }
-
-        // Update download timestamp
-        await executeNeonHttpQuery(
-          cleanPostgresUrl,
-          'UPDATE mandi_sync_data SET last_downloaded_at = NOW() WHERE shop_id = $1;',
-          [cleanShopId]
-        );
-
-        const currentConfig = getStoredCloudConfig();
-        const updatedConfig: CloudSyncMetadata = {
-          ...currentConfig,
-          shopCloudId: cleanShopId,
-          shopPin: cleanPin,
-          postgresUrl: postgresUrl || currentConfig.postgresUrl,
-          lastDownloadedAt: timestamp,
-          lastUploadedAt: row.last_uploaded_at || currentConfig.lastUploadedAt,
-        };
-        saveStoredCloudConfig(updatedConfig);
-
-        return {
-          success: true,
-          message: 'Neon PostgreSQL سے تمام ریکارڈز کامیابی سے ڈاؤن لوڈ ہو گئے!',
-          timestamp,
-          lastUploadedAt: row.last_uploaded_at,
-          lastDownloadedAt: timestamp,
-          lotsCount: row.lots_count || row.payload?.lots?.length || 0,
-          customersCount: row.customers_count || row.payload?.customers?.length || 0,
-          vendorsCount: row.vendors_count || row.payload?.vendors?.length || 0,
-          data: row.payload,
-          dbEngine: 'Neon PostgreSQL (Direct HTTPS)',
-        };
-      }
-    } catch (neonErr) {
-      console.warn('Neon direct HTTPS download failed, attempting API fallback:', neonErr);
-    }
-  }
-
+  // 1. Try Backend Server API Route
   try {
-    // 2. Try server PostgreSQL sync endpoint
     const fetchResult = await safeFetchJson<{
       success: boolean;
       message?: string;
@@ -587,18 +501,18 @@ export async function downloadDataFromCloud(
       body: JSON.stringify({
         shopId: cleanShopId,
         pin: cleanPin,
-        connectionUrl: cleanPostgresUrl,
+        connectionUrl: cleanPostgresUrl || undefined,
       }),
     }, 'db/sync-download');
 
-    if (fetchResult.ok && fetchResult.data) {
+    if (fetchResult.ok && fetchResult.data && fetchResult.data.success) {
       const json = fetchResult.data;
       const currentConfig = getStoredCloudConfig();
       const updatedConfig: CloudSyncMetadata = {
         ...currentConfig,
         shopCloudId: cleanShopId,
         shopPin: cleanPin,
-        postgresUrl: postgresUrl || currentConfig.postgresUrl,
+        postgresUrl: cleanPostgresUrl || currentConfig.postgresUrl,
         lastDownloadedAt: json.lastDownloadedAt || timestamp,
         lastUploadedAt: json.lastUploadedAt || currentConfig.lastUploadedAt,
       };
@@ -617,84 +531,136 @@ export async function downloadDataFromCloud(
         dbEngine: 'PostgreSQL',
       };
     }
+  } catch (serverErr) {
+    console.warn('Backend download API failed, trying direct Neon driver:', serverErr);
+  }
 
-    if (fetchResult.status === 404 || fetchResult.status === 401) {
-      return {
-        success: false,
-        message: fetchResult.errorText || 'کوئی ریکارڈ نہیں ملا یا غلط پن کوڈ درج کیا گیا ہے۔',
-        timestamp,
-      };
+  // 2. Direct Neon Serverless Download
+  if (cleanPostgresUrl && isNeonPostgresUrl(cleanPostgresUrl)) {
+    try {
+      const sql = neon(cleanPostgresUrl);
+      const rows = (await sql`
+        SELECT shop_id, shop_pin, payload, lots_count, customers_count, vendors_count, last_uploaded_at, last_downloaded_at
+        FROM mandi_sync_data
+        WHERE shop_id = ${cleanShopId};
+      `) as any[];
+
+      if (rows && rows.length > 0) {
+        const row = rows[0];
+
+        // PIN Verification
+        if (row.shop_pin && cleanPin && String(row.shop_pin).trim() !== cleanPin) {
+          return {
+            success: false,
+            message: 'غلط پن کوڈ (Invalid PIN)! اس دکان کا پن درست درج کریں۔',
+            timestamp,
+          };
+        }
+
+        // Update download timestamp
+        await sql`UPDATE mandi_sync_data SET last_downloaded_at = NOW() WHERE shop_id = ${cleanShopId};`;
+
+        const currentConfig = getStoredCloudConfig();
+        const updatedConfig: CloudSyncMetadata = {
+          ...currentConfig,
+          shopCloudId: cleanShopId,
+          shopPin: cleanPin,
+          postgresUrl: cleanPostgresUrl,
+          lastDownloadedAt: timestamp,
+          lastUploadedAt: row.last_uploaded_at ? String(row.last_uploaded_at) : currentConfig.lastUploadedAt,
+        };
+        saveStoredCloudConfig(updatedConfig);
+
+        return {
+          success: true,
+          message: 'Neon PostgreSQL سے تمام ریکارڈز کامیابی سے ڈاؤن لوڈ ہو گئے!',
+          timestamp,
+          lastUploadedAt: row.last_uploaded_at ? String(row.last_uploaded_at) : undefined,
+          lastDownloadedAt: timestamp,
+          lotsCount: row.lots_count || row.payload?.lots?.length || 0,
+          customersCount: row.customers_count || row.payload?.customers?.length || 0,
+          vendorsCount: row.vendors_count || row.payload?.vendors?.length || 0,
+          data: row.payload,
+          dbEngine: 'Neon PostgreSQL (Direct Serverless)',
+        };
+      }
+    } catch (neonErr: any) {
+      console.error('Neon Direct Serverless Download Error:', neonErr);
     }
+  }
 
-    throw new Error(fetchResult.errorText || 'سرور سے رابطہ ناکام رہا');
-  } catch (serverErr: any) {
-    console.warn('Server PostgreSQL download failed, checking offline vault:', serverErr);
-
-    // Fallback to local storage vault if available
-    const localData = getLocalBackupVault(cleanShopId, cleanPin);
-    if (localData) {
-      const currentConfig = getStoredCloudConfig();
-      const updatedConfig: CloudSyncMetadata = {
-        ...currentConfig,
-        shopCloudId: cleanShopId,
-        shopPin: cleanPin,
-        lastDownloadedAt: timestamp,
-      };
-      saveStoredCloudConfig(updatedConfig);
-
-      return {
-        success: true,
-        message: 'لوکل بیک اپ سے ڈیٹا بحال ہو گیا ہے۔',
-        timestamp,
-        lastUploadedAt: localData.updatedAt,
-        lastDownloadedAt: timestamp,
-        lotsCount: localData.payload.lots?.length || 0,
-        customersCount: localData.payload.customers?.length || 0,
-        vendorsCount: localData.payload.vendors?.length || 0,
-        data: localData.payload,
-      };
-    }
+  // 3. Fallback to Local Backup Vault
+  const localData = getLocalBackupVault(cleanShopId, cleanPin);
+  if (localData) {
+    const currentConfig = getStoredCloudConfig();
+    const updatedConfig: CloudSyncMetadata = {
+      ...currentConfig,
+      shopCloudId: cleanShopId,
+      shopPin: cleanPin,
+      lastDownloadedAt: timestamp,
+    };
+    saveStoredCloudConfig(updatedConfig);
 
     return {
-      success: false,
-      message: `ڈیٹا حاصل نہیں ہو سکا: ${serverErr?.message || 'سرور سے رابطہ ناکام رہا'}`,
+      success: true,
+      message: 'لوکل بیک اپ والٹ سے ڈیٹا بحال ہو گیا ہے۔',
       timestamp,
+      lastUploadedAt: localData.updatedAt,
+      lastDownloadedAt: timestamp,
+      lotsCount: localData.data?.lots?.length || 0,
+      customersCount: localData.data?.customers?.length || 0,
+      vendorsCount: localData.data?.vendors?.length || 0,
+      data: localData.data,
+      dbEngine: 'Local Backup Vault',
     };
   }
+
+  return {
+    success: false,
+    message: `دکان شناختی کوڈ (${cleanShopId}) کا کوئی ریکارڈ کلاؤڈ پر نہیں ملا۔ پہلے اسی شناختی کوڈ سے ڈیٹا اپ لوڈ کریں۔`,
+    timestamp,
+  };
 }
 
+/**
+ * Local offline snapshot cache vault
+ */
 function saveLocalBackupVault(
   shopId: string,
   pin: string,
-  payload: { settings: AppSettings; lots: VendorLot[]; customers: CustomerBuyer[]; vendors: SavedVendor[] },
+  data: any,
   updatedAt: string
-) {
+): void {
   try {
-    const key = `${LOCAL_VAULT_PREFIX}${shopId.toUpperCase()}`;
-    localStorage.setItem(
-      key,
-      JSON.stringify({
-        shopId: shopId.toUpperCase(),
-        pin,
-        updatedAt,
-        payload,
-      })
-    );
-  } catch {
-    // ignore
+    const key = `${LOCAL_VAULT_PREFIX}${shopId.trim().toUpperCase()}`;
+    const payload = {
+      shopId,
+      pin,
+      updatedAt,
+      data,
+    };
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch (e) {
+    console.warn('Failed to save local backup vault:', e);
   }
 }
 
-function getLocalBackupVault(shopId: string, pin: string) {
+function getLocalBackupVault(
+  shopId: string,
+  pin: string
+): { updatedAt: string; data: any } | null {
   try {
-    const key = `${LOCAL_VAULT_PREFIX}${shopId.toUpperCase()}`;
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed.pin && pin && parsed.pin !== pin) {
+    const key = `${LOCAL_VAULT_PREFIX}${shopId.trim().toUpperCase()}`;
+    const saved = localStorage.getItem(key);
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    if (parsed.pin && pin && parsed.pin.trim() !== pin.trim()) {
       return null;
     }
-    return parsed;
+    return {
+      updatedAt: parsed.updatedAt || new Date().toISOString(),
+      data: parsed.data,
+    };
   } catch {
     return null;
   }

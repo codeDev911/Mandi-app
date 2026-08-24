@@ -11,9 +11,23 @@ const PORT = 3000;
 
 // Helper to get PostgreSQL Pool with strict priority for URL from client form input
 function getPostgresPool(customUrl?: string): pg.Pool | null {
-  const rawUrl = customUrl?.trim() || process.env.DATABASE_URL?.trim();
+  let rawUrl = customUrl?.trim() || process.env.DATABASE_URL?.trim();
   if (!rawUrl) {
     return null;
+  }
+
+  // Strip accidental quotes or CLI prefixes
+  if ((rawUrl.startsWith('"') && rawUrl.endsWith('"')) || (rawUrl.startsWith("'") && rawUrl.endsWith("'"))) {
+    rawUrl = rawUrl.slice(1, -1).trim();
+  }
+  if (rawUrl.toLowerCase().startsWith('psql ')) {
+    rawUrl = rawUrl.slice(5).trim();
+    if ((rawUrl.startsWith('"') && rawUrl.endsWith('"')) || (rawUrl.startsWith("'") && rawUrl.endsWith("'"))) {
+      rawUrl = rawUrl.slice(1, -1).trim();
+    }
+  }
+  if (rawUrl.startsWith('postgres://')) {
+    rawUrl = 'postgresql://' + rawUrl.slice('postgres://'.length);
   }
 
   const connectionString = rawUrl;
@@ -25,7 +39,7 @@ function getPostgresPool(customUrl?: string): pg.Pool | null {
     ssl: isLocal || isSslDisabled
       ? false
       : { rejectUnauthorized: false }, // Allows Neon, Supabase, Cloud SQL, Railway, Render
-    connectionTimeoutMillis: 8000,
+    connectionTimeoutMillis: 10000,
     idleTimeoutMillis: 30000,
     max: 10,
   });
