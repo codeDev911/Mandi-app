@@ -248,33 +248,55 @@ export const downloadBlobFile = saveBlobFile;
 export const downloadTextFile = saveTextFile;
 
 /**
- * Dedicated Share API for mobile share sheet when user explicitly clicks Share
+ * Dedicated Share API for mobile/desktop share sheet when user explicitly clicks Share
  */
 export async function shareBlobFile(
   blob: Blob,
   fileName: string,
-  shareTitle: string = 'Share Document'
-): Promise<{ success: boolean; message: string }> {
+  shareTitle: string = 'Share Document',
+  shareText?: string
+): Promise<{ success: boolean; message: string; sharedViaNative: boolean; fallbackNeeded?: boolean }> {
+  // Strategy 1: Native Share API with File support
   try {
-    const file = new File([blob], fileName, { type: blob.type || 'application/pdf' });
+    const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
     if (typeof navigator !== 'undefined' && 'canShare' in navigator && navigator.canShare({ files: [file] })) {
       await navigator.share({
         files: [file],
         title: shareTitle,
-        text: fileName,
+        text: shareText || fileName,
       });
-      return { success: true, message: 'Shared successfully!' };
+      return { success: true, message: 'Shared successfully!', sharedViaNative: true };
     }
   } catch (shareErr: any) {
     if (shareErr?.name === 'AbortError') {
-      return { success: true, message: 'Share action cancelled.' };
+      return { success: true, message: 'Share action cancelled.', sharedViaNative: true };
     }
-    console.warn('Web Share failed, falling back to direct save:', shareErr);
+    console.warn('Native File Share failed:', shareErr);
   }
 
-  // Fallback to direct save if share is not supported
-  const dlRes = await saveBlobFile(blob, fileName, shareTitle);
-  return { success: dlRes.success, message: dlRes.message };
+  // Strategy 2: Native Share API with Text only
+  if (shareText && typeof navigator !== 'undefined' && 'share' in navigator) {
+    try {
+      await navigator.share({
+        title: shareTitle,
+        text: shareText,
+      });
+      return { success: true, message: 'Shared text successfully!', sharedViaNative: true };
+    } catch (textShareErr: any) {
+      if (textShareErr?.name === 'AbortError') {
+        return { success: true, message: 'Share action cancelled.', sharedViaNative: true };
+      }
+      console.warn('Native Text Share failed:', textShareErr);
+    }
+  }
+
+  // Do NOT automatically download if user asked to share! Return fallback Needed
+  return {
+    success: false,
+    message: 'Native file sharing not directly supported by this browser.',
+    sharedViaNative: false,
+    fallbackNeeded: true,
+  };
 }
 
 export async function downloadJSONBackup(
@@ -285,6 +307,49 @@ export async function downloadJSONBackup(
   const fileName = `${fileNamePrefix}-${dateStr}.json`;
   const jsonStr = JSON.stringify(data, null, 2);
   return saveTextFile(jsonStr, fileName, 'application/json;charset=utf-8', 'Mandi JSON Backup');
+}
+
+/**
+ * Direct Share helper for JSON Backup files (opens native WhatsApp / Drive / Email share sheet)
+ */
+export async function shareJSONBackup(
+  data: any,
+  fileNamePrefix: string = 'mandi-backup'
+): Promise<{
+  success: boolean;
+  message: string;
+  sharedViaNative: boolean;
+  fallbackNeeded?: boolean;
+  fileName: string;
+  jsonStr: string;
+  summaryText: string;
+}> {
+  const dateStr = new Date().toISOString().split('T')[0];
+  const fileName = `${fileNamePrefix}-${dateStr}.json`;
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+
+  const lotsCount = Array.isArray(data?.lots) ? data.lots.length : 0;
+  const customersCount = Array.isArray(data?.customers) ? data.customers.length : 0;
+  const vendorsCount = Array.isArray(data?.vendors) ? data.vendors.length : 0;
+  const shopName = data?.settings?.shopNameUrdu || data?.settings?.shopNameEn || 'سبزی منڈی بکنگ ایپ';
+
+  const summaryText = `📦 *بیک اپ فائل: ${shopName}*
+📅 تاریخ: ${dateStr}
+━━━━━━━━━━━━━━━━━
+📊 کل مال لاٹس: ${lotsCount}
+👥 کل گاہک و کھاتے: ${customersCount}
+🌾 کل زمیندار: ${vendorsCount}
+━━━━━━━━━━━━━━━━━
+یہ بیک اپ فائل سبزی منڈی ایپ میں سیٹنگز سے بحال کی جا سکتی ہے۔`;
+
+  const shareRes = await shareBlobFile(blob, fileName, `Mandi Backup - ${shopName}`, summaryText);
+  return {
+    ...shareRes,
+    fileName,
+    jsonStr,
+    summaryText,
+  };
 }
 
 export async function downloadCSV(

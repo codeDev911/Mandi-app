@@ -6,6 +6,8 @@ import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { generateMandiInvoiceCanvas, printThermalPOSReceipt } from '../utils/receiptGenerator';
 import { printSingleLotReceiptA4 } from '../utils/printHelper';
+import { saveBlobFile } from '../utils/fileDownloader';
+import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
 import {
   Printer,
   Share2,
@@ -36,6 +38,7 @@ import {
   Clock,
   Building2,
   Sliders,
+  Save,
 } from 'lucide-react';
 
 interface ReceiptPrintViewProps {
@@ -67,6 +70,7 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [copiedImageStatus, setCopiedImageStatus] = useState(false);
   const [paperFormat, setPaperFormat] = useState<'pos80' | 'standard'>('pos80');
+  const [shareModalItem, setShareModalItem] = useState<UniversalShareItem | null>(null);
   const receiptCardRef = useRef<HTMLDivElement>(null);
 
   const isPaid = lot.vendorPaymentStatus === 'paid';
@@ -143,20 +147,26 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
     }, 2000);
   };
 
-  // 1. One-Click Save PNG
+  // 1. One-Click Save Slip Image
   const handleSaveImage = async () => {
     sound.playCashChime();
     setIsGeneratingImage(true);
     try {
       const { blob } = await getReceiptImage();
       const sanitizedVendor = lot.vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
-      triggerBrowserDownload(blob, `Mandi_Vendor_Bill_${sanitizedVendor}_${lot.arrivalDate}.png`);
+      const filename = `Mandi_Vendor_Bill_${sanitizedVendor}_${lot.arrivalDate}.png`;
+      const saveRes = await saveBlobFile(blob, filename, 'Mandi Slip Image');
 
-      setShareSuccessToast(isUrdu ? 'رسید کی تصویر کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill image downloaded successfully!');
+      if (saveRes.success) {
+        setShareSuccessToast(isUrdu ? 'رسید کی تصویر کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill image saved successfully!');
+      } else {
+        triggerBrowserDownload(blob, filename);
+        setShareSuccessToast(isUrdu ? 'رسید کی تصویر محفوظ ہو گئی!' : 'Vendor Bill image saved!');
+      }
       setTimeout(() => setShareSuccessToast(null), 4000);
     } catch (err) {
       console.error('Error saving receipt image:', err);
-      setShareSuccessToast(isUrdu ? 'تصویر تیار کرنے میں مسئلہ پیش آیا' : 'Failed to generate receipt image');
+      setShareSuccessToast(isUrdu ? 'تصویر محفوظ کرنے میں مسئلہ پیش آیا' : 'Failed to save receipt image');
       setTimeout(() => setShareSuccessToast(null), 3000);
     } finally {
       setIsGeneratingImage(false);
@@ -227,61 +237,44 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
     return msg;
   };
 
-  // 4. WhatsApp Share
+  // 4. WhatsApp Share -> Opens interactive Share Modal
   const handleShareWhatsApp = async () => {
     sound.playCashChime();
     setIsGeneratingImage(true);
 
     const messageText = generateWhatsAppMessage();
-    const rawPhone = (lot.vendorPhone || '').replace(/[^0-9]/g, '');
-    const cleanPhone = rawPhone.startsWith('0') ? '92' + rawPhone.slice(1) : rawPhone;
-    const whatsappUrl = cleanPhone
-      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`
-      : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
+    const sanitizedVendor = lot.vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+    const filename = `Mandi_POS_Bill_${sanitizedVendor}_Lot_${lot.lotNumber}.png`;
 
     try {
-      const { blob } = await getReceiptImage();
-      const sanitizedVendor = lot.vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
-      const filename = `Mandi_POS_Bill_${sanitizedVendor}_Lot_${lot.lotNumber}.png`;
+      const { blob, dataUrl } = await getReceiptImage();
 
-      // Copy image to clipboard
-      try {
-        if (navigator.clipboard && window.ClipboardItem) {
-          const item = new ClipboardItem({ 'image/png': blob });
-          await navigator.clipboard.write([item]);
-          setCopiedImageStatus(true);
-          setTimeout(() => setCopiedImageStatus(false), 4000);
-        }
-      } catch (clipErr) {
-        console.warn('Clipboard image copy not supported, downloading directly:', clipErr);
-      }
-
-      // Mobile Web Share
-      const file = new File([blob], filename, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `رسید بل #${lot.lotNumber} - ${lot.vendorName}`,
-          text: messageText,
-        });
-        setShareSuccessToast(isUrdu ? 'واٹس ایپ پر رسید شیئر کر دی گئی!' : 'Receipt shared via WhatsApp!');
-        setTimeout(() => setShareSuccessToast(null), 4000);
-        return;
-      }
-
-      // Desktop Flow: Download image + Open WhatsApp Web
-      triggerBrowserDownload(blob, filename);
-      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-
-      setShareSuccessToast(
-        isUrdu
-          ? 'رسید کی تصویر محفوظ ہو گئی ہے! واٹس ایپ چیٹ میں تصویر پیسٹ (Ctrl+V) بھی کر سکتے ہیں۔'
-          : 'Receipt downloaded & copied to clipboard! Paste directly into WhatsApp chat.'
-      );
-      setTimeout(() => setShareSuccessToast(null), 6000);
+      setShareModalItem({
+        title: `بل رسید #${lot.lotNumber} - ${lot.vendorName}`,
+        subtitle: `${lot.productUrdu} (${lot.totalQuantity} ${unitLabel})`,
+        formattedText: messageText,
+        recipientName: lot.vendorName,
+        recipientPhone: lot.vendorPhone,
+        fileBlob: blob,
+        fileName: filename,
+        fileType: 'image',
+        previewImageUrl: dataUrl,
+        extraDetails: [
+          { label: 'کل رقم', value: formatPKR(lot.summary.grossSales, '₨', 'en') },
+          { label: 'کٹوتیاں', value: formatPKR(lot.summary.totalExpenses, '₨', 'en') },
+          { label: 'صافی رقم', value: formatPKR(lot.summary.netPayableToVendor, '₨', 'en') },
+        ],
+      });
     } catch (err) {
-      console.error('Share failed, opening text chat fallback:', err);
-      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+      console.warn('Share modal preview generation fallback:', err);
+      // Fallback modal without image blob
+      setShareModalItem({
+        title: `بل رسید #${lot.lotNumber} - ${lot.vendorName}`,
+        subtitle: `${lot.productUrdu} (${lot.totalQuantity} ${unitLabel})`,
+        formattedText: messageText,
+        recipientName: lot.vendorName,
+        recipientPhone: lot.vendorPhone,
+      });
     } finally {
       setIsGeneratingImage(false);
     }
@@ -425,8 +418,9 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
             onClick={handleSaveImage}
             disabled={isGeneratingImage}
             className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-sm transition active:scale-95 disabled:opacity-50"
+            title="رسید کی تصویر محفوظ کریں (Save Image)"
           >
-            {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             <span>{isUrdu ? 'تصویر محفوظ کریں' : 'Save Image'}</span>
           </button>
 
@@ -434,10 +428,11 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
             type="button"
             onClick={handleShareWhatsApp}
             disabled={isGeneratingImage}
-            className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs font-urdu-sans flex items-center gap-1.5 shadow-md transition active:scale-95 disabled:opacity-50"
+            className="px-3.5 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs font-urdu-sans flex items-center gap-1.5 shadow-md transition active:scale-95 disabled:opacity-50"
+            title="پرچی یا بل شیئر کریں (Share Receipt)"
           >
-            {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageCircle className="w-3.5 h-3.5 fill-current" />}
-            <span>{isUrdu ? 'واٹس ایپ پر بھیجیں' : 'WhatsApp'}</span>
+            {isGeneratingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5 stroke-[2.5]" />}
+            <span>{isUrdu ? 'شیئر کریں' : 'Share'}</span>
           </button>
 
           {/* Dedicated Close / Return Button */}
@@ -795,6 +790,14 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Universal WhatsApp & Social Share Modal */}
+      <UniversalShareModal
+        isOpen={!!shareModalItem}
+        onClose={() => setShareModalItem(null)}
+        shareItem={shareModalItem}
+        settings={settings}
+      />
     </div>
   );
 };

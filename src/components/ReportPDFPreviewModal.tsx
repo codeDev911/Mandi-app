@@ -5,6 +5,7 @@ import { PDFPreviewData } from '../utils/pdfReportGenerator';
 import { generateReportCanvas2DPages } from '../utils/reportCanvasGenerator';
 import { printDetailedReportDocument } from '../utils/printHelper';
 import { saveBlobFile } from '../utils/fileDownloader';
+import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
 import {
   X,
   Save,
@@ -41,6 +42,7 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
   const [viewMode, setViewMode] = useState<'single' | 'all'>('all');
   const [isRenderingCanvas, setIsRenderingCanvas] = useState<boolean>(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
+  const [shareModalItem, setShareModalItem] = useState<UniversalShareItem | null>(null);
 
   const documentRef = useRef<HTMLDivElement>(null);
 
@@ -177,34 +179,31 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
     setIsExportingPDF(true);
 
     const finalPdfName = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+    const shopTitle = isUrdu ? settings.shopNameUrdu : settings.shopNameEn;
+    const messageText = `*${shopTitle}*\n📄 *${title}*\n📅 دورانیہ: ${dateFilterLabel || 'تمام ریکارڈ'}\n📑 صفحات: ${totalPages}\n\nپی ڈی ایف رپورٹ دستاویز منسلک ہے۔`;
 
     try {
       const { blob } = await buildReportPDF();
-      const pdfFile = new File([blob], finalPdfName, { type: 'application/pdf' });
 
-      // Mobile Web Share API (native share sheet with file attached)
-      if (typeof navigator !== 'undefined' && 'canShare' in navigator && navigator.canShare({ files: [pdfFile] })) {
-        await navigator.share({
-          files: [pdfFile],
-          title: title,
-          text: `📊 ${settings.shopNameUrdu || settings.shopNameEn} - ${title} (${totalPages} صفحات)`,
-        });
-        showToast(isUrdu ? 'پی ڈی ایف رپورٹ شیئر کر دی گئی!' : 'PDF report shared!');
-        return;
-      }
-
-      // Desktop WhatsApp Web Fallback
-      await saveBlobFile(blob, finalPdfName, 'Mandi PDF Report');
-      const shopTitle = isUrdu ? settings.shopNameUrdu : settings.shopNameEn;
-      const text = `*${shopTitle}*\n📄 *${title}*\n📅 دورانیہ: ${dateFilterLabel || 'تمام ریکارڈ'}\n📑 صفحات: ${totalPages}\nفائل: ${finalPdfName}\n\nپی ڈی ایف محفوظ کر لی گئی ہے، اب آپ واٹس ایپ میں شیئر کر سکتے ہیں۔`;
-      const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-      window.open(url, '_blank', 'noopener,noreferrer');
-      showToast(isUrdu ? 'پی ڈی ایف محفوظ ہو گئی اور واٹس ایپ کھول دیا گیا ہے' : 'PDF saved & WhatsApp opened');
+      setShareModalItem({
+        title: title,
+        subtitle: `${totalPages} صفحات • ${dateFilterLabel || 'تمام ریکارڈ'}`,
+        formattedText: messageText,
+        fileBlob: blob,
+        fileName: finalPdfName,
+        fileType: 'pdf',
+        extraDetails: [
+          { label: 'رپورٹ کا نام', value: title },
+          { label: 'صفحات کی تعداد', value: `${totalPages}` },
+        ],
+      });
     } catch (err: any) {
-      if (err?.name !== 'AbortError') {
-        console.error('Share PDF error:', err);
-        showToast(isUrdu ? 'شیئر کرنے میں مسئلہ پیش آیا' : 'Failed to share PDF');
-      }
+      console.error('Share PDF error:', err);
+      setShareModalItem({
+        title: title,
+        subtitle: `${totalPages} صفحات • ${dateFilterLabel || 'تمام ریکارڈ'}`,
+        formattedText: messageText,
+      });
     } finally {
       setIsExportingPDF(false);
     }
@@ -517,6 +516,14 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Universal WhatsApp & Social Share Modal */}
+      <UniversalShareModal
+        isOpen={!!shareModalItem}
+        onClose={() => setShareModalItem(null)}
+        shareItem={shareModalItem}
+        settings={settings}
+      />
     </div>
   );
 };

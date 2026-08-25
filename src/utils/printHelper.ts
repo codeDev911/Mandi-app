@@ -5,73 +5,113 @@ import { PDFPreviewData } from './pdfReportGenerator';
 
 /**
  * Universal High-Reliability Isolated Print Engine.
- * Prints HTML documents via an isolated hidden iframe so that global styles,
- * CSS rules, fonts, and @page layout inside the print template NEVER leak into
- * or break the main React application UI/UX.
+ * - Prints HTML documents strictly inside an isolated iframe.
+ * - NEVER touches or injects styles/DOM into the main parent window.
+ * - Safely handles font loading, focus, and cross-browser trigger.
+ * - Fallback to a dedicated pop-up window if the iframe sandbox forbids sub-frame printing.
  */
 export function printHtmlViaIframe(htmlContent: string, documentTitle: string = 'Print'): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   try {
-    // 1. Immediately clean up any previous rogue portals or global styles
+    // 1. Immediately clean up any previous print elements
+    const oldIframe = document.getElementById('mandi-isolated-print-iframe');
+    if (oldIframe) {
+      try {
+        oldIframe.remove();
+      } catch {}
+    }
     const rogueElements = document.querySelectorAll(
-      '#mandi-universal-print-portal, #mandi-universal-print-styles, #mandi-print-floating-assistant, #mandi-print-quick-toast'
+      '#mandi-universal-print-portal, #mandi-universal-print-styles, #mandi-print-floating-notice'
     );
     rogueElements.forEach((el) => {
-      try { el.remove(); } catch {}
+      try {
+        el.remove();
+      } catch {}
     });
 
-    const existingIframe = document.getElementById('mandi-isolated-print-iframe') as HTMLIFrameElement | null;
-    if (existingIframe) {
-      try { existingIframe.remove(); } catch {}
-    }
-
-    // 2. Create a clean, sandboxed hidden iframe
-    const printIframe = document.createElement('iframe');
-    printIframe.id = 'mandi-isolated-print-iframe';
-    printIframe.title = documentTitle;
-    printIframe.setAttribute(
+    // 2. Create off-screen isolated iframe
+    const iframe = document.createElement('iframe');
+    iframe.id = 'mandi-isolated-print-iframe';
+    iframe.title = documentTitle;
+    iframe.setAttribute(
       'style',
-      'position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; opacity: 0; pointer-events: none; z-index: -99999;'
+      'position: fixed; top: -10000px; left: -10000px; width: 800px; height: 1000px; border: none; opacity: 0; pointer-events: none; z-index: -99999;'
     );
-    document.body.appendChild(printIframe);
+    document.body.appendChild(iframe);
 
-    const doc = printIframe.contentWindow?.document || printIframe.contentDocument;
-    if (!doc) {
-      console.error('Print error: Could not access isolated iframe document');
+    const frameDoc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (!frameDoc) {
+      openPrintWindowFallback(htmlContent, documentTitle);
       return;
     }
 
-    // 3. Write complete document inside the iframe's isolated context
-    doc.open();
-    doc.write(htmlContent);
-    doc.close();
+    frameDoc.open();
+    frameDoc.write(htmlContent);
+    frameDoc.close();
 
-    // 4. Trigger print cleanly once the iframe's content is rendered
-    const executePrint = () => {
+    const cleanup = () => {
+      setTimeout(() => {
+        try {
+          if (iframe && iframe.parentNode) {
+            iframe.parentNode.removeChild(iframe);
+          }
+        } catch {}
+      }, 2000);
+    };
+
+    const triggerPrint = () => {
       try {
-        if (printIframe.contentWindow) {
-          printIframe.contentWindow.focus();
-          printIframe.contentWindow.print();
+        if (!iframe.contentWindow) {
+          openPrintWindowFallback(htmlContent, documentTitle);
+          return;
         }
-      } catch (printErr) {
-        console.warn('Iframe native print trigger notice:', printErr);
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        cleanup();
+      } catch (err) {
+        console.warn('Iframe print failed or blocked by sandbox, attempting popup window fallback:', err);
+        cleanup();
+        openPrintWindowFallback(htmlContent, documentTitle);
       }
     };
 
-    // Check readyState or listen for load
-    if (doc.readyState === 'complete' || doc.readyState === 'interactive') {
-      setTimeout(executePrint, 150);
-    } else if (printIframe.contentWindow) {
-      printIframe.contentWindow.onload = () => {
-        setTimeout(executePrint, 150);
-      };
-      setTimeout(executePrint, 350);
+    // Wait for content & fonts to be ready
+    if (frameDoc.readyState === 'complete') {
+      setTimeout(triggerPrint, 250);
     } else {
-      setTimeout(executePrint, 250);
+      iframe.onload = () => {
+        setTimeout(triggerPrint, 250);
+      };
+      setTimeout(triggerPrint, 600);
     }
-  } catch (globalErr) {
-    console.error('Universal print execution error:', globalErr);
+  } catch (err) {
+    console.error('Print trigger error:', err);
+    openPrintWindowFallback(htmlContent, documentTitle);
+  }
+}
+
+/**
+ * Fallback to a dedicated clean window for printing
+ */
+function openPrintWindowFallback(htmlContent: string, title: string) {
+  try {
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.open();
+      win.document.write(htmlContent);
+      win.document.close();
+      win.onload = () => {
+        setTimeout(() => {
+          try {
+            win.focus();
+            win.print();
+          } catch {}
+        }, 300);
+      };
+    }
+  } catch (e) {
+    console.warn('Popup print fallback blocked:', e);
   }
 }
 

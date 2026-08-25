@@ -5,6 +5,8 @@ import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { getStoredCloudConfig } from '../utils/cloudSyncEngine';
 import { DEFAULT_UNIT_MAZDOORI_RATES } from '../utils/calculations';
+import { downloadJSONBackup, shareJSONBackup } from '../utils/fileDownloader';
+import { ShareBackupModal } from './ShareBackupModal';
 import {
   Settings,
   Store,
@@ -24,6 +26,8 @@ import {
   Upload,
   PackageCheck,
   Calculator,
+  Save,
+  Share2,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -57,6 +61,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const [form, setForm] = useState<AppSettings>({ ...settings });
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const cloudConfig = getStoredCloudConfig();
 
   const totalBidsCount = lots.reduce((acc, l) => acc + l.sales.length, 0);
@@ -70,7 +75,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleExportJSON = async () => {
-    sound.playTick();
+    sound.playCashChime();
     const exportPayload = {
       version: '2.0.0',
       exportedAt: new Date().toISOString(),
@@ -79,34 +84,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       customers,
       vendors,
     };
-    const jsonStr = JSON.stringify(exportPayload, null, 2);
-    const fileName = `sabzi-mandi-backup-${new Date().toISOString().split('T')[0]}.json`;
-
-    try {
-      // Direct browser / web download
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
-      sound.playCashChime();
-    } catch (err) {
-      // Fallback data URI
-      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonStr);
-      const a = document.createElement('a');
-      a.href = dataUri;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      sound.playCashChime();
+    const res = await downloadJSONBackup(exportPayload, 'sabzi-mandi-backup');
+    if (res.success) {
+      alert(isUrdu ? 'بیک اپ فائل کامیابی سے ڈیوائس پر محفوظ ہو گئی ہے!' : 'Backup file saved to device successfully!');
     }
+  };
+
+  const handleShareJSON = () => {
+    sound.playCashChime();
+    setIsShareModalOpen(true);
   };
 
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -587,21 +573,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         {/* JSON File Backup & Restore */}
         <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 space-y-2">
           <span className="text-xs font-bold text-stone-700 font-urdu-sans block">
-            {isUrdu ? 'ڈیٹا بیک اپ و ڈاؤن لوڈ (JSON File):' : 'Local Data Backup & File Export:'}
+            {isUrdu ? 'ڈیٹا بیک اپ، محفوظ کرنا و شیئر (JSON Backup):' : 'Data Backup, Device Save & Share (JSON):'}
           </span>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <button
               type="button"
               onClick={handleExportJSON}
-              className="flex-1 py-2 px-3 rounded-xl bg-white hover:bg-stone-100 text-stone-800 text-xs font-bold border border-stone-300 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans"
+              className="py-2.5 px-3 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 text-xs font-bold border border-emerald-200 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer"
             >
-              <Download className="w-3.5 h-3.5 text-emerald-700" />
-              <span>{isUrdu ? 'بیک اپ فائل محفوظ کریں' : 'Download Backup File'}</span>
+              <Save className="w-4 h-4 text-emerald-700" />
+              <span>{isUrdu ? 'ڈیوائس پر محفوظ کریں' : 'Save to Device'}</span>
             </button>
 
-            <label className="flex-1 py-2 px-3 rounded-xl bg-white hover:bg-stone-100 text-stone-800 text-xs font-bold border border-stone-300 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer">
-              <Upload className="w-3.5 h-3.5 text-blue-700" />
-              <span>{isUrdu ? 'بیک اپ فائل بحال کریں' : 'Restore Backup File'}</span>
+            <button
+              type="button"
+              onClick={handleShareJSON}
+              className="py-2.5 px-3 rounded-xl bg-white hover:bg-blue-50 text-blue-900 text-xs font-bold border border-blue-200 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer"
+            >
+              <Share2 className="w-4 h-4 text-blue-700" />
+              <span>{isUrdu ? 'شیئر کریں (WhatsApp/Drive)' : 'Share Backup File'}</span>
+            </button>
+
+            <label className="py-2.5 px-3 rounded-xl bg-white hover:bg-stone-100 text-stone-800 text-xs font-bold border border-stone-300 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer">
+              <Upload className="w-4 h-4 text-stone-700" />
+              <span>{isUrdu ? 'بیک اپ بحال کریں' : 'Restore Backup'}</span>
               <input
                 type="file"
                 accept=".json"
@@ -612,6 +607,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </form>
+
+      {/* Share Backup Modal */}
+      <ShareBackupModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        settings={settings}
+        lots={lots}
+        customers={customers}
+        vendors={vendors}
+      />
     </div>
   );
 };

@@ -6,14 +6,14 @@ import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt, generateVendorConsolidatedInvoiceCanvas } from '../utils/receiptGenerator';
 import { printVendorBillSlipA4 } from '../utils/printHelper';
-import { downloadBlobFile } from '../utils/fileDownloader';
+import { saveBlobFile, downloadBlobFile } from '../utils/fileDownloader';
+import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
 import {
   Printer,
   Copy,
   Check,
   Download,
   Loader2,
-  MessageCircle,
   X,
   Layers,
   Sparkles,
@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Share2,
   ArrowLeft,
+  Save,
 } from 'lucide-react';
 
 interface VendorConsolidatedBillModalProps {
@@ -55,6 +56,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isRenderingCanvas, setIsRenderingCanvas] = useState<boolean>(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
+  const [shareModalItem, setShareModalItem] = useState<UniversalShareItem | null>(null);
 
   const displayDate = dateLabel || lots[0]?.arrivalDate || new Date().toISOString().slice(0, 10);
 
@@ -414,25 +416,34 @@ ${productListText}
 
     try {
       const { blob } = await buildVendorBillPDF();
-      const pdfFile = new File([blob], finalPdfName, { type: 'application/pdf' });
 
-      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-        await navigator.share({
-          files: [pdfFile],
-          title: `بل رسید - ${vendorName}`,
-          text: messageText,
-        });
-        showToast(isUrdu ? 'پی ڈی ایف بل شیئر کر دیا گیا!' : 'PDF bill shared successfully!');
-        return;
-      }
-
-      // WhatsApp Fallback
-      triggerSafeDownload(blob, finalPdfName);
-      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-      showToast(isUrdu ? 'پی ڈی ایف محفوظ ہو گئی اور واٹس ایپ کھل گیا ہے۔' : 'PDF downloaded & WhatsApp opened.');
+      setShareModalItem({
+        title: `بل رسید برائے زمیندار: ${vendorName}`,
+        subtitle: `${lots.length} لاٹیں • ${displayDate}`,
+        formattedText: messageText,
+        recipientName: vendorName,
+        recipientPhone: vendorPhone,
+        fileBlob: blob,
+        fileName: finalPdfName,
+        fileType: 'pdf',
+        extraDetails: [
+          { label: 'کل رقم', value: formatPKR(totals.grossSales, '₨', 'en') },
+          { label: 'کٹوتیاں', value: formatPKR(totals.totalExpenses, '₨', 'en') },
+          { label: 'صافی رقم', value: formatPKR(totals.netPayable, '₨', 'en') },
+        ],
+      });
     } catch (err) {
-      console.warn('Share error, opening whatsapp text fallback:', err);
-      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+      console.warn('Share error, opening text share modal:', err);
+      setShareModalItem({
+        title: `بل رسید برائے زمیندار: ${vendorName}`,
+        subtitle: `${lots.length} لاٹیں • ${displayDate}`,
+        formattedText: messageText,
+        recipientName: vendorName,
+        recipientPhone: vendorPhone,
+        extraDetails: [
+          { label: 'صافی رقم', value: formatPKR(totals.netPayable, '₨', 'en') },
+        ],
+      });
     } finally {
       setIsExportingPDF(false);
     }
@@ -566,32 +577,32 @@ ${productListText}
             <FileText className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
           </button>
 
-          {/* 3. Download PDF Button */}
+          {/* 3. Save PDF Button */}
           <button
             type="button"
             onClick={handleDownloadPDF}
             disabled={isExportingPDF}
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 border border-emerald-400 text-white flex items-center justify-center transition active:scale-90 shadow-md disabled:opacity-50"
-            title="پی ڈی ایف ڈاؤن لوڈ کریں (Download PDF Slip)"
-            aria-label="Download PDF"
+            title="پی ڈی ایف محفوظ کریں (Save PDF Slip)"
+            aria-label="Save PDF"
           >
             {isExportingPDF ? (
               <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
             ) : (
-              <Download className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+              <Save className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
             )}
           </button>
 
-          {/* 4. WhatsApp / Share Button */}
+          {/* 4. Share PDF / WhatsApp Button */}
           <button
             type="button"
             onClick={handleShare}
             disabled={isExportingPDF}
-            className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-500 hover:bg-emerald-400 border border-emerald-400 text-slate-950 flex items-center justify-center transition active:scale-90 shadow-md disabled:opacity-50"
-            title="واٹس ایپ یا پی ڈی ایف شیئر کریں (Share Bill)"
+            className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-teal-500 hover:bg-teal-400 border border-teal-400 text-slate-950 flex items-center justify-center transition active:scale-90 shadow-md disabled:opacity-50"
+            title="پی ڈی ایف یا بل شیئر کریں (Share Bill / PDF)"
             aria-label="Share"
           >
-            <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 fill-current stroke-none" />
+            <Share2 className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
           </button>
 
           {/* 5. Copy Text Button */}
@@ -698,8 +709,17 @@ ${productListText}
           disabled={isExportingPDF}
           className="flex-1 py-2 px-2 rounded-xl bg-emerald-600 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs disabled:opacity-50"
         >
-          {isExportingPDF ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-          <span>{isUrdu ? 'پی ڈی ایف' : 'PDF'}</span>
+          {isExportingPDF ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          <span>{isUrdu ? 'محفوظ کریں' : 'Save PDF'}</span>
+        </button>
+
+        <button
+          onClick={handleShare}
+          disabled={isExportingPDF}
+          className="flex-1 py-2 px-2 rounded-xl bg-teal-600 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs disabled:opacity-50"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+          <span>{isUrdu ? 'شیئر' : 'Share'}</span>
         </button>
 
         <button
@@ -714,6 +734,14 @@ ${productListText}
           <span>{isUrdu ? 'بند' : 'Close'}</span>
         </button>
       </div>
+
+      {/* Universal WhatsApp & Social Share Modal */}
+      <UniversalShareModal
+        isOpen={!!shareModalItem}
+        onClose={() => setShareModalItem(null)}
+        shareItem={shareModalItem}
+        settings={settings}
+      />
     </div>
   );
 };

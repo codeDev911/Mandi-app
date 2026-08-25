@@ -373,7 +373,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       ctx.textAlign = 'right';
       ctx.fillText(formatPKR(v.netPayable, '', 'en'), currentX + 90, y + 17);
     };
-    totalSummaryText = `کل زمیندار: ${rows.length} • مجموعی مال فروخت: ${formatPKR(summary?.grossSales || 0, 'Rs.', 'en')} • صافی میزان: ${formatPKR(summary?.netPayableToVendor || 0, 'Rs.', 'en')}`;
+    totalSummaryText = `کل زمیندار: ${rows.length} • مجموعی مال فروخت: ${formatPKR(summary?.grossSales || 0, 'Rs.', 'en')} • صافی میزان: ${formatPKR(summary?.vendorPayable || (summary as any)?.netPayableToVendor || 0, 'Rs.', 'en')}`;
   } else if (productRows && productRows.length > 0) {
     rows = productRows;
     colDefs = [
