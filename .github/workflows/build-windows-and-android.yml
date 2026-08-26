@@ -75,7 +75,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-          prefix-key: 'v3-fresh-icon'
+          prefix-key: 'v4-clean-build'
 
       - name: Install Node dependencies (with Windows native bindings)
         shell: bash
