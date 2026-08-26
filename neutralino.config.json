@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "com.mandibolli.commission",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 0,
+  "documentRoot": "dist",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "tokenSecurity": "one-time",
+  "logging": {
+    "enabled": false
+  },
+  "nativeBlockList": [],
+  "modes": {
+    "window": {
+      "title": "آڑھت و منڈی بولی - Mandi Bolli & Commission Manager",
+      "width": 1280,
+      "height": 850,
+      "minWidth": 800,
+      "minHeight": 600,
+      "center": true,
+      "fullScreen": false,
+      "alwaysOnTop": false,
+      "icon": "/icon.png",
+      "enableInspector": false,
+      "borderless": false,
+      "maximize": false,
+      "hidden": false,
+      "resizable": true,
+      "exitProcessOnClose": true
+    }
+  },
+  "cli": {
+    "binaryName": "mandi-bolli-app",
+    "resourcesPath": "/dist/",
+    "extensionsPath": "/extensions/",
+    "clientLibrary": "/resources/neutralino.js",
+    "distributionPath": "/dist-neutralino",
+    "binaryVersion": "6.9.0",
+    "clientVersion": "6.9.0"
+  }
+}

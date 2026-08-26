@@ -1,6 +1,8 @@
 node_modules/
 build/
 dist/
+dist-neutralino/
+.tmp/
 coverage/
 .DS_Store
 *.log
