@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="50%" stop-color="#047857"/>
+      <stop offset="100%" stop-color="#064e3b"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded App Icon Background -->
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#bgGrad)"/>
+  <rect x="40" y="40" width="944" height="944" rx="212" fill="none" stroke="#34d399" stroke-width="8" stroke-opacity="0.3"/>
+
+  <!-- Centered Graphic: Scale & Wheat -->
+  <g transform="translate(512, 512)" filter="url(#shadow)">
+    <!-- Scale Base / Pillar -->
+    <path d="M-24 180 L24 180 L36 240 L-36 240 Z" fill="url(#goldGrad)"/>
+    <rect x="-120" y="240" width="240" height="24" rx="12" fill="url(#goldGrad)"/>
+    <rect x="-12" y="-160" width="24" height="360" rx="8" fill="url(#goldGrad)"/>
+
+    <!-- Central Fulcrum Ring -->
+    <circle cx="0" cy="-160" r="28" fill="#fef3c7" stroke="#d97706" stroke-width="8"/>
+
+    <!-- Scale Beam -->
+    <path d="M-260 -150 L260 -150 L240 -130 L-240 -130 Z" fill="url(#goldGrad)"/>
+
+    <!-- Left Strings and Pan -->
+    <line x1="-240" y1="-140" x2="-290" y2="-20" stroke="#fef3c7" stroke-width="6" stroke-linecap="round"/>
+    <line x1="-240" y1="-140" x2="-190" y2="-20" stroke="#fef3c7" stroke-width="6" stroke-linecap="round"/>
+    <path d="M-310 -20 Q-240 70 -170 -20 Z" fill="url(#goldGrad)"/>
+
+    <!-- Right Strings and Pan -->
+    <line x1="240" y1="-140" x2="190" y2="-20" stroke="#fef3c7" stroke-width="6" stroke-linecap="round"/>
+    <line x1="240" y1="-140" x2="290" y2="-20" stroke="#fef3c7" stroke-width="6" stroke-linecap="round"/>
+    <path d="M170 -20 Q240 70 310 -20 Z" fill="url(#goldGrad)"/>
+
+    <!-- Grain / Wheat Sprouts on Pan -->
+    <circle cx="-240" cy="-35" r="16" fill="#fef3c7"/>
+    <circle cx="-260" cy="-25" r="14" fill="#fde68a"/>
+    <circle cx="-220" cy="-25" r="14" fill="#fde68a"/>
+
+    <circle cx="240" cy="-35" r="16" fill="#fef3c7"/>
+    <circle cx="220" cy="-25" r="14" fill="#fde68a"/>
+    <circle cx="260" cy="-25" r="14" fill="#fde68a"/>
+
+    <!-- Top Spire / Grain -->
+    <path d="M0 -240 C-30 -200 -20 -170 0 -160 C20 -170 30 -200 0 -240 Z" fill="url(#goldGrad)"/>
+  </g>
+</svg>
