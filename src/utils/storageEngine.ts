@@ -1,5 +1,6 @@
 import { VendorLot, AppSettings, CustomerBuyer, SavedVendor } from '../types';
 import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors } from './sampleData';
+import * as Neutralino from '@neutralinojs/lib';
 
 const DB_NAME = 'MandiMunshiMasterDB_v2';
 const DB_VERSION = 1;
@@ -8,6 +9,11 @@ const STORE_LOTS = 'lots';
 const STORE_CUSTOMERS = 'customers';
 const STORE_VENDORS = 'vendors';
 const STORE_SETTINGS = 'settings';
+
+const NEU_KEY_LOTS = 'mandi_bolli_lots_v1';
+const NEU_KEY_CUSTOMERS = 'mandi_bolli_customers_v1';
+const NEU_KEY_VENDORS = 'mandi_bolli_vendors_v1';
+const NEU_KEY_SETTINGS = 'mandi_bolli_settings_v1';
 
 export interface DatabaseStats {
   totalLots: number;
@@ -26,9 +32,43 @@ let isInitializing = false;
 const initCallbacks: Array<(db: IDBDatabase | null) => void> = [];
 
 /**
+ * Checks if Neutralino native desktop environment is active
+ */
+export function isNeutralinoActive(): boolean {
+  if (typeof window === 'undefined') return false;
+  return typeof (window as any).NL_PORT !== 'undefined' || typeof (window as any).Neutralino !== 'undefined';
+}
+
+/**
+ * Safely reads a key from Neutralino Native Storage
+ */
+export async function readNeutralinoStorage<T>(key: string): Promise<T | null> {
+  if (!isNeutralinoActive()) return null;
+  try {
+    const raw = await Neutralino.storage.getData(key);
+    if (raw && typeof raw === 'string' && raw.trim().length > 0) {
+      return JSON.parse(raw) as T;
+    }
+  } catch {
+    // Key not found or Neutralino not ready
+  }
+  return null;
+}
+
+/**
+ * Safely writes a key to Neutralino Native Storage
+ */
+export async function writeNeutralinoStorage(key: string, data: any): Promise<void> {
+  if (!isNeutralinoActive()) return;
+  try {
+    await Neutralino.storage.setData(key, JSON.stringify(data));
+  } catch (err) {
+    console.warn(`Neutralino storage write failed for ${key}:`, err);
+  }
+}
+
+/**
  * Opens or initializes the Master IndexedDB instance.
- * IndexedDB has hundreds of megabytes of quota, handles 100,000+ records asynchronously,
- * and completely prevents QuotaExceededError crashes that occur with localStorage.
  */
 export function getIndexedDB(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
@@ -116,8 +156,11 @@ export function getIndexedDB(): Promise<IDBDatabase | null> {
 
 /**
  * Loads all persistent data on application bootstrap.
- * Checks IndexedDB first; if records exist, loads them with 100% fidelity without sample data overwriting.
- * If empty, checks localStorage migration, and only seeds initial samples on true first run.
+ * Multi-layer recovery priority:
+ * 1. Neutralino Native Storage (Persistent disk files on desktop)
+ * 2. IndexedDB (High-capacity browser database)
+ * 3. LocalStorage
+ * Only seeds sample data on true first-time run when all tiers are empty.
  */
 export async function loadInitialApplicationData(): Promise<{
   settings: AppSettings;
@@ -125,9 +168,56 @@ export async function loadInitialApplicationData(): Promise<{
   customers: CustomerBuyer[];
   vendors: SavedVendor[];
 }> {
-  const db = await getIndexedDB();
+  // Layer 1: Check Neutralino Native Storage
+  if (isNeutralinoActive()) {
+    try {
+      const [neuLots, neuCustomers, neuVendors, neuSettings] = await Promise.all([
+        readNeutralinoStorage<VendorLot[]>(NEU_KEY_LOTS),
+        readNeutralinoStorage<CustomerBuyer[]>(NEU_KEY_CUSTOMERS),
+        readNeutralinoStorage<SavedVendor[]>(NEU_KEY_VENDORS),
+        readNeutralinoStorage<AppSettings>(NEU_KEY_SETTINGS),
+      ]);
 
-  // Try loading from IndexedDB if supported
+      const hasNeuData =
+        (neuLots && neuLots.length > 0) ||
+        (neuCustomers && neuCustomers.length > 0) ||
+        (neuVendors && neuVendors.length > 0) ||
+        !!neuSettings;
+
+      if (hasNeuData) {
+        const resolvedSettings = neuSettings || defaultSettings;
+        const resolvedLots = (neuLots || []).sort(
+          (a, b) =>
+            new Date(b.arrivalDate || b.createdAt || 0).getTime() -
+            new Date(a.arrivalDate || a.createdAt || 0).getTime()
+        );
+        const resolvedCustomers = neuCustomers && neuCustomers.length > 0 ? neuCustomers : sampleCustomers;
+        const resolvedVendors = neuVendors && neuVendors.length > 0 ? neuVendors : sampleVendors;
+
+        // Mirror to IndexedDB & LocalStorage
+        getIndexedDB().then((db) => {
+          if (db) {
+            saveLotsToIndexedDB(resolvedLots).catch(() => {});
+            saveCustomersToIndexedDB(resolvedCustomers).catch(() => {});
+            saveVendorsToIndexedDB(resolvedVendors).catch(() => {});
+            saveSettingsToIndexedDB(resolvedSettings).catch(() => {});
+          }
+        });
+
+        return {
+          settings: resolvedSettings,
+          lots: resolvedLots,
+          customers: resolvedCustomers,
+          vendors: resolvedVendors,
+        };
+      }
+    } catch (e) {
+      console.warn('Error reading from Neutralino storage:', e);
+    }
+  }
+
+  // Layer 2: IndexedDB
+  const db = await getIndexedDB();
   if (db) {
     try {
       const [lots, customers, vendors, settings] = await Promise.all([
@@ -144,15 +234,26 @@ export async function loadInitialApplicationData(): Promise<{
         !!settings;
 
       if (hasAnyData) {
+        const resolvedSettings = settings || defaultSettings;
+        const resolvedLots = (lots || []).sort(
+          (a, b) =>
+            new Date(b.arrivalDate || b.createdAt || 0).getTime() -
+            new Date(a.arrivalDate || a.createdAt || 0).getTime()
+        );
+        const resolvedCustomers = customers && customers.length > 0 ? customers : sampleCustomers;
+        const resolvedVendors = vendors && vendors.length > 0 ? vendors : sampleVendors;
+
+        // Mirror back to Neutralino Storage
+        writeNeutralinoStorage(NEU_KEY_LOTS, resolvedLots);
+        writeNeutralinoStorage(NEU_KEY_CUSTOMERS, resolvedCustomers);
+        writeNeutralinoStorage(NEU_KEY_VENDORS, resolvedVendors);
+        writeNeutralinoStorage(NEU_KEY_SETTINGS, resolvedSettings);
+
         return {
-          settings: settings || defaultSettings,
-          lots: (lots || []).sort(
-            (a, b) =>
-              new Date(b.arrivalDate || b.createdAt || 0).getTime() -
-              new Date(a.arrivalDate || a.createdAt || 0).getTime()
-          ),
-          customers: customers && customers.length > 0 ? customers : sampleCustomers,
-          vendors: vendors && vendors.length > 0 ? vendors : sampleVendors,
+          settings: resolvedSettings,
+          lots: resolvedLots,
+          customers: resolvedCustomers,
+          vendors: resolvedVendors,
         };
       }
     } catch (e) {
@@ -160,7 +261,7 @@ export async function loadInitialApplicationData(): Promise<{
     }
   }
 
-  // Fallback to LocalStorage
+  // Layer 3: Fallback to LocalStorage
   let initialSettings = defaultSettings;
   let initialLots: VendorLot[] | null = null;
   let initialCustomers: CustomerBuyer[] | null = null;
@@ -186,7 +287,12 @@ export async function loadInitialApplicationData(): Promise<{
   const finalCustomers = initialCustomers !== null ? initialCustomers : sampleCustomers;
   const finalVendors = initialVendors !== null ? initialVendors : sampleVendors;
 
-  // Seed IndexedDB in the background only on genuine first run
+  // Seed all tiers on genuine first run
+  writeNeutralinoStorage(NEU_KEY_LOTS, finalLots);
+  writeNeutralinoStorage(NEU_KEY_CUSTOMERS, finalCustomers);
+  writeNeutralinoStorage(NEU_KEY_VENDORS, finalVendors);
+  writeNeutralinoStorage(NEU_KEY_SETTINGS, initialSettings);
+
   if (db) {
     saveLotsToIndexedDB(finalLots).catch(() => {});
     saveCustomersToIndexedDB(finalCustomers).catch(() => {});
@@ -233,7 +339,6 @@ function getSingleFromStore<T>(db: IDBDatabase, storeName: string, key: IDBValid
 
 /**
  * High-performance debounced batch saver for Lots.
- * Prevents UI freeze by deferring writes until typing/auction activity pauses.
  */
 let saveLotsTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingLotsToSave: VendorLot[] | null = null;
@@ -246,16 +351,16 @@ export function saveLotsAsync(lots: VendorLot[]): void {
       const data = pendingLotsToSave;
       pendingLotsToSave = null;
       saveLotsToIndexedDB(data);
-      // Also save light mirror to LocalStorage ONLY if small dataset
+      writeNeutralinoStorage(NEU_KEY_LOTS, data);
       try {
         if (data.length <= 100) {
           localStorage.setItem('mandi_bolli_lots_v1', JSON.stringify(data));
         }
       } catch {
-        // ignore localStorage quota error; IndexedDB is the authoritative store
+        // ignore localStorage quota error
       }
     }
-  }, 400);
+  }, 350);
 }
 
 export async function saveLotsToIndexedDB(lots: VendorLot[]): Promise<void> {
@@ -265,6 +370,8 @@ export async function saveLotsToIndexedDB(lots: VendorLot[]): Promise<void> {
   }
   pendingLotsToSave = null;
 
+  writeNeutralinoStorage(NEU_KEY_LOTS, lots);
+
   const db = await getIndexedDB();
   if (!db) return;
 
@@ -273,7 +380,6 @@ export async function saveLotsToIndexedDB(lots: VendorLot[]): Promise<void> {
       const tx = db.transaction(STORE_LOTS, 'readwrite');
       const store = tx.objectStore(STORE_LOTS);
       
-      // Fast clear & bulk insert using batched put
       const clearReq = store.clear();
       clearReq.onsuccess = () => {
         const len = lots.length;
@@ -305,6 +411,7 @@ export function saveCustomersAsync(customers: CustomerBuyer[]): void {
       const data = pendingCustomersToSave;
       pendingCustomersToSave = null;
       saveCustomersToIndexedDB(data);
+      writeNeutralinoStorage(NEU_KEY_CUSTOMERS, data);
       try {
         if (data.length <= 150) {
           localStorage.setItem('mandi_bolli_customers_v1', JSON.stringify(data));
@@ -313,7 +420,7 @@ export function saveCustomersAsync(customers: CustomerBuyer[]): void {
         // ignore quota error
       }
     }
-  }, 400);
+  }, 350);
 }
 
 export async function saveCustomersToIndexedDB(customers: CustomerBuyer[]): Promise<void> {
@@ -322,6 +429,8 @@ export async function saveCustomersToIndexedDB(customers: CustomerBuyer[]): Prom
     saveCustomersTimer = null;
   }
   pendingCustomersToSave = null;
+
+  writeNeutralinoStorage(NEU_KEY_CUSTOMERS, customers);
 
   const db = await getIndexedDB();
   if (!db) return;
@@ -358,6 +467,7 @@ export function saveVendorsAsync(vendors: SavedVendor[]): void {
       const data = pendingVendorsToSave;
       pendingVendorsToSave = null;
       saveVendorsToIndexedDB(data);
+      writeNeutralinoStorage(NEU_KEY_VENDORS, data);
       try {
         if (data.length <= 150) {
           localStorage.setItem('mandi_bolli_vendors_v1', JSON.stringify(data));
@@ -366,7 +476,7 @@ export function saveVendorsAsync(vendors: SavedVendor[]): void {
         // ignore quota error
       }
     }
-  }, 400);
+  }, 350);
 }
 
 export async function saveVendorsToIndexedDB(vendors: SavedVendor[]): Promise<void> {
@@ -375,6 +485,8 @@ export async function saveVendorsToIndexedDB(vendors: SavedVendor[]): Promise<vo
     saveVendorsTimer = null;
   }
   pendingVendorsToSave = null;
+
+  writeNeutralinoStorage(NEU_KEY_VENDORS, vendors);
 
   const db = await getIndexedDB();
   if (!db) return;
@@ -405,7 +517,7 @@ export function saveSettingsAsync(settings: AppSettings): void {
   if (saveSettingsTimer) clearTimeout(saveSettingsTimer);
   saveSettingsTimer = setTimeout(() => {
     saveSettingsToIndexedDB(settings);
-  }, 250);
+  }, 200);
 }
 
 export async function saveSettingsToIndexedDB(settings: AppSettings): Promise<void> {
@@ -419,6 +531,8 @@ export async function saveSettingsToIndexedDB(settings: AppSettings): Promise<vo
   } catch {
     // ignore
   }
+
+  writeNeutralinoStorage(NEU_KEY_SETTINGS, settings);
 
   const db = await getIndexedDB();
   if (!db) return;
@@ -435,6 +549,46 @@ export async function saveSettingsToIndexedDB(settings: AppSettings): Promise<vo
       reject(e);
     }
   });
+}
+
+/**
+ * Immediately flushes any pending debounced writes to disk / IndexedDB / Neutralino Storage.
+ * Called automatically before unload or window exit.
+ */
+export function flushPendingStorageSaves(): void {
+  if (saveLotsTimer && pendingLotsToSave) {
+    clearTimeout(saveLotsTimer);
+    saveLotsTimer = null;
+    const lots = pendingLotsToSave;
+    pendingLotsToSave = null;
+    saveLotsToIndexedDB(lots);
+    writeNeutralinoStorage(NEU_KEY_LOTS, lots);
+    try { localStorage.setItem('mandi_bolli_lots_v1', JSON.stringify(lots)); } catch {}
+  }
+  if (saveCustomersTimer && pendingCustomersToSave) {
+    clearTimeout(saveCustomersTimer);
+    saveCustomersTimer = null;
+    const customers = pendingCustomersToSave;
+    pendingCustomersToSave = null;
+    saveCustomersToIndexedDB(customers);
+    writeNeutralinoStorage(NEU_KEY_CUSTOMERS, customers);
+    try { localStorage.setItem('mandi_bolli_customers_v1', JSON.stringify(customers)); } catch {}
+  }
+  if (saveVendorsTimer && pendingVendorsToSave) {
+    clearTimeout(saveVendorsTimer);
+    saveVendorsTimer = null;
+    const vendors = pendingVendorsToSave;
+    pendingVendorsToSave = null;
+    saveVendorsToIndexedDB(vendors);
+    writeNeutralinoStorage(NEU_KEY_VENDORS, vendors);
+    try { localStorage.setItem('mandi_bolli_vendors_v1', JSON.stringify(vendors)); } catch {}
+  }
+}
+
+// Attach automatic flush handlers
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushPendingStorageSaves);
+  window.addEventListener('pagehide', flushPendingStorageSaves);
 }
 
 /**
@@ -461,7 +615,6 @@ export function computeDatabaseMetrics(
     }
   }
 
-  // Fast estimate memory size without blocking main thread on JSON.stringify
   const sampleSize = Math.min(lots.length, 50);
   let avgLotSize = 650;
   if (sampleSize > 0) {
@@ -492,7 +645,6 @@ export function computeDatabaseMetrics(
 
 /**
  * Generates an encrypted/structured Full JSON Backup file
- * containing all historical records, khata balances, vendors, and configurations.
  */
 export function generateFullBackupPayload(
   settings: AppSettings,
@@ -549,3 +701,4 @@ export function parseAndValidateBackupPayload(jsonText: string): {
     return { success: false, error: err?.message || 'فائل پڑھنے میں غلطی' };
   }
 }
+

@@ -3,7 +3,7 @@
   "applicationId": "com.mandibolli.commission",
   "version": "1.0.0",
   "defaultMode": "window",
-  "port": 0,
+  "port": 28419,
   "documentRoot": "dist",
   "url": "/",
   "enableServer": true,
@@ -29,7 +29,8 @@
       "maximize": false,
       "hidden": false,
       "resizable": true,
-      "exitProcessOnClose": true
+      "exitProcessOnClose": true,
+      "singleInstance": true
     }
   },
   "cli": {
