@@ -7,22 +7,29 @@ import { PlusCircle, Globe, Smartphone, Monitor, Volume2, VolumeX, Sparkles, Clo
 interface HeaderProps {
   settings: AppSettings;
   onUpdateSettings: (settings: AppSettings) => void;
-  activeLotsCount: number;
+  activeLotsCount?: number;
+  todayLotsCount?: number;
   totalTodaySales: number;
   totalTodayProfit: number;
+  onOpenNewLot?: () => void;
   onOpenCloudSync?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   settings,
   onUpdateSettings,
-  activeLotsCount,
+  activeLotsCount = 0,
+  todayLotsCount,
   totalTodaySales,
   totalTodayProfit,
+  onOpenNewLot,
   onOpenCloudSync,
 }) => {
   const t = translations[settings.language];
   const isUrdu = settings.language === 'ur';
+
+  // Display today's lots count (or fallback to activeLotsCount if not provided)
+  const displayLotsCount = typeof todayLotsCount === 'number' ? todayLotsCount : activeLotsCount;
 
   const toggleLanguage = () => {
     const nextLang = settings.language === 'ur' ? 'en' : 'ur';
@@ -131,31 +138,31 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Quick Summary Bar - Mobile Friendly */}
+      {/* Quick Summary Bar - Today's Live Stats */}
       <div className="bg-emerald-700/80 text-emerald-50 text-xs px-3 sm:px-6 py-1 sm:py-1.5 border-t border-emerald-500/60 backdrop-blur-xs">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-2 text-[10px] sm:text-xs">
           <div className="flex items-center gap-1 sm:gap-2">
             <span className="flex items-center gap-1 font-urdu-sans">
               <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-300 animate-pulse"></span>
-              <span className="hidden xs:inline">{t.activeLots}:</span>
-              <span className="xs:hidden">لاٹس:</span>
+              <span className="hidden xs:inline">{isUrdu ? 'آج کی لاٹس:' : "Today's Lots:"}</span>
+              <span className="xs:hidden">{isUrdu ? 'آج لاٹس:' : 'Lots:'}</span>
               <strong className="text-emerald-950 bg-emerald-200/90 px-1.5 sm:px-2 py-0.5 rounded-full font-numbers font-bold">
-                {activeLotsCount}
+                {displayLotsCount}
               </strong>
             </span>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 font-numbers">
             <span className="text-emerald-100 font-urdu-sans truncate">
-              <span className="hidden sm:inline">{t.todayTurnover}: </span>
-              <span className="sm:hidden">فروخت: </span>
+              <span className="hidden sm:inline">{isUrdu ? 'آج کی فروخت:' : "Today's Sales:"} </span>
+              <span className="sm:hidden">{isUrdu ? 'آج فروخت:' : 'Sales:'} </span>
               <strong className="text-white font-bold font-numbers bg-white/15 px-1.5 sm:px-2 py-0.5 rounded-lg">
                 {formatPKR(totalTodaySales, settings.currencySymbol, settings.language)}
               </strong>
             </span>
             <span className="text-emerald-100 font-urdu-sans truncate">
-              <span className="hidden sm:inline">{t.todayCommission}: </span>
-              <span className="sm:hidden">منافع: </span>
+              <span className="hidden sm:inline">{isUrdu ? 'آج کا منافع:' : "Today's Profit:"} </span>
+              <span className="sm:hidden">{isUrdu ? 'آج منافع:' : 'Profit:'} </span>
               <strong className="text-amber-300 font-bold font-numbers">
                 {formatPKR(totalTodayProfit, settings.currencySymbol, settings.language)}
               </strong>

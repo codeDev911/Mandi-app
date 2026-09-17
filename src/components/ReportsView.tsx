@@ -1,5 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { VendorLot, AppSettings, CustomerBuyer, VendorPaymentStatus } from '../types';
+import {
+  VendorLot,
+  AppSettings,
+  CustomerBuyer,
+  VendorPaymentStatus,
+  ShopExpense,
+  ExpenseCategory,
+  expenseCategoryLabels,
+} from '../types';
 import { translations, unitLabels, commonMandiProducts } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
@@ -14,6 +22,7 @@ import {
   buildSingleCustomerReportPDF,
   buildSingleProductReportPDF,
   buildSingleVendorReportPDF,
+  buildExpenseReportPDF,
 } from '../utils/pdfReportGenerator';
 import {
   BarChart3,
@@ -43,11 +52,16 @@ import {
   X,
   ArrowDownLeft,
   ArrowUpRight,
+  Wallet,
+  Trash2,
 } from 'lucide-react';
 
 interface ReportsViewProps {
   lots: VendorLot[];
   customers: CustomerBuyer[];
+  expenses?: ShopExpense[];
+  onSaveExpense?: (expense: ShopExpense) => void;
+  onDeleteExpense?: (expenseId: string) => void;
   settings: AppSettings;
   onOpenReceipt?: (lotId: string) => void;
   onOpenExpenseSlip?: (lotId: string) => void;
@@ -65,12 +79,15 @@ interface ReportsViewProps {
   ) => void;
 }
 
-type ReportType = 'vendor' | 'customer' | 'date' | 'product';
+type ReportType = 'date' | 'vendor' | 'customer' | 'product' | 'expenses';
 type DateFilter = 'all' | 'today' | 'yesterday' | 'last7days' | 'thismonth' | 'custom';
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
   lots,
   customers,
+  expenses = [],
+  onSaveExpense,
+  onDeleteExpense,
   settings,
   onOpenReceipt,
   onOpenExpenseSlip,
@@ -81,17 +98,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const isUrdu = settings.language === 'ur';
 
   const [activeReport, setActiveReport] = useState<ReportType>('date');
-  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
-  const [customFromDate, setCustomFromDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7);
-    return d.toISOString().slice(0, 10);
-  });
+  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
+  const [customFromDate, setCustomFromDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [customToDate, setCustomToDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
   const [selectedVendorFilter, setSelectedVendorFilter] = useState<string>('all');
   const [selectedCustomerFilter, setSelectedCustomerFilter] = useState<string>('all');
   const [selectedProductFilter, setSelectedProductFilter] = useState<string>('all');
+  const [selectedExpenseCategoryFilter, setSelectedExpenseCategoryFilter] = useState<string>('all');
+  const [selectedExpensePaymentMethodFilter, setSelectedExpensePaymentMethodFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   // State for Dedicated Vendor Payment div
@@ -495,6 +510,53 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     );
   }, [filteredLotsByDate, selectedProductFilter, searchTerm]);
 
+  // 4. EXPENSES REPORT DATA (دکان کے روزنامچہ و عمومی اخراجات)
+  const filteredExpensesByDate = useMemo(() => {
+    return (expenses || []).filter((exp) => isLotInDateRange(exp.date));
+  }, [expenses, dateFilter, customFromDate, customToDate]);
+
+  const searchedExpenses = useMemo(() => {
+    return filteredExpensesByDate.filter((e) => {
+      if (selectedExpenseCategoryFilter !== 'all' && e.category !== selectedExpenseCategoryFilter) {
+        return false;
+      }
+      if (selectedExpensePaymentMethodFilter !== 'all' && e.paymentMethod !== selectedExpensePaymentMethodFilter) {
+        return false;
+      }
+      if (!searchTerm) return true;
+      const term = searchTerm.toLowerCase();
+      const catUrdu = expenseCategoryLabels[e.category]?.ur || '';
+      const catEn = expenseCategoryLabels[e.category]?.en || '';
+      return (
+        e.title.toLowerCase().includes(term) ||
+        (e.paidTo && e.paidTo.toLowerCase().includes(term)) ||
+        (e.notes && e.notes.toLowerCase().includes(term)) ||
+        catUrdu.toLowerCase().includes(term) ||
+        catEn.toLowerCase().includes(term)
+      );
+    });
+  }, [filteredExpensesByDate, selectedExpenseCategoryFilter, selectedExpensePaymentMethodFilter, searchTerm]);
+
+  const expenseReportStats = useMemo(() => {
+    const total = filteredExpensesByDate.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const cash = filteredExpensesByDate
+      .filter((e) => e.paymentMethod === 'cash')
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
+    const online = filteredExpensesByDate
+      .filter((e) => e.paymentMethod === 'online')
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
+    const cheque = filteredExpensesByDate
+      .filter((e) => e.paymentMethod === 'cheque')
+      .reduce((sum, e) => sum + (e.amount || 0), 0);
+    return {
+      total,
+      cash,
+      online,
+      cheque,
+      count: filteredExpensesByDate.length,
+    };
+  }, [filteredExpensesByDate]);
+
   // Get current date range string representation
   const getDateRangeDetails = () => {
     const dateFilterLabels: Record<DateFilter, string> = {
@@ -564,6 +626,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const start = (prodReportPage - 1) * prodReportPageSize;
     return productReports.slice(start, start + prodReportPageSize);
   }, [productReports, prodReportPage, prodReportPageSize]);
+
+  // Pagination for Expense Report
+  const [expenseReportPage, setExpenseReportPage] = useState(1);
+  const [expenseReportPageSize, setExpenseReportPageSize] = useState(25);
+  const expenseReportTotalPages = Math.ceil(searchedExpenses.length / expenseReportPageSize) || 1;
+  const paginatedExpenses = useMemo(() => {
+    const start = (expenseReportPage - 1) * expenseReportPageSize;
+    return searchedExpenses.slice(start, start + expenseReportPageSize);
+  }, [searchedExpenses, expenseReportPage, expenseReportPageSize]);
 
   // Preview PDF for Current Tab Report (Filtered by Selected Date Range)
   const handlePreviewPDF = () => {
@@ -656,6 +727,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         },
         vendorRows,
       });
+    } else if (activeReport === 'expenses') {
+      previewData = buildExpenseReportPDF(
+        searchedExpenses,
+        settings,
+        dateFilterLabel,
+        expenseReportStats.total,
+        expenseReportStats.cash,
+        expenseReportStats.online
+      );
     } else {
       // Date report
       const dateRows = filteredLotsByDate.map((l) => ({
@@ -732,6 +812,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       productReports.forEach((p) => {
         csvContent += `"${p.productUrdu}",${p.totalLots},${p.totalUnits},${p.totalSold},${p.grossTurnover},${p.avgRate},${p.minRate},${p.maxRate},${p.commissionEarned}\n`;
       });
+    } else if (activeReport === 'expenses') {
+      csvContent += 'Date,Category,Title,Paid To,Payment Method,Amount,Receipt No,Notes\n';
+      searchedExpenses.forEach((e) => {
+        const cat = expenseCategoryLabels[e.category]?.en || e.category;
+        csvContent += `"${e.date}","${cat}","${e.title}","${e.paidTo || ''}","${e.paymentMethod}",${e.amount},"${e.receiptNumber || ''}","${e.notes || ''}"\n`;
+      });
     } else {
       csvContent += 'Lot #,Date,Vendor,Product,Total Qty,Sold Qty,Gross Sales,Expenses,Commission,Net Payable\n';
       filteredLotsByDate.forEach((l) => {
@@ -775,12 +861,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     text += `*${t.reportsTitle} (${dateFilter.toUpperCase()})*\n`;
     text += `📅 تاریخ: ${new Date().toLocaleDateString('en-PK')}\n`;
     text += `--------------------------\n`;
-    text += `💰 *کل فروخت:* ${formatPKR(dateReportStats.grossSales, settings.currencySymbol, settings.language)}\n`;
-    text += `💎 *خالص کمیشن منافع:* ${formatPKR(dateReportStats.commission, settings.currencySymbol, settings.language)}\n`;
-    text += `📦 *کل مال فروخت:* ${dateReportStats.unitsSold} تعداد\n`;
-    text += `💵 *نقد وصولی:* ${formatPKR(dateReportStats.cashReceived, settings.currencySymbol, settings.language)}\n`;
-    text += `⏳ *بقایا کھاتہ ادھار:* ${formatPKR(dateReportStats.creditPending, settings.currencySymbol, settings.language)}\n`;
-    text += `🤝 *زمینداروں کا واجب الادا:* ${formatPKR(dateReportStats.vendorPending, settings.currencySymbol, settings.language)}\n`;
+    if (activeReport === 'expenses') {
+      text += `💸 *رپورٹ:* دکان روزنامچہ و اخراجات\n`;
+      text += `💰 *کل دکان اخراجات:* ${formatPKR(expenseReportStats.total, settings.currencySymbol, settings.language)}\n`;
+      text += `💵 *نقد ادائیگی:* ${formatPKR(expenseReportStats.cash, settings.currencySymbol, settings.language)}\n`;
+      text += `💳 *آن لائن / بینک:* ${formatPKR(expenseReportStats.online, settings.currencySymbol, settings.language)}\n`;
+      text += `📝 *کل اندراجات:* ${searchedExpenses.length} ریکارڈز\n`;
+    } else {
+      text += `💰 *کل فروخت:* ${formatPKR(dateReportStats.grossSales, settings.currencySymbol, settings.language)}\n`;
+      text += `💎 *خالص کمیشن منافع:* ${formatPKR(dateReportStats.commission, settings.currencySymbol, settings.language)}\n`;
+      text += `📦 *کل مال فروخت:* ${dateReportStats.unitsSold} تعداد\n`;
+      text += `💵 *نقد وصولی:* ${formatPKR(dateReportStats.cashReceived, settings.currencySymbol, settings.language)}\n`;
+      text += `⏳ *بقایا کھاتہ ادھار:* ${formatPKR(dateReportStats.creditPending, settings.currencySymbol, settings.language)}\n`;
+      text += `🤝 *زمینداروں کا واجب الادا:* ${formatPKR(dateReportStats.vendorPending, settings.currencySymbol, settings.language)}\n`;
+    }
     text += `--------------------------\n`;
     text += `👤 *آڑھتی:* ${settings.arhtiNameUrdu}\n`;
     text += `📞 *رابطہ:* ${settings.shopPhone}`;
@@ -880,6 +974,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 ? isUrdu ? `📦 جنس رپورٹ (${getDateRangeDetails().label})` : `📦 Product Report (${getDateRangeDetails().label})`
                 : activeReport === 'vendor'
                 ? isUrdu ? `🚜 زمیندار رپورٹ (${getDateRangeDetails().label})` : `🚜 Vendor Report (${getDateRangeDetails().label})`
+                : activeReport === 'expenses'
+                ? isUrdu ? `💸 دکان اخراجات (${getDateRangeDetails().label})` : `💸 Shop Expenses (${getDateRangeDetails().label})`
                 : isUrdu ? `📅 روزنامچہ رپورٹ (${getDateRangeDetails().label})` : `📅 Daily Report (${getDateRangeDetails().label})`}
             </span>
           </button>
@@ -992,6 +1088,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             { id: 'vendor' as ReportType, label: t.reportByVendor, icon: User },
             { id: 'customer' as ReportType, label: t.reportByCustomer, icon: Users },
             { id: 'product' as ReportType, label: t.reportByProduct, icon: Package },
+            { id: 'expenses' as ReportType, label: isUrdu ? 'دکان اخراجات' : 'Shop Expenses', icon: Wallet },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeReport === tab.id;
@@ -2042,6 +2139,265 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     onPageSizeChange={setProdReportPageSize}
                     isUrdu={isUrdu}
                     itemName={isUrdu ? 'اجناس' : 'products'}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5. SHOP EXPENSES REPORT (دکان کے روزنامچہ و عمومی اخراجات) */}
+      {activeReport === 'expenses' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden space-y-4">
+          {/* Header */}
+          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-sm sm:text-base text-slate-900 font-urdu-nastaliq flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-rose-600" />
+                <span>{isUrdu ? 'دکان کے روزنامچہ و عمومی اخراجات' : 'Shop Operational Expenses Report'}</span>
+              </h3>
+              <p className="text-xs text-slate-500 font-urdu-sans mt-0.5">
+                {isUrdu ? `${getDateRangeDetails().label} • کل ریکارڈز: ${searchedExpenses.length}` : `${getDateRangeDetails().label} • Total: ${searchedExpenses.length} records`}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handlePreviewPDF();
+                }}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans shadow-xs"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>{isUrdu ? `اخراجات پی ڈی ایف (${getDateRangeDetails().label})` : `Expenses PDF (${getDateRangeDetails().label})`}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Mini Summary Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-4">
+            <div className="bg-rose-50 p-3 rounded-xl border border-rose-200">
+              <span className="text-[11px] text-rose-800 font-bold font-urdu-sans block">
+                {isUrdu ? 'کل دکان اخراجات' : 'Total Expenses'}
+              </span>
+              <span className="text-base font-black text-rose-950 font-numbers block mt-0.5">
+                {formatPKR(expenseReportStats.total, settings.currencySymbol, settings.language)}
+              </span>
+              <span className="text-[10px] text-rose-700 font-urdu-sans">
+                {searchedExpenses.length} {isUrdu ? 'اندراجات' : 'records'}
+              </span>
+            </div>
+
+            <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-200">
+              <span className="text-[11px] text-emerald-800 font-bold font-urdu-sans block">
+                {isUrdu ? 'نقد ادائیگی' : 'Cash Paid'}
+              </span>
+              <span className="text-base font-black text-emerald-950 font-numbers block mt-0.5">
+                {formatPKR(expenseReportStats.cash, settings.currencySymbol, settings.language)}
+              </span>
+              <span className="text-[10px] text-emerald-700 font-urdu-sans">
+                {isUrdu ? 'کیش ادا شدہ' : 'Paid in cash'}
+              </span>
+            </div>
+
+            <div className="bg-blue-50 p-3 rounded-xl border border-blue-200">
+              <span className="text-[11px] text-blue-800 font-bold font-urdu-sans block">
+                {isUrdu ? 'آن لائن / بینک' : 'Online / Bank'}
+              </span>
+              <span className="text-base font-black text-blue-950 font-numbers block mt-0.5">
+                {formatPKR(expenseReportStats.online, settings.currencySymbol, settings.language)}
+              </span>
+              <span className="text-[10px] text-blue-700 font-urdu-sans">
+                {isUrdu ? 'بینک ٹرانسفر' : 'Bank transfer'}
+              </span>
+            </div>
+
+            <div className="bg-amber-50 p-3 rounded-xl border border-amber-200">
+              <span className="text-[11px] text-amber-800 font-bold font-urdu-sans block">
+                {isUrdu ? 'چیک ادائیگی' : 'Cheque Paid'}
+              </span>
+              <span className="text-base font-black text-amber-950 font-numbers block mt-0.5">
+                {formatPKR(expenseReportStats.cheque, settings.currencySymbol, settings.language)}
+              </span>
+              <span className="text-[10px] text-amber-700 font-urdu-sans">
+                {isUrdu ? 'بینک چیک' : 'Cheque issue'}
+              </span>
+            </div>
+          </div>
+
+          {/* Filter Chips for Category & Payment Method */}
+          <div className="px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1 border-b border-slate-100">
+            {/* Category selection */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar">
+              <span className="text-xs text-slate-500 font-bold font-urdu-sans flex-shrink-0">
+                {isUrdu ? 'کیٹیگری:' : 'Category:'}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playTick();
+                  setSelectedExpenseCategoryFilter('all');
+                  setExpenseReportPage(1);
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition flex-shrink-0 ${
+                  selectedExpenseCategoryFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs font-bold'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {isUrdu ? 'تمام کیٹیگریز' : 'All Categories'}
+              </button>
+              {(Object.keys(expenseCategoryLabels) as ExpenseCategory[]).map((catKey) => {
+                const label = expenseCategoryLabels[catKey];
+                return (
+                  <button
+                    key={catKey}
+                    type="button"
+                    onClick={() => {
+                      sound.playTick();
+                      setSelectedExpenseCategoryFilter(catKey);
+                      setExpenseReportPage(1);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition flex-shrink-0 ${
+                      selectedExpenseCategoryFilter === catKey
+                        ? 'bg-rose-600 text-white shadow-xs font-bold'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {label.icon} {isUrdu ? label.ur : label.en}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Payment method selector */}
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <span className="text-xs text-slate-500 font-bold font-urdu-sans">
+                {isUrdu ? 'طریقہ:' : 'Method:'}
+              </span>
+              <select
+                value={selectedExpensePaymentMethodFilter}
+                onChange={(e) => {
+                  setSelectedExpensePaymentMethodFilter(e.target.value);
+                  setExpenseReportPage(1);
+                }}
+                className="px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg text-xs font-urdu-sans"
+              >
+                <option value="all">{isUrdu ? 'تمام طریقے' : 'All Methods'}</option>
+                <option value="cash">{isUrdu ? 'نقد (کیش)' : 'Cash'}</option>
+                <option value="online">{isUrdu ? 'آن لائن / بینک' : 'Online / Bank'}</option>
+                <option value="cheque">{isUrdu ? 'چیک' : 'Cheque'}</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Expenses Table */}
+          {searchedExpenses.length === 0 ? (
+            <div className="p-10 text-center text-slate-400 font-urdu-sans text-xs">
+              {isUrdu ? 'منتخب فلٹر کے مطابق کوئی دکان خرچہ نہیں ملا۔' : 'No shop expenses found for this filter.'}
+            </div>
+          ) : (
+            <div className="space-y-3 px-4 pb-4">
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-xs text-right border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100/90 text-slate-700 font-bold font-urdu-sans border-b border-slate-200">
+                      <th className="py-2.5 px-3 text-center w-10">#</th>
+                      <th className="py-2.5 px-3 text-center">{isUrdu ? 'تاریخ' : 'Date'}</th>
+                      <th className="py-2.5 px-3">{isUrdu ? 'مد / کیٹیگری' : 'Category'}</th>
+                      <th className="py-2.5 px-3">{isUrdu ? 'تفصیل / عنوان' : 'Title / Details'}</th>
+                      <th className="py-2.5 px-3">{isUrdu ? 'بنام / وصول کنندہ' : 'Paid To'}</th>
+                      <th className="py-2.5 px-3 text-center">{isUrdu ? 'طریقہ' : 'Method'}</th>
+                      <th className="py-2.5 px-3 text-left font-numbers">{isUrdu ? 'رقم' : 'Amount'}</th>
+                      {onDeleteExpense && (
+                        <th className="py-2.5 px-3 text-center w-12 no-print">{isUrdu ? 'حذف' : 'Action'}</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-urdu-sans">
+                    {paginatedExpenses.map((exp, idx) => {
+                      const rowNumber = (expenseReportPage - 1) * expenseReportPageSize + idx + 1;
+                      const catInfo = expenseCategoryLabels[exp.category] || {
+                        ur: exp.category,
+                        en: exp.category,
+                        icon: '📦',
+                      };
+                      return (
+                        <tr key={exp.id} className="hover:bg-slate-50 transition">
+                          <td className="py-2.5 px-3 text-center text-slate-400 font-numbers">{rowNumber}</td>
+                          <td className="py-2.5 px-3 text-center text-slate-600 font-numbers">{exp.date}</td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-800">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px]">
+                              <span>{catInfo.icon}</span>
+                              <span>{isUrdu ? catInfo.ur : catInfo.en}</span>
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-900">{exp.title}</div>
+                            {exp.notes && (
+                              <div className="text-[11px] text-slate-500 font-normal">{exp.notes}</div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-700">{exp.paidTo || '-'}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                exp.paymentMethod === 'cash'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : exp.paymentMethod === 'online'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {exp.paymentMethod === 'cash'
+                                ? isUrdu ? 'نقد' : 'Cash'
+                                : exp.paymentMethod === 'online'
+                                ? isUrdu ? 'آن لائن' : 'Online'
+                                : isUrdu ? 'چیک' : 'Cheque'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-left font-black text-rose-700 font-numbers text-sm">
+                            {formatPKR(exp.amount, settings.currencySymbol, settings.language)}
+                          </td>
+                          {onDeleteExpense && (
+                            <td className="py-2.5 px-3 text-center no-print">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm(isUrdu ? 'کیا آپ واقعی اس خرچے کو حذف کرنا چاہتے ہیں؟' : 'Delete this expense?')) {
+                                    sound.playTick();
+                                    onDeleteExpense(exp.id);
+                                  }
+                                }}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+                                title={isUrdu ? 'حذف کریں' : 'Delete'}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {searchedExpenses.length > 0 && (
+                <div className="pt-2 border-t border-slate-100">
+                  <PaginationControls
+                    currentPage={expenseReportPage}
+                    totalPages={expenseReportTotalPages}
+                    totalItems={searchedExpenses.length}
+                    pageSize={expenseReportPageSize}
+                    onPageChange={setExpenseReportPage}
+                    onPageSizeChange={setExpenseReportPageSize}
+                    isUrdu={isUrdu}
+                    itemName={isUrdu ? 'اخراجات' : 'expenses'}
                   />
                 </div>
               )}

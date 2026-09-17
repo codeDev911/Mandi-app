@@ -179,4 +179,44 @@ export interface BuyerPaymentRecord {
   notes?: string;
 }
 
+export type ExpenseCategory =
+  | 'tea_food'     // چائے / لنگر / کھانا
+  | 'electricity'  // بجلی / جنریٹر فیول
+  | 'rent'         // دکان / گودام کرایہ
+  | 'salary'       // ملازمین تنخواہ / روزانہ دیہاڑی
+  | 'labor'        // اضافی حمالی / پلیداری
+  | 'stationery'   // کاپیاں / پرنٹنگ / رجسٹر
+  | 'transport'    // گاڑی کرایہ / پیٹرول
+  | 'maintenance'  // مرمت / صفائی
+  | 'other';       // دیگر متفرق اخراجات
+
+export interface ShopExpense {
+  id: string;
+  title: string;
+  category: ExpenseCategory;
+  amount: number;
+  date: string; // YYYY-MM-DD
+  paymentMethod: 'cash' | 'online' | 'cheque';
+  paidTo?: string;
+  notes?: string;
+  receiptNumber?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export const expenseCategoryLabels: Record<
+  ExpenseCategory,
+  { ur: string; en: string; icon: string; color: string }
+> = {
+  tea_food: { ur: 'چائے و کھانا', en: 'Tea & Food', icon: '☕', color: 'amber' },
+  electricity: { ur: 'بجلی و جنریٹر فیول', en: 'Electricity & Fuel', icon: '⚡', color: 'yellow' },
+  rent: { ur: 'دکان و گودام کرایہ', en: 'Shop Rent', icon: '🏪', color: 'purple' },
+  salary: { ur: 'ملازمین تنخواہ', en: 'Staff Salary', icon: '👤', color: 'blue' },
+  labor: { ur: 'اضافی مزدوری و حمالی', en: 'Labor & Handling', icon: '📦', color: 'indigo' },
+  stationery: { ur: 'اسٹیشنری و پرنٹنگ', en: 'Stationery & Printing', icon: '📝', color: 'emerald' },
+  transport: { ur: 'گاڑی کرایہ و پیٹرول', en: 'Transport & Fuel', icon: '🚚', color: 'cyan' },
+  maintenance: { ur: 'مرمت و صفائی', en: 'Maintenance & Cleaning', icon: '🧹', color: 'orange' },
+  other: { ur: 'دیگر متفرق اخراجات', en: 'Other Miscellaneous', icon: '💼', color: 'slate' },
+};
+
 export type ActiveTab = 'bolli' | 'expenses' | 'receipt' | 'khata' | 'reports' | 'history' | 'settings';

@@ -108,7 +108,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   const [visibleCustomersCount, setVisibleCustomersCount] = useState<number>(30);
   const [visibleVendorsCount, setVisibleVendorsCount] = useState<number>(30);
   const [visibleTransactionsCount, setVisibleTransactionsCount] = useState<number>(40);
-  const [transactionsDateFilter, setTransactionsDateFilter] = useState<'thismonth' | 'today' | 'last7days' | 'all'>('thismonth');
+  const [transactionsDateFilter, setTransactionsDateFilter] = useState<'thismonth' | 'today' | 'last7days' | 'all'>('today');
 
   // Add/Edit Customer Modal State
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
@@ -846,41 +846,68 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
             </div>
 
             {/* Filter Chips */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-              <button
-                type="button"
-                onClick={() => setFilterStatus('all')}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition ${
-                  filterStatus === 'all'
-                    ? 'bg-slate-900 text-white shadow-xs font-bold'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {t.filterAll}
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterStatus('credit')}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition ${
-                  filterStatus === 'credit'
-                    ? 'bg-amber-600 text-white shadow-xs font-bold'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {isUrdu ? 'صرف ادھار کھاتہ دار' : 'Only Credit'} ({customerList.filter((c) => c.balance > 0).length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterStatus('cleared')}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition ${
-                  filterStatus === 'cleared'
-                    ? 'bg-emerald-600 text-white shadow-xs font-bold'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {isUrdu ? 'صاف کھاتہ (بے باق)' : 'Fully Paid'} ({customerList.filter((c) => c.balance === 0).length})
-              </button>
-            </div>
+            {viewMode === 'khatas' ? (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setFilterStatus('all')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition ${
+                    filterStatus === 'all'
+                      ? 'bg-slate-900 text-white shadow-xs font-bold'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {t.filterAll}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterStatus('credit')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition ${
+                    filterStatus === 'credit'
+                      ? 'bg-amber-600 text-white shadow-xs font-bold'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {isUrdu ? 'صرف ادھار کھاتہ دار' : 'Only Credit'} ({customerList.filter((c) => c.balance > 0).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterStatus('cleared')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition ${
+                    filterStatus === 'cleared'
+                      ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {isUrdu ? 'صاف کھاتہ (بے باق)' : 'Fully Paid'} ({customerList.filter((c) => c.balance === 0).length})
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <span className="text-xs font-bold text-slate-500 font-urdu-sans pl-1">
+                  {isUrdu ? 'تاریخ فلٹر:' : 'Date Filter:'}
+                </span>
+                {[
+                  { id: 'today', label: isUrdu ? 'آج' : 'Today' },
+                  { id: 'last7days', label: isUrdu ? 'گزشتہ ۷ دن' : 'Last 7 Days' },
+                  { id: 'thismonth', label: isUrdu ? 'رواں ماہ' : 'This Month' },
+                  { id: 'all', label: isUrdu ? 'تمام تاریخیں' : 'All' },
+                ].map((df) => (
+                  <button
+                    key={df.id}
+                    type="button"
+                    onClick={() => setTransactionsDateFilter(df.id as any)}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold font-urdu-sans transition ${
+                      transactionsDateFilter === df.id
+                        ? 'bg-slate-900 text-white shadow-xs font-bold'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {df.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* CUSTOMER KHATAS LIST */}

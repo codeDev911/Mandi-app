@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   VendorLot,
   AppSettings,
@@ -8,8 +8,9 @@ import {
   CustomerBuyer,
   BuyerPaymentRecord,
   SavedVendor,
+  ShopExpense,
 } from './types';
-import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors } from './utils/sampleData';
+import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors, sampleExpenses } from './utils/sampleData';
 import { calculateLotSummary } from './utils/calculations';
 import { sound } from './utils/sound';
 import {
@@ -17,6 +18,7 @@ import {
   saveLotsAsync,
   saveCustomersAsync,
   saveVendorsAsync,
+  saveExpensesAsync,
   saveSettingsAsync,
   saveLotsToIndexedDB,
   saveCustomersToIndexedDB,
@@ -42,6 +44,7 @@ const STORAGE_KEY_LOTS = 'mandi_bolli_lots_v1';
 const STORAGE_KEY_SETTINGS = 'mandi_bolli_settings_v1';
 const STORAGE_KEY_CUSTOMERS = 'mandi_bolli_customers_v1';
 const STORAGE_KEY_VENDORS = 'mandi_bolli_vendors_v1';
+const STORAGE_KEY_EXPENSES = 'mandi_bolli_expenses_v1';
 
 export default function App() {
   // 1. App Settings State
@@ -88,7 +91,18 @@ export default function App() {
     return sampleVendors;
   });
 
-  // 5. Navigation and Modal States
+  // 5. Shop Operating Expenses State
+  const [expenses, setExpenses] = useState<ShopExpense[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_EXPENSES);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // fallback
+    }
+    return sampleExpenses;
+  });
+
+  // 6. Navigation and Modal States
   const [activeTab, setActiveTab] = useState<ActiveTab>('bolli');
   const [selectedLotId, setSelectedLotId] = useState<string>(() => lots[0]?.id || '');
   const [isNewLotOpen, setIsNewLotOpen] = useState(false);
@@ -137,6 +151,7 @@ export default function App() {
         if (data.settings) setSettings(data.settings);
         if (data.customers && data.customers.length > 0) setCustomers(data.customers);
         if (data.vendors && data.vendors.length > 0) setVendors(data.vendors);
+        if (data.expenses && data.expenses.length > 0) setExpenses(data.expenses);
         isLoadedFromDbRef.current = true;
         setIsDataLoaded(true);
       }
@@ -170,6 +185,12 @@ export default function App() {
     saveVendorsAsync(vendors);
   }, [vendors, isDataLoaded]);
 
+  // Sync shop expenses with storage engine
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    saveExpensesAsync(expenses);
+  }, [expenses, isDataLoaded]);
+
   // Make sure selectedLotId is valid
   useEffect(() => {
     if (!lots.some((l) => l.id === selectedLotId) && lots.length > 0) {
@@ -180,6 +201,24 @@ export default function App() {
   // Handlers
   const handleUpdateSettings = (newSettings: AppSettings) => {
     setSettings(newSettings);
+  };
+
+  const handleSaveExpense = (expense: ShopExpense) => {
+    sound.playCashChime();
+    setExpenses((prev) => {
+      const index = prev.findIndex((e) => e.id === expense.id);
+      if (index >= 0) {
+        const copy = [...prev];
+        copy[index] = { ...expense, updatedAt: new Date().toISOString() };
+        return copy;
+      }
+      return [expense, ...prev];
+    });
+  };
+
+  const handleDeleteExpense = (expenseId: string) => {
+    sound.playTick();
+    setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
   };
 
   const handleSaveCustomer = (cust: CustomerBuyer) => {
@@ -545,29 +584,79 @@ export default function App() {
   const currentSelectedLot = lots.find((l) => l.id === selectedLotId) || lots[0];
 
   // Today's date in YYYY-MM-DD
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   // Filter lots that arrived today or have sales today
-  const todayLots = lots.filter((l) => {
-    if (l.arrivalDate === todayStr) return true;
-    return l.sales.some((s) => s.timestamp.slice(0, 10) === todayStr);
-  });
+  const todayLots = useMemo(() => {
+    return lots.filter((l) => {
+      const arrDate = l.arrivalDate?.slice(0, 10);
+      const createDate = l.createdAt?.slice(0, 10);
+      if (arrDate === todayStr || createDate === todayStr) return true;
+      return l.sales.some((s) => (s.date || s.timestamp?.slice(0, 10)) === todayStr);
+    });
+  }, [lots, todayStr]);
 
-  // Calculate active lots for today and today's sales & profit
-  const activeLotsCount = lots.filter((l) => l.status === 'active' && (l.arrivalDate === todayStr || l.createdAt?.slice(0, 10) === todayStr || !l.createdAt)).length || lots.filter((l) => l.status === 'active').length;
-  
-  // Calculate today's sales from sales that occurred today (or on today's lots)
-  const todaySalesList = lots.flatMap((l) => 
-    l.sales.filter((s) => s.timestamp.slice(0, 10) === todayStr || l.arrivalDate === todayStr)
-  );
-  
-  const totalTodaySales = todayLots.length > 0 
-    ? todayLots.reduce((acc, l) => acc + l.summary.grossSales, 0)
-    : todaySalesList.reduce((acc, s) => acc + s.totalAmount, 0);
+  // Today's lots count (strictly today's data)
+  const todayLotsCount = todayLots.length;
 
-  const totalTodayProfit = todayLots.length > 0
-    ? todayLots.reduce((acc, l) => acc + l.summary.arhtiProfitCommission, 0)
-    : lots.reduce((acc, l) => acc + l.summary.arhtiProfitCommission, 0);
+  // Active bolli lots across all time (for the navigation tab badge)
+  const activeBolliCount = useMemo(() => {
+    return lots.filter((l) => l.status === 'active').length;
+  }, [lots]);
+
+  // Today's sales (فروخت): strictly sales recorded today
+  const todaySales = useMemo(() => {
+    return lots.flatMap((lot) => {
+      const isLotToday = (lot.arrivalDate?.slice(0, 10) === todayStr) || (lot.createdAt?.slice(0, 10) === todayStr);
+      return lot.sales.filter((sale) => {
+        const sDate = sale.date || sale.timestamp?.slice(0, 10);
+        if (sDate === todayStr) return true;
+        if (isLotToday && (!sDate || sDate.length < 10)) return true;
+        return false;
+      });
+    });
+  }, [lots, todayStr]);
+
+  const totalTodaySales = useMemo(() => {
+    return todaySales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+  }, [todaySales]);
+
+  // Today's profit (منافع / کمیشن منافع): strictly commission earned on today's sales
+  const totalTodayProfit = useMemo(() => {
+    let profit = 0;
+    lots.forEach((lot) => {
+      const isLotToday = (lot.arrivalDate?.slice(0, 10) === todayStr) || (lot.createdAt?.slice(0, 10) === todayStr);
+      const lotSalesToday = lot.sales.filter((s) => {
+        const sDate = s.date || s.timestamp?.slice(0, 10);
+        if (sDate === todayStr) return true;
+        if (isLotToday && (!sDate || sDate.length < 10)) return true;
+        return false;
+      });
+
+      if (lotSalesToday.length > 0) {
+        const todaySalesAmount = lotSalesToday.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+        
+        // Commission from today's sales
+        if (lot.expenses?.commission?.enabled) {
+          if (lot.expenses.commission.type === 'percentage') {
+            const rate = Number(lot.expenses.commission.rate) || 0;
+            profit += Math.round((todaySalesAmount * rate) / 100);
+          } else if (isLotToday) {
+            profit += Number(lot.expenses.commission.amount) || 0;
+          }
+        }
+
+        // Munshiana earned if lot arrived today
+        if (isLotToday && lot.expenses?.munshiana?.enabled) {
+          profit += Number(lot.expenses.munshiana.amount) || 0;
+        }
+      } else if (isLotToday && (lot.summary?.grossSales || 0) > 0 && lot.sales.length === 0) {
+        profit += Number(lot.summary.arhtiProfitCommission) || 0;
+      }
+    });
+
+    return profit;
+  }, [lots, todayStr]);
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-urdu-sans text-slate-900 selection:bg-emerald-200">
@@ -577,7 +666,8 @@ export default function App() {
         onUpdateSettings={handleUpdateSettings}
         onOpenNewLot={() => setIsNewLotOpen(true)}
         onOpenCloudSync={() => setIsCloudSyncOpen(true)}
-        activeLotsCount={activeLotsCount}
+        activeLotsCount={activeBolliCount}
+        todayLotsCount={todayLotsCount}
         totalTodaySales={totalTodaySales}
         totalTodayProfit={totalTodayProfit}
       />
@@ -587,7 +677,7 @@ export default function App() {
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         settings={settings}
-        activeBolliCount={activeLotsCount}
+        activeBolliCount={activeBolliCount}
       />
 
       {/* Main Content Area */}
@@ -616,13 +706,18 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'expenses' && currentSelectedLot && (
+        {activeTab === 'expenses' && (
           <ExpenseSlipView
             lot={currentSelectedLot}
+            lots={lots}
+            expenses={expenses}
+            onSaveExpense={handleSaveExpense}
+            onDeleteExpense={handleDeleteExpense}
             onUpdateLotExpenses={handleUpdateLotExpenses}
             onOpenReceipt={handleOpenReceipt}
             onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onBackToBolli={() => setActiveTab('bolli')}
+            onSelectLot={setSelectedLotId}
             settings={settings}
           />
         )}
@@ -662,6 +757,9 @@ export default function App() {
           <ReportsView
             lots={lots}
             customers={customers}
+            expenses={expenses}
+            onSaveExpense={handleSaveExpense}
+            onDeleteExpense={handleDeleteExpense}
             settings={settings}
             onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onRecordVendorPayment={handleRecordVendorPayment}

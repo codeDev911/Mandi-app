@@ -48,8 +48,8 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<SaleStatusFilter>('all');
-  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
-  const [customDate, setCustomDate] = useState('');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
+  const [customDate, setCustomDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   // Helper date calculations
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);

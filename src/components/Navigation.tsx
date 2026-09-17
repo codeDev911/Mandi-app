@@ -1,7 +1,7 @@
 import React from 'react';
 import { ActiveTab, AppSettings } from '../types';
 import { translations } from '../utils/localization';
-import { Gavel, Users, History, Settings, BarChart3 } from 'lucide-react';
+import { Gavel, Users, History, Settings, BarChart3, Receipt } from 'lucide-react';
 
 interface NavigationProps {
   activeTab: ActiveTab;
@@ -21,6 +21,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   const navItems: Array<{ id: ActiveTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }> = [
     { id: 'bolli', label: t.tabBolli, icon: Gavel, badge: activeBolliCount > 0 ? activeBolliCount : undefined },
     { id: 'khata', label: t.tabKhata, icon: Users },
+    { id: 'expenses', label: t.tabExpenses || 'اخراجات', icon: Receipt },
     { id: 'reports', label: t.tabReports, icon: BarChart3 },
     { id: 'history', label: t.tabHistory, icon: History },
     { id: 'settings', label: t.tabSettings, icon: Settings },

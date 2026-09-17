@@ -815,7 +815,7 @@ export function printSingleLotReceiptA4(lot: VendorLot, settings: AppSettings): 
  * Prints Detailed PDF / HTML Report in Clean Urdu Layout
  */
 export function printDetailedReportDocument(previewData: PDFPreviewData, previewImageUrl?: string): void {
-  const { settings, title, dateFilterLabel, dateRangeStr, generatedDate, summary, dateRows, customerRows, vendorRows, productRows } = previewData;
+  const { settings, title, dateFilterLabel, dateRangeStr, generatedDate, summary, dateRows, customerRows, vendorRows, productRows, expenseRows } = previewData;
   const isUrdu = settings.language === 'ur';
 
   // If exact rendered PDF Canvas image is available, print that pixel-perfect layout
@@ -1022,10 +1022,66 @@ export function printDetailedReportDocument(previewData: PDFPreviewData, preview
         </tbody>
       </table>
     `;
+  } else if (expenseRows && expenseRows.length > 0) {
+    const rows = expenseRows
+      .map(
+        (r, idx) => `
+      <tr style="border-bottom: 1px solid #e2e8f0; ${idx % 2 === 1 ? 'background: #f8fafc;' : ''}">
+        <td style="text-align: center; padding: 6px 4px; font-size: 11px; color: #64748b;">${idx + 1}</td>
+        <td style="text-align: center; padding: 6px 4px; font-size: 11.5px; font-family: monospace;">${r.date}</td>
+        <td style="text-align: right; padding: 6px 6px; font-weight: bold; font-size: 12px; color: #1e293b;">${r.category}</td>
+        <td style="text-align: right; padding: 6px 6px; font-weight: bold; font-size: 12.5px; font-family: 'Noto Nastaliq Urdu', serif;">${r.title}</td>
+        <td style="text-align: right; padding: 6px 6px; font-size: 11.5px; color: #475569;">${r.paidTo || '-'}</td>
+        <td style="text-align: center; padding: 6px 4px; font-size: 11px;">${r.paymentMethod === 'cash' ? 'نقد' : r.paymentMethod === 'online' ? 'آن لائن' : 'چیک'}</td>
+        <td style="text-align: right; padding: 6px 6px; font-weight: bold; font-size: 12.5px; color: #be123c;">روپے ${r.amount.toLocaleString()}</td>
+      </tr>
+    `
+      )
+      .join('');
+
+    tableHtml = `
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 30px; text-align: center;">#</th>
+            <th style="width: 85px; text-align: center;">تاریخ</th>
+            <th style="width: 100px; text-align: right;">مد / کیٹیگری</th>
+            <th style="text-align: right;">تفصیل / عنوان</th>
+            <th style="width: 100px; text-align: right;">بنام / وصول کنندہ</th>
+            <th style="width: 70px; text-align: center;">طریقہ</th>
+            <th style="width: 95px; text-align: right;">رقم (روپے)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    `;
   }
 
   const summaryHtml = summary
-    ? `
+    ? summary.totalExpenses !== undefined && previewData.reportType === 'expenses'
+      ? `
+    <div class="summary-cards">
+      <div class="card" style="border-color: #fecdd3; background: #fff1f2;">
+        <span class="card-label" style="color: #9f1239;">کل دکان اخراجات</span>
+        <span class="card-val" style="color: #9f1239;">روپے ${(summary.totalExpenses || 0).toLocaleString()}</span>
+      </div>
+      <div class="card" style="border-color: #a7f3d0; background: #ecfdf5;">
+        <span class="card-label" style="color: #065f46;">نقد ادائیگی</span>
+        <span class="card-val" style="color: #065f46;">روپے ${(summary.cashReceived || 0).toLocaleString()}</span>
+      </div>
+      <div class="card" style="border-color: #bfdbfe; background: #eff6ff;">
+        <span class="card-label" style="color: #1e40af;">آن لائن / بینک</span>
+        <span class="card-val" style="color: #1e40af;">روپے ${(summary.creditPending || 0).toLocaleString()}</span>
+      </div>
+      <div class="card">
+        <span class="card-label">کل اندراجات</span>
+        <span class="card-val" style="color: #0f172a;">${summary.lotsCount || expenseRows?.length || 0}</span>
+      </div>
+    </div>
+  `
+      : `
     <div class="summary-cards">
       <div class="card">
         <span class="card-label">مجموعی فروخت</span>

@@ -1,4 +1,4 @@
-import { VendorLot, AppSettings, CustomerBuyer, SavedVendor } from '../types';
+import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense } from '../types';
 import { calculateLotSummary } from './calculations';
 
 export const defaultSettings: AppSettings = {
@@ -35,6 +35,8 @@ export const sampleVendors: SavedVendor[] = [];
 export const sampleCustomers: CustomerBuyer[] = [];
 
 export const sampleLots: VendorLot[] = [];
+
+export const sampleExpenses: ShopExpense[] = [];
 
 // Initialize lots with dynamic calculation
 export function getInitialLots(): VendorLot[] {

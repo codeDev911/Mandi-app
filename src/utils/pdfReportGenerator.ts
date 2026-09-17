@@ -1,11 +1,11 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { AppSettings, VendorLot, CustomerBuyer } from '../types';
+import { AppSettings, VendorLot, CustomerBuyer, ShopExpense, expenseCategoryLabels } from '../types';
 
 export interface PDFPreviewData {
   title: string;
   filename: string;
-  reportType: 'date' | 'vendor' | 'customer' | 'product' | 'entire_record' | 'single_lot' | 'single_customer' | 'single_product' | 'single_vendor';
+  reportType: 'date' | 'vendor' | 'customer' | 'product' | 'entire_record' | 'single_lot' | 'single_customer' | 'single_product' | 'single_vendor' | 'expenses';
   settings: AppSettings;
   dateFilterLabel?: string;
   dateRangeStr?: string;
@@ -62,6 +62,7 @@ export interface PDFPreviewData {
     commission: number;
     netPayable: number;
   }>;
+  expenseRows?: ShopExpense[];
   entireLots?: VendorLot[];
   singleLot?: VendorLot;
   singleCustomer?: {
@@ -194,6 +195,7 @@ function createPreviewData(
     customerRows: extra.customerRows,
     productRows: extra.productRows,
     vendorRows: extra.vendorRows,
+    expenseRows: extra.expenseRows,
     entireLots: extra.entireLots,
     singleLot: extra.singleLot,
     singleCustomer: extra.singleCustomer,
@@ -843,6 +845,14 @@ export function buildSingleLotReportPDF(
     settings,
     singleLot: lot,
     dateFilterLabel: periodInfo,
+    summary: {
+      grossSales: lot.summary.grossSales,
+      commission: lot.summary.arhtiProfitCommission,
+      totalExpenses: lot.summary.totalExpenses,
+      vendorPayable: lot.summary.netPayableToVendor,
+      unitsSold: lot.summary.totalSoldQuantity,
+      lotsCount: 1,
+    },
   });
 }
 
@@ -957,6 +967,14 @@ export function buildSingleCustomerReportPDF(
     settings,
     singleCustomer: customer,
     dateFilterLabel: periodInfo,
+    summary: {
+      grossSales: customer.totalAmount,
+      commission: 0,
+      cashReceived: customer.cashPaid,
+      creditPending: customer.creditPending,
+      unitsSold: customer.totalUnitsBought,
+      lotsCount: customer.totalPurchases,
+    },
   });
 }
 
@@ -1066,6 +1084,12 @@ export function buildSingleProductReportPDF(
     settings,
     singleProduct: product,
     dateFilterLabel: periodInfo,
+    summary: {
+      grossSales: product.grossTurnover,
+      commission: product.commissionEarned,
+      unitsSold: product.totalSold,
+      lotsCount: product.totalLots,
+    },
   });
 }
 
@@ -1181,5 +1205,129 @@ export function buildSingleVendorReportPDF(
     settings,
     singleVendor: vendor,
     dateFilterLabel: periodInfo,
+    summary: {
+      grossSales: vendor.grossSales,
+      commission: vendor.commission,
+      totalExpenses: vendor.totalExpenses,
+      vendorPayable: vendor.netPayable,
+      unitsSold: vendor.unitsSold,
+      lotsCount: vendor.lotsCount,
+    },
+  });
+}
+
+// 7. GENERAL SHOP EXPENSES REPORT PDF
+export function buildExpenseReportPDF(
+  expenses: ShopExpense[],
+  settings: AppSettings,
+  periodInfo?: string,
+  totalExpenseAmount?: number,
+  cashExpenseAmount?: number,
+  onlineExpenseAmount?: number
+): PDFPreviewData {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  const totalExp = totalExpenseAmount ?? expenses.reduce((s, e) => s + (e.amount || 0), 0);
+  const totalCash = cashExpenseAmount ?? expenses.filter(e => e.paymentMethod === 'cash').reduce((s, e) => s + (e.amount || 0), 0);
+  const totalOnline = onlineExpenseAmount ?? (totalExp - totalCash);
+
+  const subInfo = periodInfo
+    ? `Shop Expenses Report | Period: ${periodInfo} | Total Entries: ${expenses.length}`
+    : `Shop Expenses Report | Total Entries: ${expenses.length}`;
+
+  let currentY = addPDFHeader(
+    doc,
+    settings,
+    'SHOP GENERAL & OPERATING EXPENSES REPORT - روزنامچہ و اخراجات',
+    subInfo
+  );
+
+  // Stats Card
+  doc.setFillColor(254, 242, 242);
+  doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'F');
+  doc.setDrawColor(254, 202, 202);
+  doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'D');
+
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 100, 100);
+  doc.text('TOTAL SHOP EXPENSES', 20, currentY + 4.5);
+  doc.text('ENTRIES COUNT', 68, currentY + 4.5);
+  doc.text('CASH EXPENSES', 115, currentY + 4.5);
+  doc.text('ONLINE / BANK PAID', 155, currentY + 4.5);
+
+  doc.setFontSize(9.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(153, 27, 27);
+  doc.text(`Rs. ${totalExp.toLocaleString()}`, 20, currentY + 11);
+
+  doc.setTextColor(30, 41, 59);
+  doc.text(`${expenses.length} Records`, 68, currentY + 11);
+
+  doc.setTextColor(22, 101, 52);
+  doc.text(`Rs. ${totalCash.toLocaleString()}`, 115, currentY + 11);
+
+  doc.setTextColor(30, 64, 175);
+  doc.text(`Rs. ${totalOnline.toLocaleString()}`, 155, currentY + 11);
+
+  currentY += 21;
+
+  // Expenses Table
+  const expenseTableRows = expenses.map((e, idx) => {
+    const catLabel = expenseCategoryLabels[e.category]?.en || e.category;
+    const methodStr = e.paymentMethod === 'online' ? 'Online' : e.paymentMethod === 'cheque' ? 'Cheque' : 'Cash';
+    return [
+      idx + 1,
+      e.date,
+      catLabel,
+      e.title,
+      e.paidTo || '-',
+      methodStr,
+      `Rs. ${e.amount.toLocaleString()}`,
+    ];
+  });
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [['#', 'Date', 'Category', 'Description / Title', 'Paid To / Person', 'Method', 'Amount (PKR)']],
+    body: expenseTableRows,
+    theme: 'grid',
+    headStyles: { fillColor: [153, 27, 27], textColor: 255, fontSize: 8.5, fontStyle: 'bold' },
+    styles: { fontSize: 8, cellPadding: 2.5 },
+    columnStyles: {
+      0: { cellWidth: 8, halign: 'center' },
+      1: { halign: 'center' },
+      2: { fontStyle: 'bold' },
+      3: { fontStyle: 'normal' },
+      4: { halign: 'left' },
+      5: { halign: 'center' },
+      6: { halign: 'right', fontStyle: 'bold', textColor: [153, 27, 27] },
+    },
+    foot: [[
+      'Total',
+      '',
+      '',
+      `${expenses.length} Records`,
+      '',
+      '',
+      `Rs. ${totalExp.toLocaleString()}`,
+    ]],
+    footStyles: { fillColor: [254, 242, 242], textColor: [153, 27, 27], fontStyle: 'bold', fontSize: 8.5 },
+  });
+
+  const filename = `shop_expenses_${new Date().toISOString().slice(0, 10)}.pdf`;
+  return createPreviewData(doc, 'Shop Expenses Report', filename, {
+    reportType: 'expenses',
+    settings,
+    expenseRows: expenses,
+    dateFilterLabel: periodInfo,
+    summary: {
+      grossSales: 0,
+      commission: 0,
+      totalExpenses: totalExp,
+      cashReceived: totalCash,
+      creditPending: totalOnline,
+      lotsCount: expenses.length,
+    },
   });
 }

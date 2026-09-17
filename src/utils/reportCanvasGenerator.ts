@@ -1,5 +1,6 @@
 import { PDFPreviewData } from './pdfReportGenerator';
 import { formatPKR } from './currency';
+import { expenseCategoryLabels, ExpenseCategory } from '../types';
 
 const PAGE_WIDTH = 850;
 const PAGE_HEIGHT = 1202; // Exact A4 210mm x 297mm aspect ratio (850 * 297 / 210)
@@ -172,6 +173,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
   const {
     settings,
     title,
+    reportType,
     dateFilterLabel,
     dateRangeStr,
     generatedDate,
@@ -180,6 +182,11 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
     customerRows,
     vendorRows,
     productRows,
+    expenseRows,
+    singleVendor,
+    singleCustomer,
+    singleProduct,
+    singleLot,
   } = previewData;
 
   const tableX = 36;
@@ -192,7 +199,357 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
   let drawRowFn: (ctx: CanvasRenderingContext2D, r: any, idx: number, y: number) => void = () => {};
   let totalSummaryText = '';
 
-  if (dateRows && dateRows.length > 0) {
+  // 1. Single Vendor Report
+  if (singleVendor || reportType === 'single_vendor') {
+    const sv = singleVendor || {
+      vendorName: 'زمیندار',
+      lotsCount: 0,
+      totalUnits: 0,
+      unitsSold: 0,
+      grossSales: 0,
+      commission: 0,
+      totalExpenses: 0,
+      netPayable: 0,
+      lots: [],
+    };
+    rows = sv.lots || [];
+    colDefs = [
+      { title: '#', w: 35, align: 'center' },
+      { title: 'آمد تاریخ', w: 80, align: 'center' },
+      { title: 'لاٹ #', w: 70, align: 'center' },
+      { title: 'جنس و تفصیل', w: 135, align: 'right' },
+      { title: 'گاڑی نمبر', w: 80, align: 'center' },
+      { title: 'فروخت / کل نگ', w: 85, align: 'center' },
+      { title: 'کل فروخت', w: 98, align: 'right' },
+      { title: 'کمیشن', w: 85, align: 'right' },
+      { title: 'صافی واجب الادا', w: 110, align: 'right' },
+    ];
+    drawRowFn = (ctx, lot, idx, y) => {
+      let currentX = tableX;
+      // #
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${idx + 1}`, currentX + 17, y + 17);
+      currentX += 35;
+      // Date
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(lot.arrivalDate || '-', currentX + 40, y + 17);
+      currentX += 80;
+      // Lot #
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(lot.lotNumber || '-', currentX + 35, y + 17);
+      currentX += 70;
+      // Product
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${lot.productUrdu || lot.productName} (${lot.unitType})`, currentX + 127, y + 17);
+      currentX += 135;
+      // Vehicle
+      ctx.fillStyle = '#475569';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(lot.vehicleNumber || '-', currentX + 40, y + 17);
+      currentX += 80;
+      // Sold / Total
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${lot.summary?.totalSoldQuantity ?? 0} / ${lot.totalQuantity}`, currentX + 42, y + 17);
+      currentX += 85;
+      // Gross
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(lot.summary?.grossSales || 0, '', 'en'), currentX + 90, y + 17);
+      currentX += 98;
+      // Commission
+      ctx.fillStyle = '#065f46';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(lot.summary?.arhtiProfitCommission || 0, '', 'en'), currentX + 77, y + 17);
+      currentX += 85;
+      // Net
+      ctx.fillStyle = '#1e3a8a';
+      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(lot.summary?.netPayableToVendor || 0, '', 'en'), currentX + 102, y + 17);
+    };
+    totalSummaryText = `کل لاٹس: ${rows.length} • کل مال فروخت: ${formatPKR(sv.grossSales, 'Rs.', 'en')} • کمیشن: ${formatPKR(sv.commission, 'Rs.', 'en')} • کٹوتیاں: ${formatPKR(sv.totalExpenses, 'Rs.', 'en')} • صافی میزان زمیندار: ${formatPKR(sv.netPayable, 'Rs.', 'en')}`;
+  }
+  // 2. Single Customer Statement
+  else if (singleCustomer || reportType === 'single_customer') {
+    const sc = singleCustomer || {
+      customerName: 'خریدار',
+      totalPurchases: 0,
+      totalUnitsBought: 0,
+      totalAmount: 0,
+      cashPaid: 0,
+      creditPending: 0,
+      transactions: [],
+    };
+    rows = sc.transactions || [];
+    colDefs = [
+      { title: '#', w: 35, align: 'center' },
+      { title: 'تاریخ', w: 85, align: 'center' },
+      { title: 'جنس و تفصیل', w: 190, align: 'right' },
+      { title: 'تعداد (نگ)', w: 85, align: 'center' },
+      { title: 'ریٹ (روپے)', w: 85, align: 'right' },
+      { title: 'کل رقم', w: 148, align: 'right' },
+      { title: 'حیثیت ادائیگی', w: 150, align: 'center' },
+    ];
+    drawRowFn = (ctx, tx, idx, y) => {
+      let currentX = tableX;
+      // #
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${idx + 1}`, currentX + 17, y + 17);
+      currentX += 35;
+      // Date
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(tx.date || '-', currentX + 42, y + 17);
+      currentX += 85;
+      // Product
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText(tx.productUrdu || (tx as any).productName || '-', currentX + 182, y + 17);
+      currentX += 190;
+      // Qty
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${tx.quantity}`, currentX + 42, y + 17);
+      currentX += 85;
+      // Rate
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`Rs. ${tx.ratePerUnit}`, currentX + 75, y + 17);
+      currentX += 85;
+      // Total
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(tx.totalAmount, '', 'en'), currentX + 138, y + 17);
+      currentX += 148;
+      // Status
+      const isCash = tx.paymentStatus === 'cash';
+      ctx.fillStyle = isCash ? '#065f46' : '#9f1239';
+      ctx.font = 'bold 10.5px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(isCash ? 'نقد (ادا شدہ)' : 'ادھار (کھاتہ)', currentX + 75, y + 17);
+    };
+    totalSummaryText = `کل خریداری: ${rows.length} بار • مجموعی مال خریدا: ${formatPKR(sc.totalAmount, 'Rs.', 'en')} • نقد وصولی: ${formatPKR(sc.cashPaid, 'Rs.', 'en')} • بقایا ادھار: ${formatPKR(sc.creditPending, 'Rs.', 'en')}`;
+  }
+  // 3. Single Product Report
+  else if (singleProduct || reportType === 'single_product') {
+    const sp = singleProduct || {
+      productName: 'جنس',
+      productUrdu: 'جنس',
+      emoji: '📦',
+      totalLots: 0,
+      totalUnits: 0,
+      totalSold: 0,
+      grossTurnover: 0,
+      avgRate: 0,
+      minRate: 0,
+      maxRate: 0,
+      commissionEarned: 0,
+      lots: [],
+    };
+    rows = sp.lots || [];
+    colDefs = [
+      { title: '#', w: 35, align: 'center' },
+      { title: 'آمد تاریخ', w: 85, align: 'center' },
+      { title: 'لاٹ نمبر', w: 75, align: 'center' },
+      { title: 'زمیندار / کاشتکار', w: 185, align: 'right' },
+      { title: 'گاڑی نمبر', w: 85, align: 'center' },
+      { title: 'فروخت / آمد نگ', w: 85, align: 'center' },
+      { title: 'کل رقم', w: 118, align: 'right' },
+      { title: 'کمیشن', w: 110, align: 'right' },
+    ];
+    drawRowFn = (ctx, lot, idx, y) => {
+      let currentX = tableX;
+      // #
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${idx + 1}`, currentX + 17, y + 17);
+      currentX += 35;
+      // Date
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(lot.arrivalDate || '-', currentX + 42, y + 17);
+      currentX += 85;
+      // Lot #
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(lot.lotNumber || '-', currentX + 37, y + 17);
+      currentX += 75;
+      // Vendor
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText(lot.vendorName, currentX + 175, y + 17);
+      currentX += 185;
+      // Vehicle
+      ctx.fillStyle = '#475569';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(lot.vehicleNumber || '-', currentX + 42, y + 17);
+      currentX += 85;
+      // Units
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${lot.summary?.totalSoldQuantity ?? 0} / ${lot.totalQuantity}`, currentX + 42, y + 17);
+      currentX += 85;
+      // Gross
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(lot.summary?.grossSales || 0, '', 'en'), currentX + 110, y + 17);
+      currentX += 118;
+      // Commission
+      ctx.fillStyle = '#065f46';
+      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(lot.summary?.arhtiProfitCommission || 0, '', 'en'), currentX + 100, y + 17);
+    };
+    totalSummaryText = `کل لاٹس: ${rows.length} • کل فروخت نگ: ${sp.totalSold} / ${sp.totalUnits} • مجموعی ٹرن اوور: ${formatPKR(sp.grossTurnover, 'Rs.', 'en')} • کل کمیشن: ${formatPKR(sp.commissionEarned, 'Rs.', 'en')}`;
+  }
+  // 4. Single Lot Auction Breakdown
+  else if (singleLot || reportType === 'single_lot') {
+    const sl = singleLot!;
+    rows = sl?.sales || [];
+    colDefs = [
+      { title: '#', w: 35, align: 'center' },
+      { title: 'وقت / تاریخ', w: 95, align: 'center' },
+      { title: 'خریدار کا نام', w: 205, align: 'right' },
+      { title: 'تعداد (نگ)', w: 85, align: 'center' },
+      { title: 'بولی ریٹ', w: 85, align: 'right' },
+      { title: 'کل رقم', w: 143, align: 'right' },
+      { title: 'ادائیگی', w: 130, align: 'center' },
+    ];
+    drawRowFn = (ctx, s, idx, y) => {
+      let currentX = tableX;
+      // #
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${idx + 1}`, currentX + 17, y + 17);
+      currentX += 35;
+      // Time
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(s.timestamp ? s.timestamp.slice(11, 16) || s.timestamp.slice(0, 10) : '-', currentX + 47, y + 17);
+      currentX += 95;
+      // Buyer
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText(s.buyerName, currentX + 195, y + 17);
+      currentX += 205;
+      // Qty
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${s.quantity}`, currentX + 42, y + 17);
+      currentX += 85;
+      // Rate
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`Rs. ${s.ratePerUnit}`, currentX + 75, y + 17);
+      currentX += 85;
+      // Total
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(s.totalAmount, '', 'en'), currentX + 133, y + 17);
+      currentX += 143;
+      // Status
+      const isCash = s.paymentStatus === 'cash';
+      ctx.fillStyle = isCash ? '#065f46' : '#9f1239';
+      ctx.font = 'bold 10.5px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(isCash ? 'نقد (وصول)' : 'ادھار', currentX + 65, y + 17);
+    };
+    totalSummaryText = `کل فروخت نگ: ${sl?.summary?.totalSoldQuantity ?? 0} / ${sl?.totalQuantity ?? 0} • مجموعی فروخت: ${formatPKR(sl?.summary?.grossSales || 0, 'Rs.', 'en')} • کمیشن: ${formatPKR(sl?.summary?.arhtiProfitCommission || 0, 'Rs.', 'en')} • صافی میزان زمیندار: ${formatPKR(sl?.summary?.netPayableToVendor || 0, 'Rs.', 'en')}`;
+  }
+  // 5. General Shop Expenses Report
+  else if (expenseRows || reportType === 'expenses') {
+    rows = expenseRows || [];
+    colDefs = [
+      { title: '#', w: 35, align: 'center' },
+      { title: 'تاریخ', w: 85, align: 'center' },
+      { title: 'مد / کیٹیگری', w: 135, align: 'right' },
+      { title: 'تفصیل / خرچے کا عنوان', w: 220, align: 'right' },
+      { title: 'بنام / وصول کنندہ', w: 108, align: 'right' },
+      { title: 'طریقہ ادائیگی', w: 85, align: 'center' },
+      { title: 'رقم (روپے)', w: 110, align: 'right' },
+    ];
+    drawRowFn = (ctx, exp, idx, y) => {
+      let currentX = tableX;
+      // #
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${idx + 1}`, currentX + 17, y + 17);
+      currentX += 35;
+      // Date
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(exp.date || '-', currentX + 42, y + 17);
+      currentX += 85;
+      // Category
+      const catLabel = expenseCategoryLabels[exp.category as ExpenseCategory]?.ur || exp.category;
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(catLabel, currentX + 125, y + 17);
+      currentX += 135;
+      // Title
+      ctx.fillStyle = '#1e293b';
+      ctx.font = '11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText(exp.title || '-', currentX + 210, y + 17);
+      currentX += 220;
+      // Paid To
+      ctx.fillStyle = '#475569';
+      ctx.font = '10.5px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(exp.paidTo || '-', currentX + 98, y + 17);
+      currentX += 108;
+      // Method
+      const methodStr = exp.paymentMethod === 'online' ? 'آن لائن' : exp.paymentMethod === 'cheque' ? 'چیک' : 'نقد';
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(methodStr, currentX + 42, y + 17);
+      currentX += 85;
+      // Amount
+      ctx.fillStyle = '#9f1239';
+      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(exp.amount, '', 'en'), currentX + 100, y + 17);
+    };
+    const totalExp = rows.reduce((sum, r) => sum + (r.amount || 0), 0);
+    totalSummaryText = `کل اخراجات کے اندراجات: ${rows.length} • مجموعی دکان اخراجات: ${formatPKR(totalExp, 'Rs.', 'en')}`;
+  } else if (dateRows && dateRows.length > 0) {
     rows = dateRows;
     colDefs = [
       { title: '#', w: 35, align: 'center' },
@@ -522,61 +879,168 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       ctx.fillText(`تاریخ و وقت: ${generatedDate || new Date().toISOString().slice(0, 10)}`, 50, curY + 17);
       curY += 34;
 
-      // Summary Metric Cards (Gross Sales, Commission, Cash Received, Credit Pending)
+      // Summary Metric Cards
       if (summary) {
         const cardWidth = (PAGE_WIDTH - 72 - 36) / 4;
 
-        // Card 1: Gross Sales
-        ctx.fillStyle = '#f8fafc';
+        let card1Title = 'مجموعی کل فروخت';
+        let card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
+        let card1Bg = '#f8fafc';
+        let card1Border = '#e2e8f0';
+        let card1Text = '#0f172a';
+
+        let card2Title = 'کمیشن آمدن';
+        let card2Val = formatPKR(summary.commission, 'Rs.', 'en');
+        let card2Bg = '#ecfdf5';
+        let card2Border = '#a7f3d0';
+        let card2Text = '#065f46';
+
+        let card3Title = 'وصول شدہ نقد';
+        let card3Val = formatPKR(summary.cashReceived || 0, 'Rs.', 'en');
+        let card3Bg = '#eff6ff';
+        let card3Border = '#bfdbfe';
+        let card3Text = '#1e40af';
+
+        let card4Title = 'بقایا ادھار (کھاتہ)';
+        let card4Val = formatPKR(summary.creditPending || 0, 'Rs.', 'en');
+        let card4Bg = '#fff1f2';
+        let card4Border = '#fecdd3';
+        let card4Text = '#9f1239';
+
+        if (singleVendor || reportType === 'single_vendor') {
+          card1Title = 'مجموعی مال فروخت';
+          card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
+
+          card2Title = 'کمیشن فیس';
+          card2Val = formatPKR(summary.commission, 'Rs.', 'en');
+
+          card3Title = 'کل کٹوتیاں و اخراجات';
+          card3Val = formatPKR(summary.totalExpenses || 0, 'Rs.', 'en');
+          card3Bg = '#fef2f2';
+          card3Border = '#fecaca';
+          card3Text = '#991b1b';
+
+          card4Title = 'صافی میزان (واجب الادا)';
+          card4Val = formatPKR(summary.vendorPayable || (summary as any)?.netPayableToVendor || 0, 'Rs.', 'en');
+          card4Bg = '#f0fdf4';
+          card4Border = '#bbf7d0';
+          card4Text = '#166534';
+        } else if (singleCustomer || reportType === 'single_customer') {
+          card1Title = 'مجموعی مال خریدا';
+          card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
+
+          card2Title = 'خریدے گئے نگ';
+          card2Val = `${summary.unitsSold || 0} نگ`;
+
+          card3Title = 'نقد وصولی';
+          card3Val = formatPKR(summary.cashReceived || 0, 'Rs.', 'en');
+
+          card4Title = 'بقایا ادھار (کھاتہ)';
+          card4Val = formatPKR(summary.creditPending || 0, 'Rs.', 'en');
+        } else if (singleProduct || reportType === 'single_product') {
+          card1Title = 'مجموعی ٹرن اوور';
+          card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
+
+          card2Title = 'فروخت / آمد نگ';
+          card2Val = `${summary.unitsSold || 0} نگ`;
+
+          card3Title = 'لاٹس کی تعداد';
+          card3Val = `${summary.lotsCount || 0} لاٹس`;
+
+          card4Title = 'کمیشن آمدن';
+          card4Val = formatPKR(summary.commission, 'Rs.', 'en');
+          card4Bg = '#ecfdf5';
+          card4Border = '#a7f3d0';
+          card4Text = '#065f46';
+        } else if (singleLot || reportType === 'single_lot') {
+          card1Title = 'مجموعی مال فروخت';
+          card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
+
+          card2Title = 'کمیشن منافع';
+          card2Val = formatPKR(summary.commission, 'Rs.', 'en');
+
+          card3Title = 'کل کٹوتیاں';
+          card3Val = formatPKR(summary.totalExpenses || 0, 'Rs.', 'en');
+          card3Bg = '#fef2f2';
+          card3Border = '#fecaca';
+          card3Text = '#991b1b';
+
+          card4Title = 'صافی میزان زمیندار';
+          card4Val = formatPKR(summary.vendorPayable || (summary as any)?.netPayableToVendor || 0, 'Rs.', 'en');
+          card4Bg = '#eff6ff';
+          card4Border = '#bfdbfe';
+          card4Text = '#1e40af';
+        } else if (expenseRows || reportType === 'expenses') {
+          card1Title = 'مجموعی دکان اخراجات';
+          card1Val = formatPKR(summary.totalExpenses || 0, 'Rs.', 'en');
+          card1Bg = '#fef2f2';
+          card1Border = '#fecaca';
+          card1Text = '#991b1b';
+
+          card2Title = 'اندراجات کی تعداد';
+          card2Val = `${summary.lotsCount || rows.length} ریکارڈز`;
+
+          card3Title = 'نقد ادا شدہ';
+          card3Val = formatPKR(summary.cashReceived || 0, 'Rs.', 'en');
+
+          card4Title = 'آن لائن / بینک ادا';
+          card4Val = formatPKR(summary.creditPending || 0, 'Rs.', 'en');
+          card4Bg = '#eff6ff';
+          card4Border = '#bfdbfe';
+          card4Text = '#1e40af';
+        }
+
+        // Card 1
+        ctx.fillStyle = card1Bg;
         ctx.fillRect(36, curY, cardWidth, 46);
-        ctx.strokeStyle = '#e2e8f0';
+        ctx.strokeStyle = card1Border;
         ctx.strokeRect(36, curY, cardWidth, 46);
         ctx.textAlign = 'center';
         ctx.fillStyle = '#64748b';
         ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText('مجموعی کل فروخت', 36 + cardWidth / 2, curY + 15);
-        ctx.fillStyle = '#0f172a';
+        ctx.fillText(card1Title, 36 + cardWidth / 2, curY + 15);
+        ctx.fillStyle = card1Text;
         ctx.font = 'bold 12.5px system-ui, sans-serif';
-        ctx.fillText(formatPKR(summary.grossSales, 'Rs.', 'en'), 36 + cardWidth / 2, curY + 34);
+        ctx.fillText(card1Val, 36 + cardWidth / 2, curY + 34);
 
-        // Card 2: Commission
+        // Card 2
         const c2X = 36 + cardWidth + 12;
-        ctx.fillStyle = '#ecfdf5';
+        ctx.fillStyle = card2Bg;
         ctx.fillRect(c2X, curY, cardWidth, 46);
-        ctx.strokeStyle = '#a7f3d0';
+        ctx.strokeStyle = card2Border;
         ctx.strokeRect(c2X, curY, cardWidth, 46);
-        ctx.fillStyle = '#065f46';
+        ctx.fillStyle = '#64748b';
         ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText('کمیشن آمدن', c2X + cardWidth / 2, curY + 15);
-        ctx.fillStyle = '#065f46';
+        ctx.fillText(card2Title, c2X + cardWidth / 2, curY + 15);
+        ctx.fillStyle = card2Text;
         ctx.font = 'bold 12.5px system-ui, sans-serif';
-        ctx.fillText(formatPKR(summary.commission, 'Rs.', 'en'), c2X + cardWidth / 2, curY + 34);
+        ctx.fillText(card2Val, c2X + cardWidth / 2, curY + 34);
 
-        // Card 3: Cash Received
+        // Card 3
         const c3X = c2X + cardWidth + 12;
-        ctx.fillStyle = '#eff6ff';
+        ctx.fillStyle = card3Bg;
         ctx.fillRect(c3X, curY, cardWidth, 46);
-        ctx.strokeStyle = '#bfdbfe';
+        ctx.strokeStyle = card3Border;
         ctx.strokeRect(c3X, curY, cardWidth, 46);
-        ctx.fillStyle = '#1e40af';
+        ctx.fillStyle = '#64748b';
         ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText('وصول شدہ نقد', c3X + cardWidth / 2, curY + 15);
-        ctx.fillStyle = '#172554';
+        ctx.fillText(card3Title, c3X + cardWidth / 2, curY + 15);
+        ctx.fillStyle = card3Text;
         ctx.font = 'bold 12.5px system-ui, sans-serif';
-        ctx.fillText(formatPKR(summary.cashReceived || 0, 'Rs.', 'en'), c3X + cardWidth / 2, curY + 34);
+        ctx.fillText(card3Val, c3X + cardWidth / 2, curY + 34);
 
-        // Card 4: Credit Pending
+        // Card 4
         const c4X = c3X + cardWidth + 12;
-        ctx.fillStyle = '#fff1f2';
+        ctx.fillStyle = card4Bg;
         ctx.fillRect(c4X, curY, cardWidth, 46);
-        ctx.strokeStyle = '#fecdd3';
+        ctx.strokeStyle = card4Border;
         ctx.strokeRect(c4X, curY, cardWidth, 46);
-        ctx.fillStyle = '#9f1239';
+        ctx.fillStyle = '#64748b';
         ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText('بقایا ادھار (کھاتہ)', c4X + cardWidth / 2, curY + 15);
-        ctx.fillStyle = '#4c0519';
+        ctx.fillText(card4Title, c4X + cardWidth / 2, curY + 15);
+        ctx.fillStyle = card4Text;
         ctx.font = 'bold 12.5px system-ui, sans-serif';
-        ctx.fillText(formatPKR(summary.creditPending || 0, 'Rs.', 'en'), c4X + cardWidth / 2, curY + 34);
+        ctx.fillText(card4Val, c4X + cardWidth / 2, curY + 34);
 
         curY += 56;
       }
@@ -616,18 +1080,29 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
     const pageRows = rows.slice(rowIndex, rowIndex + pageCapacity);
 
     // DRAW TABLE ROWS
-    pageRows.forEach((rowItem, itemIdx) => {
-      const globalIdx = rowIndex + itemIdx;
-      ctx.fillStyle = globalIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
-      ctx.fillRect(tableX, curY, tableW, rowH);
+    if (rows.length === 0) {
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(tableX, curY, tableW, 44);
       ctx.strokeStyle = '#e2e8f0';
-      ctx.strokeRect(tableX, curY, tableW, rowH);
+      ctx.strokeRect(tableX, curY, tableW, 44);
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 12px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('اس دورانیے میں کوئی ریکارڈ موجود نہیں ہے (No Records Found)', PAGE_WIDTH / 2, curY + 27);
+      curY += 44;
+    } else {
+      pageRows.forEach((rowItem, itemIdx) => {
+        const globalIdx = rowIndex + itemIdx;
+        ctx.fillStyle = globalIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
+        ctx.fillRect(tableX, curY, tableW, rowH);
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.strokeRect(tableX, curY, tableW, rowH);
 
-      drawRowFn(ctx, rowItem, globalIdx, curY);
-      curY += rowH;
-    });
-
-    rowIndex += pageRows.length;
+        drawRowFn(ctx, rowItem, globalIdx, curY);
+        curY += rowH;
+      });
+      rowIndex += pageRows.length;
+    }
 
     // IF FINAL PAGE: DRAW SIGNATURE BOXES & VERIFICATION STAMP
     if (p === totalPages - 1) {

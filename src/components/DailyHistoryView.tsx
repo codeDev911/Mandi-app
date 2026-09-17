@@ -46,17 +46,53 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
+  // Date Filter state - defaults to today
+  type DailyDateFilter = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'all' | 'custom';
+  const [dateFilter, setDateFilter] = useState<DailyDateFilter>('today');
+  const [customFromDate, setCustomFromDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [customToDate, setCustomToDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const yesterdayStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }, []);
+  const weekAgoStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  }, []);
+  const thisMonthPrefix = useMemo(() => new Date().toISOString().slice(0, 7), []);
+
+  const isLotInDateRange = (lot: VendorLot) => {
+    const lotDate = lot.arrivalDate || lot.createdAt?.slice(0, 10) || todayStr;
+    if (dateFilter === 'all') return true;
+    if (dateFilter === 'today') return lotDate === todayStr;
+    if (dateFilter === 'yesterday') return lotDate === yesterdayStr;
+    if (dateFilter === 'this_week') return lotDate >= weekAgoStr && lotDate <= todayStr;
+    if (dateFilter === 'this_month') return lotDate.startsWith(thisMonthPrefix);
+    if (dateFilter === 'custom') {
+      return (!customFromDate || lotDate >= customFromDate) && (!customToDate || lotDate <= customToDate);
+    }
+    return true;
+  };
+
+  const lotsByDate = useMemo(() => {
+    return lots.filter(isLotInDateRange);
+  }, [lots, dateFilter, customFromDate, customToDate, todayStr, yesterdayStr, weekAgoStr, thisMonthPrefix]);
+
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, dateFilter, customFromDate, customToDate]);
 
   const { totalGrossSales, totalCommissionProfit, totalCratesHandled, totalCratesSold } = useMemo(() => {
     let gross = 0;
     let comm = 0;
     let handled = 0;
     let sold = 0;
-    for (let i = 0; i < lots.length; i++) {
-      const l = lots[i];
+    for (let i = 0; i < lotsByDate.length; i++) {
+      const l = lotsByDate[i];
       gross += l.summary.grossSales || 0;
       comm += l.summary.arhtiProfitCommission || 0;
       handled += l.totalQuantity || 0;
@@ -68,12 +104,12 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
       totalCratesHandled: handled,
       totalCratesSold: sold,
     };
-  }, [lots]);
+  }, [lotsByDate]);
 
   const filteredLots = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return lots;
-    return lots.filter((l) => {
+    if (!term) return lotsByDate;
+    return lotsByDate.filter((l) => {
       return (
         l.vendorName.toLowerCase().includes(term) ||
         l.productUrdu.toLowerCase().includes(term) ||
@@ -81,7 +117,7 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
         (l.vendorCity && l.vendorCity.toLowerCase().includes(term))
       );
     });
-  }, [lots, searchTerm]);
+  }, [lotsByDate, searchTerm]);
 
   const totalPages = Math.ceil(filteredLots.length / pageSize) || 1;
   const paginatedLots = useMemo(() => {
@@ -134,27 +170,76 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
         </div>
       </div>
 
-      {/* Search Bar & View All Lots Button */}
-      <div className="bg-white p-3 sm:p-4 rounded-2xl border border-stone-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
-        <div className="relative flex-1">
-          <input
-            type="text"
-            placeholder={t.searchPlaceholder}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 rtl:pr-9 rtl:pl-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs sm:text-sm font-urdu-sans focus:ring-2 focus:ring-emerald-500"
-          />
-          <Search className="w-4 h-4 text-stone-400 absolute left-3 rtl:right-3 rtl:left-auto top-2.5" />
+      {/* Search Bar & Date Filter Controls */}
+      <div className="bg-white p-3 sm:p-4 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              placeholder={t.searchPlaceholder}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 rtl:pr-9 rtl:pl-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs sm:text-sm font-urdu-sans focus:ring-2 focus:ring-emerald-500"
+            />
+            <Search className="w-4 h-4 text-stone-400 absolute left-3 rtl:right-3 rtl:left-auto top-2.5" />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsAllLotsOpen(true)}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 font-urdu-sans transition shadow-xs"
+          >
+            <Layers className="w-4 h-4" />
+            <span>{isUrdu ? 'تمام لاٹس ڈائرکٹری دیکھیں' : 'View All Lots Modal'}</span>
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsAllLotsOpen(true)}
-          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 font-urdu-sans transition shadow-xs"
-        >
-          <Layers className="w-4 h-4" />
-          <span>{isUrdu ? 'تمام لاٹس ڈائرکٹری دیکھیں' : 'View All Lots Modal'}</span>
-        </button>
+        {/* Date Filter Chips (Default: Today) */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-stone-100">
+          <span className="text-xs font-bold text-stone-500 font-urdu-sans pl-1 flex items-center gap-1">
+            <Calendar className="w-3.5 h-3.5 text-emerald-700" />
+            {isUrdu ? 'تاریخ فلٹر:' : 'Date Filter:'}
+          </span>
+          {[
+            { id: 'today', label: isUrdu ? 'آج' : 'Today' },
+            { id: 'yesterday', label: isUrdu ? 'گزشتہ کل' : 'Yesterday' },
+            { id: 'this_week', label: isUrdu ? 'گزشتہ ۷ دن' : 'Last 7 Days' },
+            { id: 'this_month', label: isUrdu ? 'رواں ماہ' : 'This Month' },
+            { id: 'all', label: isUrdu ? 'تمام تاریخیں' : 'All Time' },
+            { id: 'custom', label: isUrdu ? 'اپنی مرضی' : 'Custom' },
+          ].map((df) => (
+            <button
+              key={df.id}
+              type="button"
+              onClick={() => setDateFilter(df.id as any)}
+              className={`px-3 py-1 rounded-xl text-xs font-semibold font-urdu-sans transition ${
+                dateFilter === df.id
+                  ? 'bg-emerald-900 text-white shadow-xs font-bold'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              {df.label}
+            </button>
+          ))}
+
+          {dateFilter === 'custom' && (
+            <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+              <input
+                type="date"
+                value={customFromDate}
+                onChange={(e) => setCustomFromDate(e.target.value)}
+                className="px-2 py-1 bg-stone-50 border border-stone-300 rounded-lg text-xs font-numbers"
+              />
+              <span className="text-xs text-stone-400 font-urdu-sans">تا</span>
+              <input
+                type="date"
+                value={customToDate}
+                onChange={(e) => setCustomToDate(e.target.value)}
+                className="px-2 py-1 bg-stone-50 border border-stone-300 rounded-lg text-xs font-numbers"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Lots Detailed History Table */}
@@ -166,12 +251,39 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
           </h3>
 
           <span className="text-xs font-bold font-numbers text-stone-600">
-            {filteredLots.length} / {lots.length}
+            {filteredLots.length} / {lotsByDate.length}
           </span>
         </div>
 
-        <div className="divide-y divide-stone-100">
-          {paginatedLots.map((lot) => {
+        {paginatedLots.length === 0 ? (
+          <div className="p-8 text-center bg-white">
+            <p className="text-sm font-bold text-stone-700 font-urdu-sans">
+              {dateFilter === 'today'
+                ? (isUrdu ? 'آج کی کوئی لاٹ درج نہیں ہے۔' : 'No lots recorded for today.')
+                : (isUrdu ? 'منتخب کردہ تاریخ کی کوئی لاٹ نہیں ملی۔' : 'No lots found for the selected date.')}
+            </p>
+            <div className="mt-3 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDateFilter('all')}
+                className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-xs font-bold text-stone-800 font-urdu-sans transition"
+              >
+                {isUrdu ? 'تمام لاٹس دیکھیں' : 'View All Lots'}
+              </button>
+              {onOpenNewLot && (
+                <button
+                  type="button"
+                  onClick={onOpenNewLot}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-xs font-bold text-white font-urdu-sans transition"
+                >
+                  {isUrdu ? 'نئی لاٹ شامل کریں' : 'Add New Lot'}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="divide-y divide-stone-100">
+            {paginatedLots.map((lot) => {
             const unitLabel = unitLabels[lot.unitType][settings.language];
             const isCompleted = lot.status === 'completed' || lot.summary.remainingQuantity === 0;
 
@@ -275,6 +387,7 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
             );
           })}
         </div>
+        )}
 
         {filteredLots.length > 0 && (
           <div className="p-3 border-t border-stone-200">

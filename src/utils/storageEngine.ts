@@ -1,19 +1,21 @@
-import { VendorLot, AppSettings, CustomerBuyer, SavedVendor } from '../types';
-import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors } from './sampleData';
+import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense } from '../types';
+import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors, sampleExpenses } from './sampleData';
 import * as Neutralino from '@neutralinojs/lib';
 
 const DB_NAME = 'MandiMunshiMasterDB_v2';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORE_LOTS = 'lots';
 const STORE_CUSTOMERS = 'customers';
 const STORE_VENDORS = 'vendors';
 const STORE_SETTINGS = 'settings';
+const STORE_EXPENSES = 'expenses';
 
 const NEU_KEY_LOTS = 'mandi_bolli_lots_v1';
 const NEU_KEY_CUSTOMERS = 'mandi_bolli_customers_v1';
 const NEU_KEY_VENDORS = 'mandi_bolli_vendors_v1';
 const NEU_KEY_SETTINGS = 'mandi_bolli_settings_v1';
+const NEU_KEY_EXPENSES = 'mandi_bolli_expenses_v1';
 
 export interface DatabaseStats {
   totalLots: number;
@@ -121,6 +123,13 @@ export function getIndexedDB(): Promise<IDBDatabase | null> {
         if (!db.objectStoreNames.contains(STORE_SETTINGS)) {
           db.createObjectStore(STORE_SETTINGS, { keyPath: 'key' });
         }
+
+        // 5. Expenses Store (Shop General & Overhead Expenses)
+        if (!db.objectStoreNames.contains(STORE_EXPENSES)) {
+          const expStore = db.createObjectStore(STORE_EXPENSES, { keyPath: 'id' });
+          expStore.createIndex('date', 'date', { unique: false });
+          expStore.createIndex('category', 'category', { unique: false });
+        }
       };
 
       request.onsuccess = (event) => {
@@ -167,21 +176,24 @@ export async function loadInitialApplicationData(): Promise<{
   lots: VendorLot[];
   customers: CustomerBuyer[];
   vendors: SavedVendor[];
+  expenses: ShopExpense[];
 }> {
   // Layer 1: Check Neutralino Native Storage
   if (isNeutralinoActive()) {
     try {
-      const [neuLots, neuCustomers, neuVendors, neuSettings] = await Promise.all([
+      const [neuLots, neuCustomers, neuVendors, neuSettings, neuExpenses] = await Promise.all([
         readNeutralinoStorage<VendorLot[]>(NEU_KEY_LOTS),
         readNeutralinoStorage<CustomerBuyer[]>(NEU_KEY_CUSTOMERS),
         readNeutralinoStorage<SavedVendor[]>(NEU_KEY_VENDORS),
         readNeutralinoStorage<AppSettings>(NEU_KEY_SETTINGS),
+        readNeutralinoStorage<ShopExpense[]>(NEU_KEY_EXPENSES),
       ]);
 
       const hasNeuData =
         (neuLots && neuLots.length > 0) ||
         (neuCustomers && neuCustomers.length > 0) ||
         (neuVendors && neuVendors.length > 0) ||
+        (neuExpenses && neuExpenses.length > 0) ||
         !!neuSettings;
 
       if (hasNeuData) {
@@ -193,6 +205,7 @@ export async function loadInitialApplicationData(): Promise<{
         );
         const resolvedCustomers = neuCustomers && neuCustomers.length > 0 ? neuCustomers : sampleCustomers;
         const resolvedVendors = neuVendors && neuVendors.length > 0 ? neuVendors : sampleVendors;
+        const resolvedExpenses = neuExpenses && neuExpenses.length > 0 ? neuExpenses : sampleExpenses;
 
         // Mirror to IndexedDB & LocalStorage
         getIndexedDB().then((db) => {
@@ -201,6 +214,7 @@ export async function loadInitialApplicationData(): Promise<{
             saveCustomersToIndexedDB(resolvedCustomers).catch(() => {});
             saveVendorsToIndexedDB(resolvedVendors).catch(() => {});
             saveSettingsToIndexedDB(resolvedSettings).catch(() => {});
+            saveExpensesToIndexedDB(resolvedExpenses).catch(() => {});
           }
         });
 
@@ -209,6 +223,7 @@ export async function loadInitialApplicationData(): Promise<{
           lots: resolvedLots,
           customers: resolvedCustomers,
           vendors: resolvedVendors,
+          expenses: resolvedExpenses,
         };
       }
     } catch (e) {
@@ -220,17 +235,19 @@ export async function loadInitialApplicationData(): Promise<{
   const db = await getIndexedDB();
   if (db) {
     try {
-      const [lots, customers, vendors, settings] = await Promise.all([
+      const [lots, customers, vendors, settings, expenses] = await Promise.all([
         getAllFromStore<VendorLot>(db, STORE_LOTS),
         getAllFromStore<CustomerBuyer>(db, STORE_CUSTOMERS),
         getAllFromStore<SavedVendor>(db, STORE_VENDORS),
         getSingleFromStore<AppSettings>(db, STORE_SETTINGS, 'app_settings'),
+        getAllFromStore<ShopExpense>(db, STORE_EXPENSES),
       ]);
 
       const hasAnyData =
         (lots && lots.length > 0) ||
         (customers && customers.length > 0) ||
         (vendors && vendors.length > 0) ||
+        (expenses && expenses.length > 0) ||
         !!settings;
 
       if (hasAnyData) {
@@ -242,18 +259,21 @@ export async function loadInitialApplicationData(): Promise<{
         );
         const resolvedCustomers = customers && customers.length > 0 ? customers : sampleCustomers;
         const resolvedVendors = vendors && vendors.length > 0 ? vendors : sampleVendors;
+        const resolvedExpenses = expenses && expenses.length > 0 ? expenses : sampleExpenses;
 
         // Mirror back to Neutralino Storage
         writeNeutralinoStorage(NEU_KEY_LOTS, resolvedLots);
         writeNeutralinoStorage(NEU_KEY_CUSTOMERS, resolvedCustomers);
         writeNeutralinoStorage(NEU_KEY_VENDORS, resolvedVendors);
         writeNeutralinoStorage(NEU_KEY_SETTINGS, resolvedSettings);
+        writeNeutralinoStorage(NEU_KEY_EXPENSES, resolvedExpenses);
 
         return {
           settings: resolvedSettings,
           lots: resolvedLots,
           customers: resolvedCustomers,
           vendors: resolvedVendors,
+          expenses: resolvedExpenses,
         };
       }
     } catch (e) {
@@ -266,6 +286,7 @@ export async function loadInitialApplicationData(): Promise<{
   let initialLots: VendorLot[] | null = null;
   let initialCustomers: CustomerBuyer[] | null = null;
   let initialVendors: SavedVendor[] | null = null;
+  let initialExpenses: ShopExpense[] | null = null;
 
   try {
     const savedSettings = localStorage.getItem('mandi_bolli_settings_v1');
@@ -279,6 +300,9 @@ export async function loadInitialApplicationData(): Promise<{
 
     const savedVendors = localStorage.getItem('mandi_bolli_vendors_v1');
     if (savedVendors) initialVendors = JSON.parse(savedVendors);
+
+    const savedExpenses = localStorage.getItem('mandi_bolli_expenses_v1');
+    if (savedExpenses) initialExpenses = JSON.parse(savedExpenses);
   } catch (e) {
     console.warn('LocalStorage parse error:', e);
   }
@@ -286,18 +310,21 @@ export async function loadInitialApplicationData(): Promise<{
   const finalLots = initialLots !== null ? initialLots : getInitialLots();
   const finalCustomers = initialCustomers !== null ? initialCustomers : sampleCustomers;
   const finalVendors = initialVendors !== null ? initialVendors : sampleVendors;
+  const finalExpenses = initialExpenses !== null ? initialExpenses : sampleExpenses;
 
   // Seed all tiers on genuine first run
   writeNeutralinoStorage(NEU_KEY_LOTS, finalLots);
   writeNeutralinoStorage(NEU_KEY_CUSTOMERS, finalCustomers);
   writeNeutralinoStorage(NEU_KEY_VENDORS, finalVendors);
   writeNeutralinoStorage(NEU_KEY_SETTINGS, initialSettings);
+  writeNeutralinoStorage(NEU_KEY_EXPENSES, finalExpenses);
 
   if (db) {
     saveLotsToIndexedDB(finalLots).catch(() => {});
     saveCustomersToIndexedDB(finalCustomers).catch(() => {});
     saveVendorsToIndexedDB(finalVendors).catch(() => {});
     saveSettingsToIndexedDB(initialSettings).catch(() => {});
+    saveExpensesToIndexedDB(finalExpenses).catch(() => {});
   }
 
   return {
@@ -305,6 +332,7 @@ export async function loadInitialApplicationData(): Promise<{
     lots: finalLots,
     customers: finalCustomers,
     vendors: finalVendors,
+    expenses: finalExpenses,
   };
 }
 
@@ -510,6 +538,62 @@ export async function saveVendorsToIndexedDB(vendors: SavedVendor[]): Promise<vo
 }
 
 /**
+ * Expenses saver (Debounced)
+ */
+let saveExpensesTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingExpensesToSave: ShopExpense[] | null = null;
+
+export function saveExpensesAsync(expenses: ShopExpense[]): void {
+  pendingExpensesToSave = expenses;
+  if (saveExpensesTimer) clearTimeout(saveExpensesTimer);
+  saveExpensesTimer = setTimeout(() => {
+    if (pendingExpensesToSave) {
+      const data = pendingExpensesToSave;
+      pendingExpensesToSave = null;
+      saveExpensesToIndexedDB(data);
+      writeNeutralinoStorage(NEU_KEY_EXPENSES, data);
+      try {
+        if (data.length <= 500) {
+          localStorage.setItem('mandi_bolli_expenses_v1', JSON.stringify(data));
+        }
+      } catch {
+        // ignore quota error
+      }
+    }
+  }, 350);
+}
+
+export async function saveExpensesToIndexedDB(expenses: ShopExpense[]): Promise<void> {
+  if (saveExpensesTimer) {
+    clearTimeout(saveExpensesTimer);
+    saveExpensesTimer = null;
+  }
+  pendingExpensesToSave = null;
+
+  writeNeutralinoStorage(NEU_KEY_EXPENSES, expenses);
+
+  const db = await getIndexedDB();
+  if (!db) return;
+
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(STORE_EXPENSES, 'readwrite');
+      const store = tx.objectStore(STORE_EXPENSES);
+      store.clear().onsuccess = () => {
+        for (let i = 0; i < expenses.length; i++) {
+          store.put(expenses[i]);
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+/**
  * Settings saver
  */
 let saveSettingsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -583,6 +667,15 @@ export function flushPendingStorageSaves(): void {
     writeNeutralinoStorage(NEU_KEY_VENDORS, vendors);
     try { localStorage.setItem('mandi_bolli_vendors_v1', JSON.stringify(vendors)); } catch {}
   }
+  if (saveExpensesTimer && pendingExpensesToSave) {
+    clearTimeout(saveExpensesTimer);
+    saveExpensesTimer = null;
+    const expenses = pendingExpensesToSave;
+    pendingExpensesToSave = null;
+    saveExpensesToIndexedDB(expenses);
+    writeNeutralinoStorage(NEU_KEY_EXPENSES, expenses);
+    try { localStorage.setItem('mandi_bolli_expenses_v1', JSON.stringify(expenses)); } catch {}
+  }
 }
 
 // Attach automatic flush handlers
@@ -650,7 +743,8 @@ export function generateFullBackupPayload(
   settings: AppSettings,
   lots: VendorLot[],
   customers: CustomerBuyer[],
-  vendors: SavedVendor[]
+  vendors: SavedVendor[],
+  expenses: ShopExpense[] = []
 ): string {
   const payload = {
     version: '2.0.0',
@@ -660,11 +754,13 @@ export function generateFullBackupPayload(
       lotsCount: lots.length,
       customersCount: customers.length,
       vendorsCount: vendors.length,
+      expensesCount: expenses.length,
     },
     settings,
     lots,
     customers,
     vendors,
+    expenses,
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -678,6 +774,7 @@ export function parseAndValidateBackupPayload(jsonText: string): {
   lots?: VendorLot[];
   customers?: CustomerBuyer[];
   vendors?: SavedVendor[];
+  expenses?: ShopExpense[];
   error?: string;
 } {
   try {
@@ -696,6 +793,7 @@ export function parseAndValidateBackupPayload(jsonText: string): {
       lots: parsed.lots || [],
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
       vendors: Array.isArray(parsed.vendors) ? parsed.vendors : [],
+      expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
     };
   } catch (err: any) {
     return { success: false, error: err?.message || 'فائل پڑھنے میں غلطی' };

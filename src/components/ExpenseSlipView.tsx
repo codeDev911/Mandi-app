@@ -1,825 +1,908 @@
-import React, { useState } from 'react';
-import { VendorLot, AppSettings, CustomExpense } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import React, { useState, useMemo } from 'react';
+import {
+  VendorLot,
+  AppSettings,
+  ShopExpense,
+  ExpenseCategory,
+  expenseCategoryLabels,
+} from '../types';
+import { translations } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
-import { getUnitMazdooriRate } from '../utils/calculations';
 import {
   Receipt,
   Plus,
   Trash2,
   Edit3,
-  RotateCcw,
   Check,
-  FileText,
-  DollarSign,
-  TrendingUp,
-  Percent,
-  Layers,
-  HelpCircle,
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
-  Clock,
+  Search,
+  Calendar,
+  Filter,
+  X,
+  Printer,
+  Download,
 } from 'lucide-react';
+import { PaginationControls } from './PaginationControls';
+import { ReportPDFPreviewModal } from './ReportPDFPreviewModal';
+import { buildExpenseReportPDF, PDFPreviewData } from '../utils/pdfReportGenerator';
+import { printDetailedReportDocument } from '../utils/printHelper';
+
+export type ExpenseDateFilter = 'all' | 'today' | 'yesterday' | 'last7days' | 'thismonth' | 'custom';
 
 interface ExpenseSlipViewProps {
-  lot: VendorLot;
-  onUpdateLotExpenses: (lotId: string, updatedExpenses: VendorLot['expenses']) => void;
-  onOpenReceipt: (lotId: string) => void;
+  lot?: VendorLot;
+  lots?: VendorLot[];
+  expenses?: ShopExpense[];
+  onSaveExpense?: (expense: ShopExpense) => void;
+  onDeleteExpense?: (expenseId: string) => void;
+  onUpdateLotExpenses?: (lotId: string, updatedExpenses: VendorLot['expenses']) => void;
+  onOpenReceipt?: (lotId: string) => void;
   onToggleVendorPaymentStatus?: (lotId: string, customStatus?: 'pending' | 'paid') => void;
   onBackToBolli?: () => void;
+  onSelectLot?: (lotId: string) => void;
   settings: AppSettings;
 }
 
 export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
-  lot,
-  onUpdateLotExpenses,
-  onOpenReceipt,
-  onToggleVendorPaymentStatus,
+  expenses: shopExpenses = [],
+  onSaveExpense,
+  onDeleteExpense,
   onBackToBolli,
   settings,
 }) => {
   const t = translations[settings.language];
   const isUrdu = settings.language === 'ur';
-  const unitLabel = unitLabels[lot.unitType][settings.language];
 
-  // Local state for editable fields
-  const [expenses, setExpenses] = useState<VendorLot['expenses']>(lot.expenses);
-  const [customNameUrdu, setCustomNameUrdu] = useState('');
-  const [customAmount, setCustomAmount] = useState<number>(0);
-  const [isAddingCustom, setIsAddingCustom] = useState(false);
+  // -------------------------------------------------------------
+  // SHOP GENERAL EXPENSES STATE & HANDLERS
+  // -------------------------------------------------------------
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
 
-  // Sync state if lot changes
-  React.useEffect(() => {
-    setExpenses(lot.expenses);
-  }, [lot.expenses]);
+  const [formDate, setFormDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [formCategory, setFormCategory] = useState<ExpenseCategory>('tea');
+  const [formTitle, setFormTitle] = useState('');
+  const [formAmount, setFormAmount] = useState<number | ''>('');
+  const [formPaidTo, setFormPaidTo] = useState('');
+  const [formPaymentMethod, setFormPaymentMethod] = useState<'cash' | 'online' | 'cheque'>('cash');
+  const [formNotes, setFormNotes] = useState('');
 
-  const handleFieldChange = (updater: (prev: VendorLot['expenses']) => VendorLot['expenses']) => {
-    const updated = updater({ ...expenses });
-    setExpenses(updated);
-    onUpdateLotExpenses(lot.id, updated);
+  // Filters state
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<ExpenseDateFilter>('today');
+  const [customFromDate, setCustomFromDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [customToDate, setCustomToDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Pagination state for Shop Expenses list
+  const [expensePage, setExpensePage] = useState<number>(1);
+  const [expensePageSize, setExpensePageSize] = useState<number>(20);
+
+  // PDF Preview Modal State
+  const [pdfPreview, setPdfPreview] = useState<PDFPreviewData | null>(null);
+
+  const openAddExpenseModal = () => {
+    sound.playTick();
+    setEditingExpenseId(null);
+    setFormDate(new Date().toISOString().slice(0, 10));
+    setFormCategory('tea');
+    setFormTitle('');
+    setFormAmount('');
+    setFormPaidTo('');
+    setFormPaymentMethod('cash');
+    setFormNotes('');
+    setIsExpenseModalOpen(true);
   };
 
-  const handleCommissionRateChange = (rate: number) => {
-    handleFieldChange((prev) => {
-      const computed = Math.round((lot.summary.grossSales * rate) / 100);
-      return {
-        ...prev,
-        commission: {
-          ...prev.commission,
-          rate,
-          amount: computed,
-          type: 'percentage',
-        },
-      };
-    });
+  const openEditExpenseModal = (exp: ShopExpense) => {
+    sound.playTick();
+    setEditingExpenseId(exp.id);
+    setFormDate(exp.date);
+    setFormCategory(exp.category);
+    setFormTitle(exp.title);
+    setFormAmount(exp.amount);
+    setFormPaidTo(exp.paidTo || '');
+    setFormPaymentMethod(exp.paymentMethod || 'cash');
+    setFormNotes(exp.notes || '');
+    setIsExpenseModalOpen(true);
   };
 
-  const handleCommissionAmountManualChange = (amount: number) => {
-    handleFieldChange((prev) => {
-      return {
-        ...prev,
-        commission: {
-          ...prev.commission,
-          amount,
-          type: 'fixed',
-        },
-      };
-    });
-  };
-
-  const handleMazdooriManualChange = (amount: number) => {
-    handleFieldChange((prev) => {
-      return {
-        ...prev,
-        mazdoori: {
-          ...prev.mazdoori,
-          amount,
-        },
-      };
-    });
-  };
-
-  const handleKirayaChange = (amount: number) => {
-    handleFieldChange((prev) => ({
-      ...prev,
-      kiraya: {
-        ...prev.kiraya,
-        amount,
-        enabled: amount > 0,
-      },
-    }));
-  };
-
-  const handleMunshianaChange = (amount: number) => {
-    handleFieldChange((prev) => ({
-      ...prev,
-      munshiana: {
-        ...prev.munshiana,
-        amount,
-        enabled: amount > 0,
-      },
-    }));
-  };
-
-  const handleNaqdAdvanceChange = (amount: number) => {
-    handleFieldChange((prev) => ({
-      ...prev,
-      naqdAdvance: {
-        ...prev.naqdAdvance,
-        amount,
-        enabled: amount > 0,
-      },
-    }));
-  };
-
-  const handleMarketFeeChange = (amount: number) => {
-    handleFieldChange((prev) => ({
-      ...prev,
-      marketFee: {
-        ...prev.marketFee,
-        amount,
-        enabled: amount > 0,
-      },
-    }));
-  };
-
-  const handleAddCustomExpense = (e: React.FormEvent) => {
+  const handleSaveExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customNameUrdu.trim() || customAmount <= 0) return;
+    const numAmount = parseNumber(formAmount);
+    if (!formTitle.trim() || numAmount <= 0) return;
 
-    sound.playTick();
-    const newCustom: CustomExpense = {
-      id: `ce-${Date.now()}`,
-      nameUrdu: customNameUrdu.trim(),
-      nameEn: customNameUrdu.trim(),
-      amount: customAmount,
+    const payload: ShopExpense = {
+      id: editingExpenseId || `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      date: formDate,
+      category: formCategory,
+      title: formTitle.trim(),
+      amount: numAmount,
+      paidTo: formPaidTo.trim() || undefined,
+      paymentMethod: formPaymentMethod,
+      notes: formNotes.trim() || undefined,
+      createdAt: editingExpenseId
+        ? shopExpenses.find((x) => x.id === editingExpenseId)?.createdAt || new Date().toISOString()
+        : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
-    handleFieldChange((prev) => ({
-      ...prev,
-      customExpenses: [...(prev.customExpenses || []), newCustom],
-    }));
-
-    setCustomNameUrdu('');
-    setCustomAmount(0);
-    setIsAddingCustom(false);
+    if (onSaveExpense) {
+      onSaveExpense(payload);
+    }
+    setIsExpenseModalOpen(false);
   };
 
-  const handleRemoveCustomExpense = (id: string) => {
-    sound.playTick();
-    handleFieldChange((prev) => ({
-      ...prev,
-      customExpenses: (prev.customExpenses || []).filter((item) => item.id !== id),
-    }));
+  // Helper for human-readable date filter label (used in headers, PDF, and print)
+  const getDateFilterLabel = () => {
+    if (dateFilter === 'all') return isUrdu ? 'تمام دستیاب ریکارڈ' : 'All Time Records';
+    if (dateFilter === 'today') return isUrdu ? 'آج کی تاریخ' : "Today's Date";
+    if (dateFilter === 'yesterday') return isUrdu ? 'گزشتہ کل کی تاریخ' : 'Yesterday';
+    if (dateFilter === 'last7days') return isUrdu ? 'گزشتہ ۷ دن' : 'Last 7 Days';
+    if (dateFilter === 'thismonth') return isUrdu ? 'رواں ماہ' : 'This Month';
+    if (dateFilter === 'custom') {
+      if (customFromDate && customToDate) {
+        return isUrdu
+          ? `از تاریخ ${customFromDate} تا ${customToDate}`
+          : `From ${customFromDate} to ${customToDate}`;
+      }
+      if (customFromDate) return isUrdu ? `از تاریخ ${customFromDate}` : `From ${customFromDate}`;
+      if (customToDate) return isUrdu ? `تا تاریخ ${customToDate}` : `Until ${customToDate}`;
+    }
+    return isUrdu ? 'تمام ریکارڈ' : 'All Records';
   };
 
-  const handleResetToDefaults = () => {
+  // Check if expense date falls within chosen range
+  const isExpenseInDateRange = (expDate: string) => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const yesterdayStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+    if (dateFilter === 'all') return true;
+    if (dateFilter === 'today') return expDate === todayStr;
+    if (dateFilter === 'yesterday') return expDate === yesterdayStr;
+    if (dateFilter === 'last7days') {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      return expDate >= sevenDaysAgo && expDate <= todayStr;
+    }
+    if (dateFilter === 'thismonth') {
+      const monthPrefix = new Date().toISOString().slice(0, 7);
+      return expDate.startsWith(monthPrefix);
+    }
+    if (dateFilter === 'custom') {
+      if (customFromDate && customToDate) {
+        return expDate >= customFromDate && expDate <= customToDate;
+      }
+      if (customFromDate) return expDate >= customFromDate;
+      if (customToDate) return expDate <= customToDate;
+      return true;
+    }
+    return true;
+  };
+
+  // Filtered Shop Expenses
+  const filteredShopExpenses = useMemo(() => {
+    return shopExpenses.filter((exp) => {
+      if (categoryFilter !== 'all' && exp.category !== categoryFilter) return false;
+      if (!isExpenseInDateRange(exp.date)) return false;
+
+      if (searchTerm.trim()) {
+        const query = searchTerm.toLowerCase();
+        const matchesTitle = exp.title.toLowerCase().includes(query);
+        const matchesPaidTo = exp.paidTo?.toLowerCase().includes(query) ?? false;
+        const matchesCategory =
+          expenseCategoryLabels[exp.category]?.ur.includes(query) || exp.category.includes(query);
+        if (!matchesTitle && !matchesPaidTo && !matchesCategory) return false;
+      }
+      return true;
+    });
+  }, [shopExpenses, categoryFilter, dateFilter, customFromDate, customToDate, searchTerm]);
+
+  // Shop Expenses Stats
+  const shopExpensesStats = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const monthStr = new Date().toISOString().slice(0, 7);
+
+    let totalAll = 0;
+    let todayTotal = 0;
+    let monthTotal = 0;
+    let cashTotal = 0;
+
+    shopExpenses.forEach((exp) => {
+      const amt = exp.amount || 0;
+      totalAll += amt;
+      if (exp.date === todayStr) todayTotal += amt;
+      if (exp.date.startsWith(monthStr)) monthTotal += amt;
+      if (exp.paymentMethod === 'cash') cashTotal += amt;
+    });
+
+    return { totalAll, todayTotal, monthTotal, cashTotal, count: shopExpenses.length };
+  }, [shopExpenses]);
+
+  // Paginated Expenses
+  const totalExpensePages = Math.ceil(filteredShopExpenses.length / expensePageSize) || 1;
+  const paginatedShopExpenses = useMemo(() => {
+    const start = (expensePage - 1) * expensePageSize;
+    return filteredShopExpenses.slice(start, start + expensePageSize);
+  }, [filteredShopExpenses, expensePage, expensePageSize]);
+
+  // Reset pagination to page 1 when filters change
+  React.useEffect(() => {
+    setExpensePage(1);
+  }, [categoryFilter, dateFilter, customFromDate, customToDate, searchTerm]);
+
+  // PDF Report Handler for Shop Expenses
+  const handlePreviewExpensePDF = () => {
     sound.playTick();
-    const defaultComm = Math.round((lot.summary.grossSales * settings.defaultCommissionPercent) / 100);
-    const unitMazRate = getUnitMazdooriRate(lot.unitType, settings);
-    const defaultMaz = unitMazRate * lot.totalQuantity;
-    const defaultMkt = settings.defaultMarketFeePerUnit * lot.totalQuantity;
+    const dateFilterLabel = getDateFilterLabel();
+    const filteredTotal = filteredShopExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+    const filteredCash = filteredShopExpenses
+      .filter((e) => e.paymentMethod === 'cash')
+      .reduce((s, e) => s + (e.amount || 0), 0);
+    const filteredOnline = filteredShopExpenses
+      .filter((e) => e.paymentMethod === 'online' || e.paymentMethod === 'cheque')
+      .reduce((s, e) => s + (e.amount || 0), 0);
 
-    const resetExpenses: VendorLot['expenses'] = {
-      commission: {
-        type: 'percentage',
-        rate: settings.defaultCommissionPercent,
-        amount: defaultComm,
-        enabled: true,
-      },
-      kiraya: {
-        amount: 0,
-        enabled: false,
-      },
-      mazdoori: {
-        ratePerUnit: unitMazRate,
-        amount: defaultMaz,
-        enabled: true,
-      },
-      munshiana: {
-        amount: settings.defaultMunshiana,
-        enabled: true,
-      },
-      naqdAdvance: {
-        amount: 0,
-        enabled: false,
-      },
-      marketFee: {
-        ratePerUnit: settings.defaultMarketFeePerUnit,
-        amount: defaultMkt,
-        enabled: true,
-      },
-      customExpenses: [],
-    };
+    const preview = buildExpenseReportPDF(
+      filteredShopExpenses,
+      settings,
+      dateFilterLabel,
+      filteredTotal,
+      filteredCash,
+      filteredOnline
+    );
+    setPdfPreview(preview);
+  };
 
-    setExpenses(resetExpenses);
-    onUpdateLotExpenses(lot.id, resetExpenses);
+  // Direct High-Quality Print for Shop Expenses
+  const handlePrintExpenseReport = () => {
+    sound.playTick();
+    const dateFilterLabel = getDateFilterLabel();
+    const filteredTotal = filteredShopExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+    const filteredCash = filteredShopExpenses
+      .filter((e) => e.paymentMethod === 'cash')
+      .reduce((s, e) => s + (e.amount || 0), 0);
+    const filteredOnline = filteredShopExpenses
+      .filter((e) => e.paymentMethod === 'online' || e.paymentMethod === 'cheque')
+      .reduce((s, e) => s + (e.amount || 0), 0);
+
+    const preview = buildExpenseReportPDF(
+      filteredShopExpenses,
+      settings,
+      dateFilterLabel,
+      filteredTotal,
+      filteredCash,
+      filteredOnline
+    );
+    printDetailedReportDocument(preview);
   };
 
   return (
     <div className="space-y-4 pb-16 sm:pb-6">
-      {/* Top Banner */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 flex items-center justify-center text-2xl flex-shrink-0">
-              {lot.productEmoji}
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-900 font-urdu-nastaliq">
-                {lot.vendorName} • {t.expenseSlipTitle}
+      {/* Header Bar: Shop Expenses & Petty Cash */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center justify-center flex-shrink-0 shadow-2xs">
+            <Receipt className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="font-bold text-sm sm:text-base text-slate-900 font-urdu-nastaliq">
+                {isUrdu ? 'دکان کے اخراجات و روزنامچہ' : 'Shop Expenses & Petty Cash'}
               </h2>
-              <p className="text-xs text-slate-500 font-urdu-sans">
-                {lot.productUrdu} ({lot.totalQuantity} {unitLabel}) • {t.lotNumber}: <span className="font-mono">{lot.lotNumber}</span>
-              </p>
+              <span className="px-2 py-0.5 bg-rose-100 text-rose-800 text-[11px] rounded-full font-numbers font-bold">
+                {shopExpenses.length} {isUrdu ? 'اندراجات' : 'entries'}
+              </span>
             </div>
+            <p className="text-[11px] text-slate-500 font-urdu-sans">
+              {isUrdu
+                ? 'دکان کا چائے، کرایہ، تنخواہ، بجلی بل اور دیگر متفرق روزمرہ اخراجات کا محفوظ حساب کتاب'
+                : 'Manage shop petty cash, daily expenses, bills, rent, and staff costs'}
+            </p>
           </div>
         </div>
 
+        {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
-          {onToggleVendorPaymentStatus && (
-            <button
-              onClick={() => {
-                sound.playTick();
-                onToggleVendorPaymentStatus(lot.id);
-              }}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 border shadow-2xs active:scale-95 ${
-                lot.vendorPaymentStatus === 'paid'
-                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300 hover:bg-emerald-200'
-                  : 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
-              }`}
-              title={
-                lot.vendorPaymentStatus === 'paid'
-                  ? 'ادائیگی ہو چکی ہے - کلک کر کے بقایا کریں'
-                  : 'ادائیگی بقایا ہے - کلک کر کے ادا شدہ کریں'
-              }
-            >
-              {lot.vendorPaymentStatus === 'paid' ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-              ) : (
-                <Clock className="w-3.5 h-3.5 text-amber-700" />
-              )}
-              <span>
-                {lot.vendorPaymentStatus === 'paid'
-                  ? (isUrdu ? 'ادا شدہ (Paid)' : 'Paid')
-                  : (isUrdu ? 'ادائیگی بقایا (Pending)' : 'Pending')}
-              </span>
-            </button>
-          )}
+          <button
+            onClick={openAddExpenseModal}
+            className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-xs active:scale-95"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isUrdu ? 'نیا خرچہ درج کریں' : 'Add Expense'}</span>
+          </button>
 
           {onBackToBolli && (
             <button
               onClick={onBackToBolli}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition flex items-center gap-1.5 font-urdu-sans border border-slate-300"
+              className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition flex items-center gap-1.5 font-urdu-sans border border-slate-200"
             >
               {isUrdu ? <ArrowRight className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowLeft className="w-3.5 h-3.5 text-emerald-600" />}
               <span>{t.backToBolli}</span>
             </button>
           )}
-
-          <button
-            onClick={handleResetToDefaults}
-            className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition flex items-center gap-1.5 font-urdu-sans border border-slate-200"
-            title={t.resetDefault}
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>{t.resetDefault}</span>
-          </button>
-
-          <button
-            onClick={() => onOpenReceipt(lot.id)}
-            className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans shadow-xs active:scale-95 border border-slate-800"
-          >
-            <FileText className="w-4 h-4 text-emerald-400" />
-            <span>{t.tabReceipt}</span>
-          </button>
         </div>
       </div>
 
-      {/* Main 2-Column Mandi Parchi Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* LEFT / CENTER: Mandi Receipt Slip */}
-        <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          {/* Slip Header with Pakistani Mandi Theme */}
-          <div className="bg-slate-50 border-b border-slate-200 p-3.5 sm:p-4 flex items-center justify-between">
-            <div>
-              <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider font-urdu-sans">
-                {isUrdu ? 'آڑھت حساب کتاب و اخراجات پرچی' : 'Mandi Expense & Deductions Ledger'}
-              </span>
-              <h3 className="font-bold text-sm sm:text-base text-slate-800 font-urdu-nastaliq">
-                {settings.shopNameUrdu}
-              </h3>
-            </div>
-            <div className="text-end">
-              <span className="text-[11px] text-slate-500 font-urdu-sans block">{t.date}: {lot.arrivalDate}</span>
-              <span className="text-xs font-mono font-bold text-slate-700">{lot.lotNumber}</span>
-            </div>
+      {/* Shop Expenses Overview Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* 1. Today's Expenses */}
+        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+          <span className="text-[11px] text-slate-500 font-bold font-urdu-sans block">
+            {isUrdu ? 'آج کے اخراجات' : "Today's Expenses"}
+          </span>
+          <span className="text-base sm:text-lg font-black text-rose-700 font-numbers block mt-0.5">
+            {formatPKR(shopExpensesStats.todayTotal, settings.currencySymbol, settings.language)}
+          </span>
+          <span className="text-[10px] text-slate-400 font-urdu-sans">
+            {new Date().toISOString().slice(0, 10)}
+          </span>
+        </div>
+
+        {/* 2. This Month's Expenses */}
+        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+          <span className="text-[11px] text-slate-500 font-bold font-urdu-sans block">
+            {isUrdu ? 'رواں ماہ کے اخراجات' : "This Month's"}
+          </span>
+          <span className="text-base sm:text-lg font-black text-slate-900 font-numbers block mt-0.5">
+            {formatPKR(shopExpensesStats.monthTotal, settings.currencySymbol, settings.language)}
+          </span>
+          <span className="text-[10px] text-slate-400 font-urdu-sans">
+            {new Date().toISOString().slice(0, 7)}
+          </span>
+        </div>
+
+        {/* 3. Cash Expenses */}
+        <div className="bg-emerald-50 p-3.5 sm:p-4 rounded-2xl border border-emerald-200 shadow-xs">
+          <span className="text-[11px] text-emerald-800 font-bold font-urdu-sans block">
+            {isUrdu ? 'نقد ادا شدہ' : 'Paid in Cash'}
+          </span>
+          <span className="text-base sm:text-lg font-black text-emerald-950 font-numbers block mt-0.5">
+            {formatPKR(shopExpensesStats.cashTotal, settings.currencySymbol, settings.language)}
+          </span>
+          <span className="text-[10px] text-emerald-700 font-urdu-sans">
+            {isUrdu ? 'دکان کی دراز سے' : 'Direct from register'}
+          </span>
+        </div>
+
+        {/* 4. Total Overall Expenses */}
+        <div className="bg-slate-900 text-white p-3.5 sm:p-4 rounded-2xl border border-slate-800 shadow-xs">
+          <span className="text-[11px] text-slate-300 font-bold font-urdu-sans block">
+            {isUrdu ? 'کل دکان اخراجات' : 'Total Shop Expenses'}
+          </span>
+          <span className="text-base sm:text-lg font-black text-rose-400 font-numbers block mt-0.5">
+            {formatPKR(shopExpensesStats.totalAll, settings.currencySymbol, settings.language)}
+          </span>
+          <span className="text-[10px] text-slate-400 font-urdu-sans">
+            {shopExpensesStats.count} {isUrdu ? 'کل اندراجات' : 'total entries'}
+          </span>
+        </div>
+      </div>
+
+      {/* Search, Date Filter & Category Filter Bar */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Search Bar */}
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder={isUrdu ? 'خرچے کا عنوان، وصول کنندہ یا مد تلاش کریں...' : 'Search expenses by title, recipient...'}
+              className="w-full pr-9 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-urdu-sans text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
-          {/* 2-Column Table Structure */}
-          <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x md:rtl:divide-x-reverse divide-slate-200">
-            {/* COLUMN 1: اخراجات (Deductions & Expenses) */}
-            <div className="p-3.5 sm:p-4 space-y-3 bg-slate-50/50">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                <h4 className="font-extrabold text-sm text-slate-800 font-urdu-nastaliq flex items-center gap-1.5">
-                  <Receipt className="w-4 h-4 text-emerald-600" />
-                  <span>{t.expensesSection} (کٹوتیاں)</span>
-                </h4>
-                <span className="text-[11px] text-slate-500 font-urdu-sans">
-                  {isUrdu ? 'دستی ترمیم ممکن ہے' : 'Manual adjustment enabled'}
-                </span>
-              </div>
-
-              {/* 1. کمیشن (Commission) */}
-              <div className="bg-white p-2.5 rounded-xl border border-blue-200 shadow-xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-blue-900 font-urdu-nastaliq">
-                      {t.commission}
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-urdu-sans font-numbers">
-                      ({expenses.commission.rate}% یا فکسڈ)
-                    </span>
-                  </div>
-                  <label className="text-xs flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={expenses.commission.enabled}
-                      onChange={(e) =>
-                        handleFieldChange((prev) => ({
-                          ...prev,
-                          commission: { ...prev.commission, enabled: e.target.checked },
-                        }))
-                      }
-                      className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
-                    />
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-urdu-sans block">{t.commission} %</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={expenses.commission.rate}
-                      onChange={(e) => handleCommissionRateChange(parseNumber(e.target.value))}
-                      disabled={!expenses.commission.enabled}
-                      className="w-full px-2 py-1 bg-slate-50 border border-slate-300 rounded-lg text-xs font-numbers text-center"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-urdu-sans block">رقم (روپے)</label>
-                    <input
-                      type="number"
-                      value={expenses.commission.amount}
-                      onChange={(e) => handleCommissionAmountManualChange(parseNumber(e.target.value))}
-                      disabled={!expenses.commission.enabled}
-                      className="w-full px-2 py-1 bg-blue-50 border border-blue-300 rounded-lg text-xs font-bold text-blue-900 font-numbers text-center"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. کرایہ (Kiraya / Freight) */}
-              <div className="bg-white p-2.5 rounded-xl border border-emerald-200 shadow-xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-emerald-900 font-urdu-nastaliq">
-                      {t.kiraya}
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-urdu-sans">
-                      {isUrdu ? '(گاڑی / شہزور کرایہ)' : '(Freight)'}
-                    </span>
-                  </div>
-                  <label className="text-xs flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={expenses.kiraya.enabled}
-                      onChange={(e) =>
-                        handleFieldChange((prev) => ({
-                          ...prev,
-                          kiraya: { ...prev.kiraya, enabled: e.target.checked },
-                        }))
-                      }
-                      className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                    />
-                  </label>
-                </div>
-
-                <div className="pt-1">
-                  <input
-                    type="number"
-                    value={expenses.kiraya.amount}
-                    onChange={(e) => handleKirayaChange(parseNumber(e.target.value))}
-                    disabled={!expenses.kiraya.enabled}
-                    placeholder="0"
-                    className="w-full px-3 py-1.5 bg-emerald-50/60 border border-emerald-300 rounded-lg text-xs font-bold text-emerald-950 font-numbers text-center"
-                  />
-                </div>
-              </div>
-
-              {/* 3. مزدوری (Mazdoori / Labor) */}
-              <div className="bg-white p-2.5 rounded-xl border border-fuchsia-200 shadow-xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-fuchsia-950 font-urdu-nastaliq">
-                      {t.mazdoori}
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-urdu-sans">
-                      {isUrdu ? '(اترائی و چنائی)' : '(Unloading)'}
-                    </span>
-                  </div>
-                  <label className="text-xs flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={expenses.mazdoori.enabled}
-                      onChange={(e) =>
-                        handleFieldChange((prev) => ({
-                          ...prev,
-                          mazdoori: { ...prev.mazdoori, enabled: e.target.checked },
-                        }))
-                      }
-                      className="rounded text-fuchsia-600 focus:ring-fuchsia-500 w-4 h-4"
-                    />
-                  </label>
-                </div>
-
-                <div className="pt-1">
-                  <input
-                    type="number"
-                    value={expenses.mazdoori.amount}
-                    onChange={(e) => handleMazdooriManualChange(parseNumber(e.target.value))}
-                    disabled={!expenses.mazdoori.enabled}
-                    placeholder="0"
-                    className="w-full px-3 py-1.5 bg-fuchsia-50/60 border border-fuchsia-300 rounded-lg text-xs font-bold text-fuchsia-950 font-numbers text-center"
-                  />
-                </div>
-              </div>
-
-              {/* 4. منشیانہ (Munshiana) */}
-              <div className="bg-white p-2.5 rounded-xl border border-sky-200 shadow-xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-sky-900 font-urdu-nastaliq">
-                      {t.munshiana}
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-urdu-sans">
-                      {isUrdu ? '(منشی خرچ)' : '(Clerk Fee)'}
-                    </span>
-                  </div>
-                  <label className="text-xs flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={expenses.munshiana.enabled}
-                      onChange={(e) =>
-                        handleFieldChange((prev) => ({
-                          ...prev,
-                          munshiana: { ...prev.munshiana, enabled: e.target.checked },
-                        }))
-                      }
-                      className="rounded text-sky-600 focus:ring-sky-500 w-4 h-4"
-                    />
-                  </label>
-                </div>
-
-                <div className="pt-1">
-                  <input
-                    type="number"
-                    value={expenses.munshiana.amount}
-                    onChange={(e) => handleMunshianaChange(parseNumber(e.target.value))}
-                    disabled={!expenses.munshiana.enabled}
-                    placeholder="0"
-                    className="w-full px-3 py-1.5 bg-sky-50/60 border border-sky-300 rounded-lg text-xs font-bold text-sky-950 font-numbers text-center"
-                  />
-                </div>
-              </div>
-
-              {/* 5. نقد / پیشگی (Naqd Advance) */}
-              <div className="bg-white p-2.5 rounded-xl border border-rose-200 shadow-xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-rose-900 font-urdu-nastaliq">
-                      {t.naqdAdvance}
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-urdu-sans">
-                      {isUrdu ? '(پیشگی نقد / قرض)' : '(Advance)'}
-                    </span>
-                  </div>
-                  <label className="text-xs flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={expenses.naqdAdvance.enabled}
-                      onChange={(e) =>
-                        handleFieldChange((prev) => ({
-                          ...prev,
-                          naqdAdvance: { ...prev.naqdAdvance, enabled: e.target.checked },
-                        }))
-                      }
-                      className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
-                    />
-                  </label>
-                </div>
-
-                <div className="pt-1">
-                  <input
-                    type="number"
-                    value={expenses.naqdAdvance.amount}
-                    onChange={(e) => handleNaqdAdvanceChange(parseNumber(e.target.value))}
-                    disabled={!expenses.naqdAdvance.enabled}
-                    placeholder="0"
-                    className="w-full px-3 py-1.5 bg-rose-50/60 border border-rose-300 rounded-lg text-xs font-bold text-rose-950 font-numbers text-center"
-                  />
-                </div>
-              </div>
-
-              {/* 6. مارکیٹ فیس (Market Fee) */}
-              <div className="bg-white p-2.5 rounded-xl border border-amber-200 shadow-xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-amber-900 font-urdu-nastaliq">
-                      {t.marketFee}
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-urdu-sans">
-                      {isUrdu ? '(مارکیٹ کمیٹی فیس)' : '(Mandi Fee)'}
-                    </span>
-                  </div>
-                  <label className="text-xs flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={expenses.marketFee.enabled}
-                      onChange={(e) =>
-                        handleFieldChange((prev) => ({
-                          ...prev,
-                          marketFee: { ...prev.marketFee, enabled: e.target.checked },
-                        }))
-                      }
-                      className="rounded text-amber-600 focus:ring-amber-500 w-4 h-4"
-                    />
-                  </label>
-                </div>
-
-                <div className="pt-1">
-                  <input
-                    type="number"
-                    value={expenses.marketFee.amount}
-                    onChange={(e) => handleMarketFeeChange(parseNumber(e.target.value))}
-                    disabled={!expenses.marketFee.enabled}
-                    placeholder="0"
-                    className="w-full px-3 py-1.5 bg-amber-50/60 border border-amber-300 rounded-lg text-xs font-bold text-amber-950 font-numbers text-center"
-                  />
-                </div>
-              </div>
-
-              {/* Custom Expenses List */}
-              {expenses.customExpenses && expenses.customExpenses.length > 0 && (
-                <div className="space-y-1.5">
-                  {expenses.customExpenses.map((ce) => (
-                    <div
-                      key={ce.id}
-                      className="bg-white p-2 rounded-xl border border-slate-200 flex items-center justify-between gap-2"
-                    >
-                      <span className="px-2 py-0.5 rounded bg-slate-700 text-white text-xs font-urdu-nastaliq">
-                        {ce.nameUrdu}
-                      </span>
-                      <span className="font-bold text-xs font-numbers text-slate-800">
-                        {formatPKR(ce.amount, settings.currencySymbol, settings.language)}
-                      </span>
-                      <button
-                        onClick={() => handleRemoveCustomExpense(ce.id)}
-                        className="text-slate-400 hover:text-rose-600 p-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Add Custom Expense Button & Inline Form */}
-              {isAddingCustom ? (
-                <form onSubmit={handleAddCustomExpense} className="p-2.5 bg-slate-100 rounded-xl space-y-2 border border-slate-200">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-700 font-urdu-sans">{t.addCustomExpense}</span>
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingCustom(false)}
-                      className="text-xs text-slate-400 hover:text-slate-600"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <input
-                      type="text"
-                      placeholder={isUrdu ? 'نام مثلاً برف یا باردانہ' : 'Name e.g. Ice / Bags'}
-                      value={customNameUrdu}
-                      onChange={(e) => setCustomNameUrdu(e.target.value)}
-                      className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-urdu-sans"
-                      required
-                    />
-                    <input
-                      type="number"
-                      placeholder="رقم (روپے)"
-                      value={customAmount || ''}
-                      onChange={(e) => setCustomAmount(parseNumber(e.target.value))}
-                      className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-numbers"
-                      required
-                    />
-                  </div>
-                  <div className="flex gap-1">
-                    {['برف', 'باردانہ', 'لیبل و پیکنگ', 'چھانٹی'].map((preset) => (
-                      <button
-                        type="button"
-                        key={preset}
-                        onClick={() => setCustomNameUrdu(preset)}
-                        className="px-1.5 py-0.5 bg-white border border-slate-200 text-[10px] rounded text-slate-600 font-urdu-sans"
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold font-urdu-sans hover:bg-emerald-700"
-                  >
-                    + {t.save}
-                  </button>
-                </form>
-              ) : (
-                <button
-                  onClick={() => setIsAddingCustom(true)}
-                  className="w-full py-2 bg-slate-100 hover:bg-slate-200 border border-dashed border-slate-300 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition font-urdu-sans"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>{t.addCustomExpense}</span>
-                </button>
-              )}
-            </div>
-
-            {/* COLUMN 2: ٹوٹل (Total Sales / Split Transactions Rows) */}
-            <div className="p-3.5 sm:p-4 space-y-3 bg-white">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                <h4 className="font-extrabold text-sm text-slate-800 font-urdu-nastaliq flex items-center gap-1.5">
-                  <DollarSign className="w-4 h-4 text-emerald-600" />
-                  <span>{t.grossTotal} (بولی فروخت لاٹس)</span>
-                </h4>
-                <span className="text-xs font-bold text-emerald-800 font-numbers bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
-                  {lot.sales.length} {isUrdu ? 'اندراج' : 'bids'}
-                </span>
-              </div>
-
-              {lot.sales.length === 0 ? (
-                <div className="p-6 text-center text-slate-400">
-                  <p className="text-xs font-urdu-sans">{t.noSalesYet}</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {lot.sales.map((sale, idx) => (
-                    <div
-                      key={sale.id}
-                      className="p-2.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <span className="font-bold text-xs text-slate-800 font-urdu-nastaliq truncate block">
-                          {idx + 1}. {sale.buyerName}
-                        </span>
-                        <span className="text-[11px] text-slate-500 font-urdu-sans font-numbers">
-                          {sale.quantity} {unitLabel} × {formatPKR(sale.ratePerUnit, settings.currencySymbol, settings.language)}
-                        </span>
-                      </div>
-                      <div className="text-end">
-                        <span className="font-bold text-sm text-slate-900 font-numbers block">
-                          {formatPKR(sale.totalAmount, settings.currencySymbol, settings.language)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Subtotal of Sales */}
-              <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-center justify-between">
-                <span className="text-xs font-bold text-blue-900 font-urdu-sans">
-                  {t.grossTotal} ({t.soldQuantity}: {lot.summary.totalSoldQuantity} {unitLabel})
-                </span>
-                <span className="text-base font-bold text-blue-950 font-numbers">
-                  {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* FINAL BOTTOM SUMMARY: میزان (Meezan / Net Payable) */}
-          <div className="bg-slate-900 text-white p-4 sm:p-5 border-t border-slate-800">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="flex items-center gap-3.5 text-center sm:text-start">
-                <div className="px-3.5 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-sm sm:text-base font-urdu-nastaliq shadow-xs">
-                  {t.meezan}
-                </div>
-                <div>
-                  <span className="text-xs text-slate-200 font-urdu-sans block">
-                    {isUrdu ? 'صافی رقم جو کسان/زمیندار کو ادا کرنی ہے' : 'Net amount payable to vendor/farmer'}
-                  </span>
-                  <span className="text-[11px] text-slate-400 font-urdu-sans">
-                    ({t.grossTotal} {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)} - {t.totalExpenses} {formatPKR(lot.summary.totalExpenses, settings.currencySymbol, settings.language)})
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-2xl sm:text-3xl font-black text-amber-300 font-numbers tracking-tight">
-                {formatPKR(lot.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
-              </div>
-            </div>
+          {/* Quick Date Filters Chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar">
+            <span className="text-xs text-slate-500 font-bold font-urdu-sans flex items-center gap-1 whitespace-nowrap pl-1">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <span>{isUrdu ? 'تاریخ فلٹر:' : 'Date:'}</span>
+            </span>
+            {[
+              { id: 'all' as ExpenseDateFilter, label: isUrdu ? 'تمام' : 'All' },
+              { id: 'today' as ExpenseDateFilter, label: isUrdu ? 'آج' : 'Today' },
+              { id: 'yesterday' as ExpenseDateFilter, label: isUrdu ? 'گزشتہ کل' : 'Yesterday' },
+              { id: 'last7days' as ExpenseDateFilter, label: isUrdu ? 'گزشتہ ۷ دن' : 'Last 7 Days' },
+              { id: 'thismonth' as ExpenseDateFilter, label: isUrdu ? 'رواں ماہ' : 'This Month' },
+              { id: 'custom' as ExpenseDateFilter, label: isUrdu ? 'اپنی مرضی کی تاریخ' : 'Custom Range' },
+            ].map((df) => (
+              <button
+                key={df.id}
+                onClick={() => {
+                  sound.playTick();
+                  setDateFilter(df.id);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold font-urdu-sans whitespace-nowrap transition ${
+                  dateFilter === df.id
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                {df.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* RIGHT / SIDEBAR: Profit Margin & Arhti Analytics */}
-        <div className="lg:col-span-4 space-y-4">
-          {/* Arhti Net Profit Margin Card */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
-              <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-                <TrendingUp className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-slate-900 font-urdu-nastaliq">
-                  {t.arhtiProfit}
-                </h3>
-                <span className="text-[11px] text-slate-500 font-urdu-sans">
-                  {isUrdu ? 'آڑھت کمیشن سے خالص آمدن' : 'Net Arhti Commission'}
+        {/* Custom Date Range Picker Box (Shown when Custom Range is active) */}
+        {dateFilter === 'custom' && (
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3 flex-wrap animate-in fade-in duration-150">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-xs font-urdu-sans">
+                <span className="font-bold text-slate-700 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>{isUrdu ? 'از تاریخ:' : 'From:'}</span>
                 </span>
+                <input
+                  type="date"
+                  value={customFromDate}
+                  onChange={(e) => setCustomFromDate(e.target.value)}
+                  className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-slate-800 shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 text-xs font-urdu-sans">
+                <span className="font-bold text-slate-700 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>{isUrdu ? 'تا تاریخ:' : 'To:'}</span>
+                </span>
+                <input
+                  type="date"
+                  value={customToDate}
+                  onChange={(e) => setCustomToDate(e.target.value)}
+                  className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-slate-800 shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                />
               </div>
             </div>
 
-            <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 ring-2 ring-emerald-500/80 ring-offset-1 text-center">
-              <span className="text-[11px] text-emerald-700 font-bold uppercase tracking-wider font-urdu-sans block mb-0.5">
-                {isUrdu ? 'اس مال سے کل کمیشن منافع' : 'Total Commission from this lot'}
+            {/* Quick Presets within custom range */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playTick();
+                  const d = new Date();
+                  const today = d.toISOString().slice(0, 10);
+                  d.setDate(d.getDate() - 30);
+                  setCustomFromDate(d.toISOString().slice(0, 10));
+                  setCustomToDate(today);
+                }}
+                className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-bold font-urdu-sans transition shadow-2xs"
+              >
+                {isUrdu ? 'گزشتہ ۳۰ دن' : 'Last 30 Days'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playTick();
+                  const now = new Date();
+                  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+                  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+                  setCustomFromDate(startOfMonth);
+                  setCustomToDate(endOfMonth);
+                }}
+                className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-bold font-urdu-sans transition shadow-2xs"
+              >
+                {isUrdu ? 'پورا مہینہ' : 'Full Month'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Category Filter Pills */}
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar pt-1 border-t border-slate-100">
+          <button
+            onClick={() => {
+              sound.playTick();
+              setCategoryFilter('all');
+            }}
+            className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition font-urdu-sans ${
+              categoryFilter === 'all'
+                ? 'bg-emerald-800 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {isUrdu ? 'تمام مدات' : 'All Categories'}
+          </button>
+          {(Object.keys(expenseCategoryLabels) as ExpenseCategory[]).map((cat) => {
+            const info = expenseCategoryLabels[cat];
+            const isActive = categoryFilter === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => {
+                  sound.playTick();
+                  setCategoryFilter(cat);
+                }}
+                className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition font-urdu-sans flex items-center gap-1 ${
+                  isActive
+                    ? 'bg-emerald-800 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <span>{info.icon}</span>
+                <span>{isUrdu ? info.ur : info.en}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Expenses List / Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="p-3.5 sm:p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Receipt className="w-4 h-4 text-slate-700" />
+            <h3 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-nastaliq">
+              {isUrdu ? 'دکان اخراجات ریکارڈ' : 'Shop Expenses Records'} ({filteredShopExpenses.length})
+            </h3>
+            {dateFilter !== 'all' && (
+              <span className="text-[10px] text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-urdu-sans">
+                {getDateFilterLabel()}
               </span>
-              <div className="text-2xl font-black text-emerald-950 font-numbers">
-                {formatPKR(lot.summary.arhtiProfitCommission, settings.currencySymbol, settings.language)}
-              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3 justify-between sm:justify-end flex-wrap">
+            <div className="text-xs font-bold text-slate-800 font-urdu-sans">
+              {isUrdu ? 'مجموعہ:' : 'Total:'}{' '}
+              <span className="text-rose-700 font-numbers font-black">
+                {formatPKR(
+                  filteredShopExpenses.reduce((s, e) => s + (e.amount || 0), 0),
+                  settings.currencySymbol,
+                  settings.language
+                )}
+              </span>
             </div>
 
-            {/* Profit Margin Breakdown List */}
-            <div className="space-y-2 text-xs divide-y divide-slate-100">
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-slate-600 font-urdu-sans">{t.commission} ({expenses.commission.rate}%):</span>
-                <span className="font-bold font-numbers text-slate-800">
-                  {formatPKR(expenses.commission.amount, settings.currencySymbol, settings.language)}
-                </span>
+            {filteredShopExpenses.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                {/* PDF Report Preview Button */}
+                <button
+                  type="button"
+                  onClick={handlePreviewExpensePDF}
+                  className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-xs active:scale-95"
+                  title={isUrdu ? 'پی ڈی ایف رپورٹ دیکھیں یا ڈاؤن لوڈ کریں' : 'Preview / Download PDF Report'}
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{isUrdu ? 'پی ڈی ایف رپورٹ' : 'PDF Report'}</span>
+                </button>
+
+                {/* Direct High-Quality Print Button */}
+                <button
+                  type="button"
+                  onClick={handlePrintExpenseReport}
+                  className="p-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition shadow-xs active:scale-95"
+                  title={isUrdu ? 'پرنٹ کریں' : 'Print'}
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                </button>
               </div>
+            )}
+          </div>
+        </div>
 
-              {expenses.munshiana.enabled && (
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-slate-600 font-urdu-sans">{t.munshiana}:</span>
-                  <span className="font-bold font-numbers text-slate-800">
-                    {formatPKR(expenses.munshiana.amount, settings.currencySymbol, settings.language)}
-                  </span>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-slate-600 font-urdu-sans">{t.totalExpenses} (کٹوتی):</span>
-                <span className="font-bold font-numbers text-rose-600">
-                  - {formatPKR(lot.summary.totalExpenses, settings.currencySymbol, settings.language)}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between pt-2 text-sm font-bold text-slate-900 border-t border-slate-200">
-                <span className="font-urdu-sans">{t.meezan}:</span>
-                <span className="text-slate-900 font-numbers font-black">
-                  {formatPKR(lot.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
-                </span>
-              </div>
-            </div>
-
-            {/* Action button to generate Official Slip */}
+        {filteredShopExpenses.length === 0 ? (
+          <div className="p-8 text-center space-y-2">
+            <Receipt className="w-10 h-10 text-slate-300 mx-auto" />
+            <p className="text-xs sm:text-sm font-bold text-slate-700 font-urdu-sans">
+              {isUrdu ? 'کوئی خرچہ ریکارڈ نہیں ملا' : 'No expenses recorded yet'}
+            </p>
+            <p className="text-xs text-slate-400 font-urdu-sans">
+              {dateFilter !== 'all' || categoryFilter !== 'all' || searchTerm
+                ? (isUrdu ? 'منتخب کردہ فلٹر کے مطابق کوئی ریکارڈ دستیاب نہیں ہے۔' : 'No records match the current filter.')
+                : (isUrdu ? 'دکان کا نیا خرچہ درج کرنے کے لیے اوپر دیا گیا بٹن دبائیں۔' : 'Click "+ Add Expense" to record daily expenses.')}
+            </p>
             <button
-              onClick={() => onOpenReceipt(lot.id)}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 shadow-sm active:scale-95 font-urdu-sans border border-slate-800"
+              onClick={openAddExpenseModal}
+              className="mt-2 px-3.5 py-1.5 bg-slate-900 text-white rounded-xl text-xs font-bold font-urdu-sans hover:bg-slate-800 transition shadow-xs"
             >
-              <FileText className="w-4 h-4 text-emerald-400" />
-              <span>{t.tabReceipt} ({t.printReceipt})</span>
+              {isUrdu ? '+ نیا خرچہ درج کریں' : '+ Add Expense'}
             </button>
           </div>
+        ) : (
+          <div>
+            <div className="divide-y divide-slate-100">
+              {paginatedShopExpenses.map((exp) => {
+                const catInfo = expenseCategoryLabels[exp.category] || { ur: exp.category, en: exp.category, icon: '💸' };
+                return (
+                  <div
+                    key={exp.id}
+                    className="p-3 sm:p-4 hover:bg-slate-50/80 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-center text-lg flex-shrink-0">
+                        {catInfo.icon}
+                      </div>
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-sans">
+                            {exp.title}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold font-urdu-sans">
+                            {isUrdu ? catInfo.ur : catInfo.en}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-urdu-sans ${
+                              exp.paymentMethod === 'cash'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}
+                          >
+                            {exp.paymentMethod === 'cash'
+                              ? isUrdu
+                                ? 'نقد'
+                                : 'Cash'
+                              : exp.paymentMethod === 'online'
+                              ? isUrdu
+                                ? 'آن لائن'
+                                : 'Online'
+                              : isUrdu
+                              ? 'چیک'
+                              : 'Cheque'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px] text-slate-500 font-urdu-sans flex-wrap">
+                          <span className="font-numbers">{exp.date}</span>
+                          {exp.paidTo && (
+                            <span>
+                              {isUrdu ? 'وصول کنندہ:' : 'Paid to:'}{' '}
+                              <strong className="text-slate-700">{exp.paidTo}</strong>
+                            </span>
+                          )}
+                          {exp.notes && (
+                            <span className="text-slate-400 italic">({exp.notes})</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
-          {/* Quick Guide on Mandi Accounting */}
-          <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3.5 text-xs text-slate-600 space-y-1.5 font-urdu-sans">
-            <div className="font-bold text-slate-800 flex items-center gap-1.5">
-              <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-              <span>{isUrdu ? 'آڑھت اخراجات کا طریقہ کار' : 'Mandi Ledger Guide'}</span>
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                      <div className="text-right">
+                        <span className="text-sm sm:text-base font-black text-rose-700 font-numbers block">
+                          {formatPKR(exp.amount, settings.currencySymbol, settings.language)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditExpenseModal(exp)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                          title={isUrdu ? 'ترمیم کریں' : 'Edit'}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        {onDeleteExpense && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(isUrdu ? 'کیا آپ واقعی یہ خرچہ حذف کرنا چاہتے ہیں؟' : 'Delete this expense entry?')) {
+                                sound.playPop();
+                                onDeleteExpense(exp.id);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                            title={isUrdu ? 'حذف کریں' : 'Delete'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <p className="text-[11px] leading-relaxed text-slate-500">
-              {isUrdu
-                ? 'فروخت شدہ مال کی کل رقم سے کمیشن، گاڑی کا کرایہ، مزدوری اور پیشگی نقد منہا کر کے صافی "میزان" زمیندار کو دیا جاتا ہے۔ آپ ہر فیلڈ میں اپنی مرضی کے مطابق دستی رقم درج کر سکتے ہیں۔'
-                : 'From the gross sale, commission, freight, labor, and cash advances are deducted to arrive at the net Meezan payout.'}
-            </p>
+
+            {/* Pagination Controls */}
+            {filteredShopExpenses.length > 0 && (
+              <div className="p-3 bg-slate-50 border-t border-slate-200">
+                <PaginationControls
+                  currentPage={expensePage}
+                  totalPages={totalExpensePages}
+                  totalItems={filteredShopExpenses.length}
+                  pageSize={expensePageSize}
+                  onPageChange={setExpensePage}
+                  onPageSizeChange={(newSize) => {
+                    setExpensePageSize(newSize);
+                    setExpensePage(1);
+                  }}
+                  isUrdu={isUrdu}
+                  itemName={isUrdu ? 'اخراجات' : 'expenses'}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ============================================================= */}
+      {/* MODAL: ADD / EDIT SHOP GENERAL EXPENSE                         */}
+      {/* ============================================================= */}
+      {isExpenseModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-rose-400" />
+                <h3 className="font-bold text-sm sm:text-base font-urdu-nastaliq">
+                  {editingExpenseId ? (isUrdu ? 'خرچہ ترمیم کریں' : 'Edit Expense') : (isUrdu ? 'نیا دکان خرچہ درج کریں' : 'Record Shop Expense')}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExpenseModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body / Form */}
+            <form onSubmit={handleSaveExpenseSubmit} className="p-4 sm:p-5 space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Date */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                    {isUrdu ? 'تاریخ' : 'Date'}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formDate}
+                    onChange={(e) => setFormDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-numbers focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  />
+                </div>
+
+                {/* Category */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                    {isUrdu ? 'مد / کیٹیگری' : 'Category'}
+                  </label>
+                  <select
+                    value={formCategory}
+                    onChange={(e) => setFormCategory(e.target.value as ExpenseCategory)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  >
+                    {(Object.keys(expenseCategoryLabels) as ExpenseCategory[]).map((cat) => (
+                      <option key={cat} value={cat}>
+                        {expenseCategoryLabels[cat].icon} {isUrdu ? expenseCategoryLabels[cat].ur : expenseCategoryLabels[cat].en}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Title / Description */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                  {isUrdu ? 'تفصیل / خرچے کا عنوان *' : 'Description / Title *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={formTitle}
+                  onChange={(e) => setFormTitle(e.target.value)}
+                  placeholder={isUrdu ? 'مثلاً صبح کی چائے، ملازمین دوپہر کھانا، بل بجلی وغیرہ' : 'e.g. Morning tea, Lunch, Electricity bill'}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Amount in PKR */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                    {isUrdu ? 'رقم (روپے) *' : 'Amount (PKR) *'}
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={formAmount}
+                    onChange={(e) => setFormAmount(e.target.value === '' ? '' : parseNumber(e.target.value))}
+                    placeholder="0"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-rose-800 font-numbers focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  />
+                </div>
+
+                {/* Paid To */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                    {isUrdu ? 'کس کو ادا کیا؟ (اختیاری)' : 'Paid To / Recipient'}
+                  </label>
+                  <input
+                    type="text"
+                    value={formPaidTo}
+                    onChange={(e) => setFormPaidTo(e.target.value)}
+                    placeholder={isUrdu ? 'مثلاً ہوٹل والا، اصغر منشی، واپڈا' : 'e.g. Asghar, WAPDA'}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              {/* Payment Method */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                  {isUrdu ? 'طریقہ ادائیگی' : 'Payment Method'}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'cash', labelUrdu: 'نقد (کیش)', labelEn: 'Cash' },
+                    { id: 'online', labelUrdu: 'آن لائن / بینک', labelEn: 'Online Bank' },
+                    { id: 'cheque', labelUrdu: 'چیک', labelEn: 'Cheque' },
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setFormPaymentMethod(m.id as any)}
+                      className={`py-2 px-2 rounded-xl text-xs font-bold font-urdu-sans border transition flex items-center justify-center gap-1.5 ${
+                        formPaymentMethod === m.id
+                          ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>{isUrdu ? m.labelUrdu : m.labelEn}</span>
+                      {formPaymentMethod === m.id && <Check className="w-3 h-3 text-emerald-400" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
+                  {isUrdu ? 'مزید ریمارکس یا نوٹ (اختیاری)' : 'Notes / Remarks (Optional)'}
+                </label>
+                <textarea
+                  rows={2}
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  placeholder={isUrdu ? 'کوئی اضافی تفصیل لکھیں...' : 'Add any extra notes...'}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                />
+              </div>
+
+              {/* Buttons */}
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs sm:text-sm font-bold font-urdu-sans transition shadow-xs active:scale-95"
+                >
+                  {isUrdu ? 'محفوظ کریں' : 'Save Expense'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsExpenseModalOpen(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs sm:text-sm font-bold font-urdu-sans transition"
+                >
+                  {isUrdu ? 'منسوخ' : 'Cancel'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* PDF REPORT INTERACTIVE PREVIEW MODAL (دیکھیں یا ڈاؤن لوڈ کریں) */}
+      {pdfPreview && (
+        <ReportPDFPreviewModal
+          previewData={pdfPreview}
+          onClose={() => setPdfPreview(null)}
+          isUrdu={isUrdu}
+        />
+      )}
     </div>
   );
 };
