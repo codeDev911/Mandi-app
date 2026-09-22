@@ -29,6 +29,7 @@ import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { BolliRoomView } from './components/BolliRoomView';
 import { ExpenseSlipView } from './components/ExpenseSlipView';
+import { LotExpenseSlipView } from './components/LotExpenseSlipView';
 import { ReceiptPrintView } from './components/ReceiptPrintView';
 import { BuyersKhataView } from './components/BuyersKhataView';
 import { ReportsView } from './components/ReportsView';
@@ -560,7 +561,7 @@ export default function App() {
 
   const handleOpenExpenseSlip = (lotId: string) => {
     setSelectedLotId(lotId);
-    setActiveTab('expenses');
+    setActiveTab('slip_expenses');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -718,6 +719,19 @@ export default function App() {
             onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onBackToBolli={() => setActiveTab('bolli')}
             onSelectLot={setSelectedLotId}
+            settings={settings}
+          />
+        )}
+
+        {activeTab === 'slip_expenses' && currentSelectedLot && (
+          <LotExpenseSlipView
+            lot={currentSelectedLot}
+            lots={lots}
+            onSelectLot={setSelectedLotId}
+            onUpdateLotExpenses={handleUpdateLotExpenses}
+            onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
+            onOpenReceipt={handleOpenReceipt}
+            onBackToBolli={() => setActiveTab('bolli')}
             settings={settings}
           />
         )}

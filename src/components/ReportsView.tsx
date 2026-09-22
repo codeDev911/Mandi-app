@@ -1274,8 +1274,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           <button
                             onClick={() => onOpenExpenseSlip(lot.id)}
                             className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold font-urdu-sans transition"
+                            title="زمیندار کی اخراجات پرچی و کٹوتیاں"
                           >
-                            {t.tabExpenses}
+                            {isUrdu ? 'اخراجات پرچی' : 'Slip Expenses'}
                           </button>
                         )}
                         {onOpenReceipt && (

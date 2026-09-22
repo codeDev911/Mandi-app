@@ -219,4 +219,4 @@ export const expenseCategoryLabels: Record<
   other: { ur: 'دیگر متفرق اخراجات', en: 'Other Miscellaneous', icon: '💼', color: 'slate' },
 };
 
-export type ActiveTab = 'bolli' | 'expenses' | 'receipt' | 'khata' | 'reports' | 'history' | 'settings';
+export type ActiveTab = 'bolli' | 'expenses' | 'receipt' | 'khata' | 'reports' | 'history' | 'settings' | 'slip_expenses';

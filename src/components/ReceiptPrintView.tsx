@@ -346,6 +346,18 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
 
         {/* Action Buttons: POS Thermal Print, A4 Print, Preview, Image, WhatsApp */}
         <div className="flex items-center gap-1.5 flex-wrap">
+          {onOpenExpenseSlip && (
+            <button
+              type="button"
+              onClick={() => onOpenExpenseSlip(lot.id)}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 border border-slate-700 transition active:scale-95 shadow-xs"
+              title="اخراجات پرچی و کٹوتیاں تبدیل کریں"
+            >
+              <Receipt className="w-3.5 h-3.5 text-amber-400" />
+              <span>{isUrdu ? 'اخراجات پرچی' : 'Expense Slip'}</span>
+            </button>
+          )}
+
           {/* Dedicated 80mm POS Thermal Print Button */}
           <button
             type="button"
@@ -594,8 +606,18 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
 
           {/* DEDUCTIONS / EXPENSES LIST (کٹوتیاں و اخراجات) */}
           <div className="space-y-1 text-xs">
-            <div className="font-bold text-slate-900 font-urdu-nastaliq text-xs mb-1">
-              منہا کٹوتیاں و اخراجات (Deductions):
+            <div className="flex items-center justify-between font-bold text-slate-900 font-urdu-nastaliq text-xs mb-1">
+              <span>منہا کٹوتیاں و اخراجات (Deductions):</span>
+              {onOpenExpenseSlip && (
+                <button
+                  type="button"
+                  onClick={() => onOpenExpenseSlip(lot.id)}
+                  className="text-[10px] text-amber-800 hover:text-amber-900 font-urdu-sans font-bold no-print underline"
+                  title="اخراجات پرچی کھولیں اور کٹوتیاں تبدیل کریں"
+                >
+                  اخراجات پرچی ✏️
+                </button>
+              )}
             </div>
 
             <div className="space-y-1 text-slate-700">

@@ -369,9 +369,10 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
                     <button
                       onClick={() => onOpenExpenseSlip(lot.id)}
                       className="px-2.5 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-semibold transition flex items-center gap-1 font-urdu-sans"
+                      title="زمیندار کی اخراجات پرچی و کٹوتیاں"
                     >
                       <Receipt className="w-3.5 h-3.5" />
-                      <span>{t.tabExpenses}</span>
+                      <span>{isUrdu ? 'اخراجات پرچی' : 'Slip Expenses'}</span>
                     </button>
 
                     <button
