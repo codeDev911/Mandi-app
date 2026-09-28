@@ -3,7 +3,7 @@ import { VendorLot, AppSettings, LotExpenses, CustomExpense } from '../types';
 import { translations, unitLabels } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
-import { calculateLotSummary, getUnitMazdooriRate } from '../utils/calculations';
+import { calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
 import { printThermalPOSReceipt } from '../utils/receiptGenerator';
 import { printSingleLotReceiptA4 } from '../utils/printHelper';
 import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
@@ -683,6 +683,43 @@ export const LotExpenseSlipView: React.FC<LotExpenseSlipViewProps> = ({
                 </div>
               </div>
             </div>
+
+            {expenses.mazdoori.enabled && (
+              <div className="mt-2 pt-2 border-t border-stone-200/60 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                <span className="text-[10px] text-stone-500 font-urdu-sans flex-shrink-0">
+                  {isUrdu ? 'تیز رفتار ریٹ انتخاب:' : 'Quick Pick:'}
+                </span>
+                <div className="flex gap-1 flex-wrap">
+                  {getMazdooriItems(settings).map((it) => {
+                    const isSelected = expenses.mazdoori.ratePerUnit === it.rate;
+                    return (
+                      <button
+                        type="button"
+                        key={it.id}
+                        onClick={() => {
+                          sound.playTick();
+                          const qty = liveSummary.totalSoldQuantity || lot.totalQuantity || 0;
+                          updateExpenseField('mazdoori', (prev) => ({
+                            ...prev,
+                            ratePerUnit: it.rate,
+                            title: it.title,
+                            amount: Math.round(it.rate * qty),
+                          }));
+                        }}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-urdu-sans transition ${
+                          isSelected
+                            ? 'bg-emerald-700 text-white font-bold shadow-2xs'
+                            : 'bg-white border border-stone-300 text-stone-700 hover:bg-emerald-50'
+                        }`}
+                      >
+                        <span>{it.title.split(' ')[0]}</span>
+                        <span className="font-numbers ml-1">₨{it.rate}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 3. Kiraya / Carriage Freight (کرایہ گاڑی) */}

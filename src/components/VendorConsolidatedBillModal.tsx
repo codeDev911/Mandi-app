@@ -57,6 +57,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   const [isRenderingCanvas, setIsRenderingCanvas] = useState<boolean>(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [shareModalItem, setShareModalItem] = useState<UniversalShareItem | null>(null);
+  const [isAveraged, setIsAveraged] = useState<boolean>(false);
 
   const displayDate = dateLabel || lots[0]?.arrivalDate || new Date().toISOString().slice(0, 10);
 
@@ -151,7 +152,6 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
           unitLabel: uLabel,
           ratePerUnit: s.ratePerUnit,
           totalAmount: s.totalAmount,
-          buyerName: s.buyerName,
         });
       });
     } else {
@@ -167,7 +167,73 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     }
   });
 
-  // Generate High-Resolution PDF Canvas preview immediately on open / lot change
+  // Group all sales by product for averaged display / text share (اجناس وار خلاصہ بل)
+  const averagedProductItems: Array<{
+    lotNumber: string;
+    productName: string;
+    productUrdu: string;
+    quantity: number;
+    unitLabel: string;
+    ratePerUnit: number;
+    totalAmount: number;
+    buyerName?: string;
+  }> = [];
+
+  const productGroups = new Map<
+    string,
+    {
+      productUrdu: string;
+      productName: string;
+      quantity: number;
+      unitLabel: string;
+      totalAmount: number;
+      lotNumbers: Set<string>;
+    }
+  >();
+
+  lots.forEach((lot) => {
+    const prodKey = (lot.productUrdu || lot.productName || 'جنس').trim();
+    const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+
+    if (!productGroups.has(prodKey)) {
+      productGroups.set(prodKey, {
+        productUrdu: prodKey,
+        productName: lot.productName,
+        quantity: 0,
+        unitLabel: uLabel,
+        totalAmount: 0,
+        lotNumbers: new Set<string>(),
+      });
+    }
+
+    const grp = productGroups.get(prodKey)!;
+    grp.lotNumbers.add(lot.lotNumber);
+
+    if (lot.sales && lot.sales.length > 0) {
+      lot.sales.forEach((s) => {
+        grp.quantity += s.quantity;
+        grp.totalAmount += s.totalAmount;
+      });
+    } else {
+      grp.quantity += lot.totalQuantity;
+      grp.totalAmount += lot.summary.grossSales;
+    }
+  });
+
+  productGroups.forEach((grp) => {
+    const avgRate = grp.quantity > 0 ? Math.round(grp.totalAmount / grp.quantity) : 0;
+    averagedProductItems.push({
+      lotNumber: Array.from(grp.lotNumbers).join(', '),
+      productName: grp.productName,
+      productUrdu: grp.productUrdu,
+      quantity: grp.quantity,
+      unitLabel: grp.unitLabel,
+      ratePerUnit: avgRate,
+      totalAmount: Math.round(grp.totalAmount),
+    });
+  });
+
+  // Generate High-Resolution PDF Canvas preview immediately on open / lot change / averaged change
   useEffect(() => {
     if (!isOpen || lots.length === 0) {
       setPreviewImageUrl(null);
@@ -192,7 +258,8 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
           vendorCity,
           lots,
           settings,
-          displayDate
+          displayDate,
+          isAveraged
         );
         const dataUrl = canvas.toDataURL('image/png', 0.98);
         setPreviewImageUrl(dataUrl);
@@ -205,7 +272,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
 
     const timer = setTimeout(generatePreview, 60);
     return () => clearTimeout(timer);
-  }, [isOpen, vendorName, vendorPhone, vendorCity, lots, settings, displayDate]);
+  }, [isOpen, vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged]);
 
   if (!isOpen || lots.length === 0) return null;
 
@@ -237,7 +304,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     }
   };
 
-  // Build A4 PDF from High-Res 2D Canvas with exact Urdu calligraphy
+  // Build Half Landscape A4 PDF (148.5mm x 210mm) from High-Res 2D Canvas with exact Urdu calligraphy
   const buildVendorBillPDF = async (): Promise<{ pdf: jsPDF; blob: Blob }> => {
     if (document.fonts && document.fonts.ready) {
       try {
@@ -253,12 +320,18 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       vendorCity,
       lots,
       settings,
-      displayDate
+      displayDate,
+      isAveraged
     );
 
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfPageWidth = 210;
-    const pdfPageHeight = 297;
+    // Half of Landscape A4: 148.5mm x 210mm
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: [148.5, 210],
+    });
+    const pdfPageWidth = 148.5;
+    const pdfPageHeight = 210;
     const pxPageHeight = Math.floor((canvas.width * pdfPageHeight) / pdfPageWidth);
     const totalCanvasHeight = canvas.height;
     let renderedHeight = 0;
@@ -281,7 +354,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       }
       const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.95);
       if (pageIndex > 0) {
-        pdf.addPage('a4', 'p');
+        pdf.addPage([148.5, 210], 'p');
       }
       const renderedSliceMmHeight = (sliceHeight * pdfPageWidth) / canvas.width;
       pdf.addImage(pageImgData, 'JPEG', 0, 0, pdfPageWidth, renderedSliceMmHeight, undefined, 'FAST');
@@ -328,7 +401,8 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
           vendorCity,
           lots,
           settings,
-          displayDate
+          displayDate,
+          isAveraged
         );
         canvas.toBlob(async (pngBlob) => {
           if (pngBlob) {
@@ -357,7 +431,8 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
         vendorCity,
         lots,
         settings,
-        displayDate
+        displayDate,
+        isAveraged
       );
       canvas.toBlob((blob) => {
         if (blob) {
@@ -383,20 +458,21 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
     const finalPdfName = `Vendor_Bill_${sanitizedName}_${displayDate}.pdf`;
 
-    const productListText = allProductItems
+    const itemsToShare = isAveraged ? averagedProductItems : allProductItems;
+    const productListText = itemsToShare
       .map(
         (item, idx) =>
-          `${idx + 1}. ${item.productUrdu}: ${item.quantity} ${item.unitLabel} @ Rs.${item.ratePerUnit} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`
+          `${idx + 1}. ${item.productUrdu}: ${item.quantity} ${item.unitLabel} @ ${isAveraged ? 'اوسط ریٹ ' : ''}Rs.${item.ratePerUnit} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`
       )
       .join('\n');
 
     const messageText = `*${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}*
-📋 *پکی پرچی رسید برائے زمیندار*
+📋 *${isAveraged ? 'پکی پرچی رسید برائے زمیندار (خلاصہ اجناس وار)' : 'پکی پرچی رسید برائے زمیندار'}*
 ━━━━━━━━━━━━━━━━━
 👤 *زمیندار:* ${vendorName} ${vendorCity ? `(${vendorCity})` : ''}
 📅 *تاریخ:* ${displayDate}
 
-📦 *تفصیلِ فروخت اجناس:*
+📦 *تفصیلِ فروخت اجناس (${isAveraged ? 'اجناس وار اوسط ریٹ' : 'تفصیلی'}):*
 ${productListText}
 
 ━━━━━━━━━━━━━━━━━
@@ -410,16 +486,13 @@ ${productListText}
 
     const rawPhone = (vendorPhone || '').replace(/[^0-9]/g, '');
     const cleanPhone = rawPhone.startsWith('0') ? '92' + rawPhone.slice(1) : rawPhone;
-    const whatsappUrl = cleanPhone
-      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`
-      : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
 
     try {
       const { blob } = await buildVendorBillPDF();
 
       setShareModalItem({
         title: `بل رسید برائے زمیندار: ${vendorName}`,
-        subtitle: `${lots.length} لاٹیں • ${displayDate}`,
+        subtitle: `${lots.length} لاٹیں • ${displayDate} ${isAveraged ? '(اوسط بل)' : ''}`,
         formattedText: messageText,
         recipientName: vendorName,
         recipientPhone: vendorPhone,
@@ -452,9 +525,18 @@ ${productListText}
   // 4. Copy Text Summary
   const handleCopyText = () => {
     sound.playTick();
+    const itemsToCopy = isAveraged ? averagedProductItems : allProductItems;
+    const itemsText = itemsToCopy
+      .map(
+        (item, idx) =>
+          `${idx + 1}. ${item.productUrdu}: ${item.quantity} ${item.unitLabel} @ ${isAveraged ? 'اوسط ریٹ ' : ''}Rs.${item.ratePerUnit} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`
+      )
+      .join('\n');
+
     const text = `*${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}*
-پکی پرچی رسید برائے زمیندار - ${vendorName}
+${isAveraged ? 'خلاصہ بل برائے زمیندار (اجناس وار اوسط ریٹ)' : 'پکی پرچی رسید برائے زمیندار'} - ${vendorName}
 تاریخ: ${displayDate}
+${itemsText}
 کل فروخت: ${formatPKR(totals.grossSales, settings.currencySymbol, settings.language)}
 کل کٹوتیاں: ${formatPKR(totals.totalExpenses, settings.currencySymbol, settings.language)}
 صافی واجب الادا: ${formatPKR(totals.netPayable, settings.currencySymbol, settings.language)}`;
@@ -465,14 +547,14 @@ ${productListText}
     showToast(isUrdu ? 'متن کاپی ہو گیا!' : 'Text summary copied!');
   };
 
-  // 5. Clean Universal A4 Print
+  // 5. Clean Universal Half Landscape A4 Print
   const handlePrint = (e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
     sound.playTick();
-    printVendorBillSlipA4(vendorName, vendorPhone, vendorCity, lots, settings, displayDate);
+    printVendorBillSlipA4(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged);
   };
 
   // 6. 80mm POS Thermal Print
@@ -482,7 +564,7 @@ ${productListText}
       e.stopPropagation();
     }
     sound.playTick();
-    printConsolidatedThermalPOSReceipt(vendorName, vendorPhone, vendorCity, lots, settings, displayDate);
+    printConsolidatedThermalPOSReceipt(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged);
   };
 
   return (
@@ -524,6 +606,35 @@ ${productListText}
 
         {/* Action Controls & Close */}
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+          {/* Averaged Bill Toggle Option (بڑی لسٹ کیلئے اجناس وار اوسط بل کا آپشن) */}
+          <button
+            type="button"
+            onClick={() => {
+              sound.playTick();
+              setIsAveraged(!isAveraged);
+            }}
+            className={`px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl border flex items-center gap-1.5 transition active:scale-95 text-xs font-bold font-urdu-sans shadow-xs ${
+              isAveraged
+                ? 'bg-amber-500 text-slate-950 border-amber-300 ring-2 ring-amber-400/40 shadow-amber-500/20 shadow-md'
+                : 'bg-slate-800/90 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
+            }`}
+            title="بڑی لسٹ کیلئے اجناس وار اوسط ریٹ اور بل دیکھیں"
+          >
+            <span
+              className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-black ${
+                isAveraged ? 'bg-slate-950 text-amber-400' : 'bg-slate-700 text-slate-400'
+              }`}
+            >
+              {isAveraged ? '✓' : ''}
+            </span>
+            <span className="hidden sm:inline">
+              {isAveraged ? 'اجناس وار اوسط بل (فعال ہے)' : 'اجناس وار اوسط بل'}
+            </span>
+            <span className="sm:hidden">
+              {isAveraged ? 'اوسط بل ✓' : 'اوسط بل'}
+            </span>
+          </button>
+
           {/* Zoom Controls */}
           <div className="hidden md:flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 text-slate-300">
             <button
@@ -560,7 +671,7 @@ ${productListText}
             type="button"
             onClick={handlePrint}
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center transition active:scale-90 shadow-md"
-            title="پرنٹ کریں (Print A4 Slip)"
+            title="پرنٹ کریں (Print Half Landscape A4 Slip)"
             aria-label="Print A4"
           >
             <Printer className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.2]" />
@@ -666,7 +777,7 @@ ${productListText}
             className="transition-all duration-150 ease-out flex justify-center max-w-full cursor-default"
             style={{
               width: `${zoomLevel}%`,
-              maxWidth: '850px',
+              maxWidth: '940px',
               minWidth: '320px',
             }}
           >
@@ -689,6 +800,20 @@ ${productListText}
       {/* Mobile Floating Action Bar for Quick Printing/PDF */}
       <div className="sm:hidden flex-none bg-slate-900 border-t border-slate-800 p-2.5 flex items-center justify-between gap-1.5 z-20">
         <button
+          onClick={() => {
+            sound.playTick();
+            setIsAveraged(!isAveraged);
+          }}
+          className={`py-2 px-2.5 rounded-xl border font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs ${
+            isAveraged
+              ? 'bg-amber-500 text-slate-950 border-amber-300 font-black'
+              : 'bg-slate-800 text-slate-300 border-slate-700'
+          }`}
+        >
+          <span>{isAveraged ? 'اوسط بل ✓' : 'اوسط بل'}</span>
+        </button>
+
+        <button
           onClick={handlePrint}
           className="flex-1 py-2 px-2 rounded-xl bg-slate-950 border border-slate-700 text-emerald-400 font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs"
         >
@@ -710,7 +835,7 @@ ${productListText}
           className="flex-1 py-2 px-2 rounded-xl bg-emerald-600 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs disabled:opacity-50"
         >
           {isExportingPDF ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-          <span>{isUrdu ? 'محفوظ کریں' : 'Save PDF'}</span>
+          <span>{isUrdu ? 'محفوظ' : 'Save'}</span>
         </button>
 
         <button
@@ -731,7 +856,6 @@ ${productListText}
           title="بند کریں (Close)"
         >
           <X className="w-4 h-4 stroke-[2.5]" />
-          <span>{isUrdu ? 'بند' : 'Close'}</span>
         </button>
       </div>
 

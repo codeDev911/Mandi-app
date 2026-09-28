@@ -1,5 +1,13 @@
 export type UnitType = 'bori' | 'tora' | 'kainchi' | 'shopper' | 'crates' | 'peti' | 'theli' | 'kg' | 'nag';
 
+export interface MazdooriRateItem {
+  id: string;
+  title: string;       // e.g. "بوری (Bori)" or "ٹرالی اترائی"
+  titleEn?: string;
+  rate: number;        // e.g. 30
+  unitType?: UnitType; // optional link to standard unit
+}
+
 export interface UnitMazdooriRates {
   bori: number;      // بوری (e.g. Rs 30/bori)
   tora: number;      // توڑہ / تورڑہ (e.g. Rs 25/tora)
@@ -51,6 +59,7 @@ export interface LotExpenses {
     ratePerUnit: number; // e.g. Rs. 20 per crate
     amount: number; // e.g. Rs. 290
     enabled: boolean;
+    title?: string; // e.g. "بوری (Bori)" or "ٹرالی اترائی"
   };
   munshiana: {
     amount: number; // e.g. Rs. 30
@@ -128,6 +137,7 @@ export interface AppSettings {
   defaultCommissionPercent: number;
   defaultMazdooriPerUnit: number;
   unitMazdooriRates?: UnitMazdooriRates;
+  mazdooriItems?: MazdooriRateItem[];
   defaultMarketFeePerUnit: number;
   defaultMunshiana: number;
   shopNameUrdu: string;
@@ -220,3 +230,26 @@ export const expenseCategoryLabels: Record<
 };
 
 export type ActiveTab = 'bolli' | 'expenses' | 'receipt' | 'khata' | 'reports' | 'history' | 'settings' | 'slip_expenses';
+
+export interface DrawerAdjustment {
+  id: string;
+  type: 'in' | 'out'; // 'in' = add cash to drawer, 'out' = deduct/withdraw cash from drawer
+  amount: number;
+  reason: string;
+  date: string; // YYYY-MM-DD
+  timestamp: string;
+  notes?: string;
+  recordedBy?: string;
+}
+
+export interface CashDrawerSummary {
+  salesCashCollected: number;
+  buyerKhataCashCollected: number;
+  manualCashIn: number;
+  totalCashIn: number;
+  shopCashExpenses: number;
+  vendorCashPaid: number;
+  manualCashOut: number;
+  totalCashOut: number;
+  netCashInDrawer: number;
+}

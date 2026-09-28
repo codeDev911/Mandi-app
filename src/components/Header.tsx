@@ -11,6 +11,8 @@ interface HeaderProps {
   todayLotsCount?: number;
   totalTodaySales: number;
   totalTodayProfit: number;
+  cashInDrawer?: number;
+  onOpenCashDrawer?: () => void;
   onOpenNewLot?: () => void;
   onOpenCloudSync?: () => void;
 }
@@ -22,6 +24,8 @@ export const Header: React.FC<HeaderProps> = ({
   todayLotsCount,
   totalTodaySales,
   totalTodayProfit,
+  cashInDrawer,
+  onOpenCashDrawer,
   onOpenNewLot,
   onOpenCloudSync,
 }) => {
@@ -167,6 +171,21 @@ export const Header: React.FC<HeaderProps> = ({
                 {formatPKR(totalTodayProfit, settings.currencySymbol, settings.language)}
               </strong>
             </span>
+
+            {typeof cashInDrawer === 'number' && (
+              <button
+                type="button"
+                onClick={onOpenCashDrawer}
+                className="flex items-center gap-1.5 text-emerald-100 hover:text-white bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded-lg transition font-urdu-sans active:scale-95 border border-white/15"
+                title={isUrdu ? 'گلہ کیش ریکارڈ و تفصیل دیکھیں' : 'View Cash in Drawer'}
+              >
+                <span>💼</span>
+                <span className="hidden sm:inline">{isUrdu ? 'گلہ کیش:' : 'Drawer:'} </span>
+                <strong className={`font-bold font-numbers ${cashInDrawer >= 0 ? 'text-emerald-200' : 'text-rose-200'}`}>
+                  {formatPKR(cashInDrawer, settings.currencySymbol, settings.language)}
+                </strong>
+              </button>
+            )}
           </div>
         </div>
       </div>

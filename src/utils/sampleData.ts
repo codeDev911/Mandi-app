@@ -1,5 +1,5 @@
 import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense } from '../types';
-import { calculateLotSummary } from './calculations';
+import { calculateLotSummary, DEFAULT_MAZDOORI_ITEMS } from './calculations';
 
 export const defaultSettings: AppSettings = {
   language: 'en',
@@ -17,6 +17,7 @@ export const defaultSettings: AppSettings = {
     kg: 2,        // Kg: Rs. 2
     nag: 5,       // Piece: Rs. 5
   },
+  mazdooriItems: [...DEFAULT_MAZDOORI_ITEMS],
   defaultMarketFeePerUnit: 5,
   defaultMunshiana: 30,
   shopNameUrdu: 'Bismillah Fruit & Vegetable Commission Shop',

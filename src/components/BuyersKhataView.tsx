@@ -142,6 +142,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   const [customerSalesSubPages, setCustomerSalesSubPages] = useState<Record<string, number>>({});
   const [customerPaymentsSubPages, setCustomerPaymentsSubPages] = useState<Record<string, number>>({});
   const [vendorLotsSubPages, setVendorLotsSubPages] = useState<Record<string, number>>({});
+  const [vendorPaymentsSubPages, setVendorPaymentsSubPages] = useState<Record<string, number>>({});
 
   // Add/Edit Vendor Modal State
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
@@ -423,14 +424,61 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
     });
 
     return Array.from(vendorMap.values()).map((v) => {
-      const remaining = Math.max(0, v.netPayable - v.totalPaid);
+      // Build unified payment history for this vendor
+      const historyMap = new Map<string, VendorPaymentRecord>();
+
+      // 1. From saved vendor payments
+      (v.payments || []).forEach((p) => {
+        historyMap.set(p.id, { ...p });
+      });
+
+      // 2. From lot-specific payments
+      v.lots.forEach((lot) => {
+        const lotPaid =
+          lot.vendorPaymentAmount !== undefined
+            ? lot.vendorPaymentAmount
+            : lot.vendorPaymentStatus === 'paid'
+            ? lot.summary.netPayableToVendor
+            : 0;
+
+        if (lotPaid > 0) {
+          const lotPayKey = `lot-pay-${lot.id}`;
+          const alreadyLinked = Array.from(historyMap.values()).some((p) => p.lotId === lot.id);
+          if (!alreadyLinked) {
+            historyMap.set(lotPayKey, {
+              id: lotPayKey,
+              vendorName: lot.vendorName,
+              lotId: lot.id,
+              lotNumber: lot.lotNumber,
+              amount: lotPaid,
+              date: lot.vendorPaymentDate || lot.updatedAt?.slice(0, 10) || lot.arrivalDate,
+              paymentDate: lot.vendorPaymentDate || lot.updatedAt?.slice(0, 10) || lot.arrivalDate,
+              paymentMethod: lot.vendorPaymentMethod || 'cash',
+              notes: lot.vendorPaymentNotes || `لاٹ #${lot.lotNumber} (${lot.productUrdu}) کی ادائیگی`,
+            });
+          }
+        }
+      });
+
+      const paymentHistory = Array.from(historyMap.values()).sort((a, b) => {
+        const dateA = a.date || a.paymentDate || '';
+        const dateB = b.date || b.paymentDate || '';
+        return dateB.localeCompare(dateA);
+      });
+
+      const totalRecordedPaid = paymentHistory.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const effectivePaid = Math.max(v.totalPaid, totalRecordedPaid);
+      const remaining = Math.max(0, v.netPayable - effectivePaid);
       const isAllPaid = remaining === 0 && v.netPayable > 0;
-      const isPartial = v.totalPaid > 0 && remaining > 0;
+      const isPartial = effectivePaid > 0 && remaining > 0;
+
       return {
         ...v,
+        totalPaid: effectivePaid,
         remainingDue: remaining,
         isAllPaid,
         isPartial,
+        paymentHistory,
       };
     });
   }, [lots, vendors]);
@@ -612,8 +660,8 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
     sound.playCashChime();
     if (onRecordVendorPayment) {
       onRecordVendorPayment(vendor.name, {
-        amount: vendor.netPayable,
-        notes: isUrdu ? 'مکمل ادائیگی یکمشت ادا کی گئی' : 'Marked fully paid in full',
+        amount: vendor.remainingDue,
+        notes: isUrdu ? 'مکمل بقایا رقم ادا کی گئی' : 'Marked fully paid in full',
         paymentDate: new Date().toISOString().slice(0, 10),
         paymentMethod: 'cash',
         status: 'paid',
@@ -979,14 +1027,27 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                           </div>
                         </div>
 
-                        {/* Financial Figures & Connect/Action Buttons */}
-                        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between sm:justify-end gap-2.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                          <div className="text-start sm:text-end">
-                            <span className="text-[10px] text-slate-400 font-urdu-sans block">
-                              {t.balanceDue} (بقایا کھاتہ):
+                        {/* Financial Figures: Nakad & Uddar Under Individual Customer */}
+                        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                          {/* Nakad (Received) */}
+                          <div className="bg-emerald-50/90 border border-emerald-200/80 px-2.5 py-1 rounded-xl text-start sm:text-end">
+                            <span className="text-[10px] text-emerald-800 font-bold font-urdu-sans block">
+                              {isUrdu ? 'نقد (وصول شدہ):' : 'Nakad (Received):'}
+                            </span>
+                            <span className="text-sm sm:text-base font-black font-numbers text-emerald-700 block">
+                              {formatPKR(cust.cashPaidDirect + cust.khataPaymentsReceived, settings.currencySymbol, settings.language)}
+                            </span>
+                          </div>
+
+                          {/* Uddar (Credit Balance) */}
+                          <div className={`px-2.5 py-1 rounded-xl border text-start sm:text-end ${
+                            isCleared ? 'bg-slate-50 border-slate-200' : 'bg-amber-50/90 border-amber-200/80'
+                          }`}>
+                            <span className="text-[10px] text-amber-900 font-bold font-urdu-sans block">
+                              {isUrdu ? 'ادھار (بقایا):' : 'Uddar (Credit):'}
                             </span>
                             <span
-                              className={`text-base sm:text-lg font-black font-numbers block ${
+                              className={`text-sm sm:text-base font-black font-numbers block ${
                                 isCleared ? 'text-emerald-700' : 'text-amber-800'
                               }`}
                             >
@@ -1122,6 +1183,28 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
 
                         return (
                         <div className="bg-slate-50 p-3 sm:p-4 border-t border-slate-200 space-y-4 animate-in fade-in duration-150">
+                          {/* Individual Customer Financial Breakdown: Nakad vs Uddar */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-white p-2.5 rounded-xl border border-slate-200 text-xs font-urdu-sans">
+                            <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-center">
+                              <span className="text-slate-500 text-[11px] block">{isUrdu ? 'کل مال خریداری' : 'Total Purchases'}</span>
+                              <span className="font-bold text-slate-800 text-sm font-numbers block">
+                                {formatPKR(cust.grossPurchasesAmount, settings.currencySymbol, settings.language)}
+                              </span>
+                            </div>
+                            <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-100 text-center">
+                              <span className="text-emerald-800 font-bold text-[11px] block">{isUrdu ? 'نقد وصول شدہ (Nakad)' : 'Cash Received (Nakad)'}</span>
+                              <span className="font-bold text-emerald-700 text-sm font-numbers block">
+                                {formatPKR(cust.cashPaidDirect + cust.khataPaymentsReceived, settings.currencySymbol, settings.language)}
+                              </span>
+                            </div>
+                            <div className={`p-2 rounded-lg border text-center ${isCleared ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
+                              <span className="text-amber-900 font-bold text-[11px] block">{isUrdu ? 'بقایا ادھار کھاتہ (Uddar)' : 'Balance Udhaar (Uddar)'}</span>
+                              <span className={`font-bold text-sm font-numbers block ${isCleared ? 'text-emerald-700' : 'text-amber-800'}`}>
+                                {formatPKR(cust.balance, settings.currencySymbol, settings.language)}
+                              </span>
+                            </div>
+                          </div>
+
                           <div>
                             <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
                               <h4 className="text-xs font-bold text-slate-700 font-urdu-sans">
@@ -1171,19 +1254,17 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                 <table className="w-full text-xs text-start font-urdu-sans">
                                   <thead>
                                     <tr className="text-slate-400 border-b border-slate-200 text-[11px]">
-                                      <th className="py-1.5 px-2.5 text-start">{t.date}</th>
+                                      <th className="py-1.5 px-2.5 text-start">{t.lotNumber}</th>
                                       <th className="py-1.5 px-2.5 text-start">{t.product}</th>
                                       <th className="py-1.5 px-2.5 text-center">{t.qty}</th>
                                       <th className="py-1.5 px-2.5 text-center">{t.rate}</th>
                                       <th className="py-1.5 px-2.5 text-end">{t.totalAmount}</th>
-                                      <th className="py-1.5 px-2.5 text-center">{t.status}</th>
-                                      <th className="py-1.5 px-2.5 text-center">{t.action}</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
                                     {paginatedCustSales.map((sale) => (
                                       <tr key={sale.saleId} className="hover:bg-slate-50/80">
-                                        <td className="py-1.5 px-2.5 text-slate-500 font-numbers">{sale.lotNumber}</td>
+                                        <td className="py-1.5 px-2.5 text-slate-500 font-numbers">#{sale.lotNumber}</td>
                                         <td className="py-1.5 px-2.5 font-bold text-slate-800">{sale.productUrdu}</td>
                                         <td className="py-1.5 px-2.5 text-center font-numbers">{sale.quantity} {sale.unitLabel}</td>
                                         <td className="py-1.5 px-2.5 text-center font-numbers">
@@ -1191,26 +1272,6 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                         </td>
                                         <td className="py-1.5 px-2.5 text-end font-bold font-numbers text-slate-900">
                                           {formatPKR(sale.totalAmount, settings.currencySymbol, settings.language)}
-                                        </td>
-                                        <td className="py-1.5 px-2.5 text-center">
-                                          <span
-                                            className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
-                                              sale.paymentStatus === 'cash'
-                                                ? 'bg-emerald-100 text-emerald-800'
-                                                : 'bg-amber-100 text-amber-900'
-                                            }`}
-                                          >
-                                            {sale.paymentStatus === 'cash' ? t.paymentCash : t.paymentCredit}
-                                          </span>
-                                        </td>
-                                        <td className="py-1.5 px-2.5 text-center">
-                                          <button
-                                            type="button"
-                                            onClick={() => onToggleSalePaymentStatus(sale.lotId, sale.saleId)}
-                                            className="text-[11px] text-emerald-700 hover:underline font-bold"
-                                          >
-                                            {sale.paymentStatus === 'cash' ? (isUrdu ? 'ادھار کریں' : 'Set Credit') : t.markPaid}
-                                          </button>
                                         </td>
                                       </tr>
                                     ))}
@@ -1326,8 +1387,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                       <th className="py-2.5 px-3 text-center">{t.qty}</th>
                       <th className="py-2.5 px-3 text-center">{t.rate}</th>
                       <th className="py-2.5 px-3 text-end">{t.totalAmount}</th>
-                      <th className="py-2.5 px-3 text-center">{t.status}</th>
-                      <th className="py-2.5 px-3 text-center">{t.action}</th>
+                      <th className="py-2.5 px-3 text-center">{t.paymentMethod || (isUrdu ? 'ادائیگی نوعیت' : 'Type')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1352,15 +1412,6 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                           >
                             {sale.paymentStatus === 'cash' ? t.paymentCash : t.paymentCredit}
                           </span>
-                        </td>
-                        <td className="py-2 px-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => onToggleSalePaymentStatus(sale.lotId, sale.saleId)}
-                            className="text-xs text-emerald-700 font-bold hover:underline"
-                          >
-                            {sale.paymentStatus === 'cash' ? (isUrdu ? 'ادھار کریں' : 'Set Credit') : t.markPaid}
-                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1788,7 +1839,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                       </div>
                     )}
 
-                    {/* Expanded Lots Table with Sub-Pagination */}
+                    {/* Expanded Lots Table with Sub-Pagination & Payment History */}
                     {isExpanded && (() => {
                       const vendorLotsPageSize = 8;
                       const currentVendorLotsPage = vendorLotsSubPages[vendor.name] || 1;
@@ -1798,132 +1849,245 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                         currentVendorLotsPage * vendorLotsPageSize
                       );
 
-                      return (
-                      <div className="bg-slate-50 p-3.5 sm:p-4 border-t border-slate-200 space-y-3">
-                        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
-                          <h4 className="text-xs font-bold text-slate-700 flex items-center gap-2">
-                            <Package className="w-4 h-4 text-amber-600" />
-                            <span>زمیندار کی کل اجناس و لاٹس ({vendor.lots.length})</span>
-                          </h4>
+                      const vendorPayPageSize = 6;
+                      const currentVendorPayPage = vendorPaymentsSubPages[vendor.name] || 1;
+                      const totalVendorPayPages = Math.ceil(vendor.paymentHistory.length / vendorPayPageSize) || 1;
+                      const paginatedVendorPayments = vendor.paymentHistory.slice(
+                        (currentVendorPayPage - 1) * vendorPayPageSize,
+                        currentVendorPayPage * vendorPayPageSize
+                      );
 
-                          {totalVendorLotsPages > 1 && (
-                            <div className="flex items-center gap-1.5 text-[11px] font-urdu-sans">
-                              <span className="text-slate-500 font-numbers">
-                                صفحہ {currentVendorLotsPage} از {totalVendorLotsPages}
-                              </span>
-                              <button
-                                type="button"
-                                disabled={currentVendorLotsPage <= 1}
-                                onClick={() =>
-                                  setVendorLotsSubPages((prev) => ({
-                                    ...prev,
-                                    [vendor.name]: Math.max(1, currentVendorLotsPage - 1),
-                                  }))
-                                }
-                                className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
-                              >
-                                ‹ پچھلا
-                              </button>
-                              <button
-                                type="button"
-                                disabled={currentVendorLotsPage >= totalVendorLotsPages}
-                                onClick={() =>
-                                  setVendorLotsSubPages((prev) => ({
-                                    ...prev,
-                                    [vendor.name]: Math.min(totalVendorLotsPages, currentVendorLotsPage + 1),
-                                  }))
-                                }
-                                className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
-                              >
-                                اگلا ›
-                              </button>
+                      return (
+                      <div className="bg-slate-50 p-3.5 sm:p-4 border-t border-slate-200 space-y-4">
+                        {/* 3-part financial overview card for vendor */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+                            <span className="text-[10px] text-slate-500 font-urdu-sans block">صافی مال فروخت (واجب الادا):</span>
+                            <span className="text-sm font-bold text-slate-900 font-numbers block">
+                              {formatPKR(vendor.netPayable, settings.currencySymbol, settings.language)}
+                            </span>
+                          </div>
+                          <div className="bg-white p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/50">
+                            <span className="text-[10px] text-emerald-800 font-bold font-urdu-sans block">ادا شدہ نقد (Paid to Vendor):</span>
+                            <span className="text-sm font-bold text-emerald-950 font-numbers block">
+                              {formatPKR(vendor.totalPaid, settings.currencySymbol, settings.language)}
+                            </span>
+                          </div>
+                          <div className="bg-white p-2.5 rounded-xl border border-amber-200 bg-amber-50/50">
+                            <span className="text-[10px] text-amber-900 font-bold font-urdu-sans block">بقایا ادھار کھاتہ (Balance Due):</span>
+                            <span className="text-sm font-bold text-amber-900 font-numbers block">
+                              {formatPKR(vendor.remainingDue, settings.currencySymbol, settings.language)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Vendor Lots Section */}
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                            <h4 className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                              <Package className="w-4 h-4 text-amber-600" />
+                              <span>زمیندار کی کل اجناس و لاٹس ({vendor.lots.length})</span>
+                            </h4>
+
+                            {totalVendorLotsPages > 1 && (
+                              <div className="flex items-center gap-1.5 text-[11px] font-urdu-sans">
+                                <span className="text-slate-500 font-numbers">
+                                  صفحہ {currentVendorLotsPage} از {totalVendorLotsPages}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={currentVendorLotsPage <= 1}
+                                  onClick={() =>
+                                    setVendorLotsSubPages((prev) => ({
+                                      ...prev,
+                                      [vendor.name]: Math.max(1, currentVendorLotsPage - 1),
+                                    }))
+                                  }
+                                  className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                                >
+                                  ‹ پچھلا
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={currentVendorLotsPage >= totalVendorLotsPages}
+                                  onClick={() =>
+                                    setVendorLotsSubPages((prev) => ({
+                                      ...prev,
+                                      [vendor.name]: Math.min(totalVendorLotsPages, currentVendorLotsPage + 1),
+                                    }))
+                                  }
+                                  className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                                >
+                                  اگلا ›
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {vendor.lots.length === 0 ? (
+                            <p className="text-xs text-slate-400">کوئی لاٹ موجود نہیں</p>
+                          ) : (
+                            <div className="overflow-x-auto bg-white rounded-xl border border-slate-200">
+                              <table className="w-full text-xs text-start">
+                                <thead>
+                                  <tr className="text-slate-400 border-b border-slate-200 text-[11px]">
+                                    <th className="py-2 px-2.5 text-start">لاٹ نمبر</th>
+                                    <th className="py-2 px-2.5 text-start">تاریخ آمد</th>
+                                    <th className="py-2 px-2.5 text-start">جنس مال</th>
+                                    <th className="py-2 px-2.5 text-center">تعداد</th>
+                                    <th className="py-2 px-2.5 text-end">کل فروخت</th>
+                                    <th className="py-2 px-2.5 text-end">کٹوتیاں</th>
+                                    <th className="py-2 px-2.5 text-end">صافی رقم</th>
+                                    <th className="py-2 px-2.5 text-center">کیفیت</th>
+                                    <th className="py-2 px-2.5 text-center">ایکشن</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {paginatedVendorLots.map((lot) => {
+                                    const isLotPaid = lot.vendorPaymentStatus === 'paid';
+                                    const lotUnitLabel = unitLabels[lot.unitType][settings.language];
+
+                                    return (
+                                      <tr key={lot.id} className="hover:bg-slate-50/80">
+                                        <td className="py-2 px-2.5 font-mono font-bold text-slate-700">#{lot.lotNumber}</td>
+                                        <td className="py-2 px-2.5 text-slate-500 font-numbers">{lot.arrivalDate}</td>
+                                        <td className="py-2 px-2.5 font-bold text-slate-900">{lot.productUrdu}</td>
+                                        <td className="py-2 px-2.5 text-center font-numbers">{lot.totalQuantity} {lotUnitLabel}</td>
+                                        <td className="py-2 px-2.5 text-end font-bold font-numbers text-slate-900">
+                                          {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
+                                        </td>
+                                        <td className="py-2 px-2.5 text-end text-rose-700 font-numbers font-bold">
+                                          -{formatPKR(lot.summary.totalExpenses, settings.currencySymbol, settings.language)}
+                                        </td>
+                                        <td className="py-2 px-2.5 text-end font-black font-numbers text-slate-950">
+                                          {formatPKR(lot.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
+                                        </td>
+                                        <td className="py-2 px-2.5 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => onToggleVendorPaymentStatus && onToggleVendorPaymentStatus(lot.id)}
+                                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition ${
+                                              isLotPaid
+                                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                                : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+                                            }`}
+                                            title="کلک کر کے ادا شدہ / بقایا سوئچ کریں"
+                                          >
+                                            {isLotPaid ? '✅ ادا شدہ' : '⏳ بقایا'}
+                                          </button>
+                                        </td>
+                                        <td className="py-2 px-2.5 text-center">
+                                          <div className="flex items-center justify-center gap-1">
+                                            {onOpenReceipt && (
+                                              <button
+                                                type="button"
+                                                onClick={() => onOpenReceipt(lot.id)}
+                                                className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+                                                title="پرچی رسید دیکھیں"
+                                              >
+                                                <Receipt className="w-3.5 h-3.5" />
+                                              </button>
+                                            )}
+                                            {onOpenExpenseSlip && (
+                                              <button
+                                                type="button"
+                                                onClick={() => onOpenExpenseSlip(lot.id)}
+                                                className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+                                                title="خرچہ پرچی دیکھیں"
+                                              >
+                                                <FileText className="w-3.5 h-3.5" />
+                                              </button>
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
                             </div>
                           )}
                         </div>
 
-                        {vendor.lots.length === 0 ? (
-                          <p className="text-xs text-slate-400">کوئی لاٹ موجود نہیں</p>
-                        ) : (
-                          <div className="overflow-x-auto bg-white rounded-xl border border-slate-200">
-                            <table className="w-full text-xs text-start">
-                              <thead>
-                                <tr className="text-slate-400 border-b border-slate-200 text-[11px]">
-                                  <th className="py-2 px-2.5 text-start">لاٹ نمبر</th>
-                                  <th className="py-2 px-2.5 text-start">تاریخ آمد</th>
-                                  <th className="py-2 px-2.5 text-start">جنس مال</th>
-                                  <th className="py-2 px-2.5 text-center">تعداد</th>
-                                  <th className="py-2 px-2.5 text-end">کل فروخت</th>
-                                  <th className="py-2 px-2.5 text-end">کٹوتیاں</th>
-                                  <th className="py-2 px-2.5 text-end">صافی رقم</th>
-                                  <th className="py-2 px-2.5 text-center">کیفیت</th>
-                                  <th className="py-2 px-2.5 text-center">ایکشن</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                {paginatedVendorLots.map((lot) => {
-                                  const isLotPaid = lot.vendorPaymentStatus === 'paid';
-                                  const lotUnitLabel = unitLabels[lot.unitType][settings.language];
+                        {/* Vendor Payment History Records - EXACT MATCH TO CUSTOMER WASOOL SHUDA ADYGYA */}
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                            <h4 className="text-xs font-bold text-slate-700 font-urdu-sans flex items-center gap-1.5">
+                              <Banknote className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>مالک / زمیندار کو کی گئی ادائیگیاں ({vendor.paymentHistory.length})</span>
+                            </h4>
+                            {totalVendorPayPages > 1 && (
+                              <div className="flex items-center gap-1.5 text-[11px] font-urdu-sans">
+                                <span className="text-slate-500 font-numbers">
+                                  صفحہ {currentVendorPayPage} از {totalVendorPayPages}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={currentVendorPayPage <= 1}
+                                  onClick={() =>
+                                    setVendorPaymentsSubPages((prev) => ({
+                                      ...prev,
+                                      [vendor.name]: Math.max(1, currentVendorPayPage - 1),
+                                    }))
+                                  }
+                                  className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                                >
+                                  ‹ پچھلا
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={currentVendorPayPage >= totalVendorPayPages}
+                                  onClick={() =>
+                                    setVendorPaymentsSubPages((prev) => ({
+                                      ...prev,
+                                      [vendor.name]: Math.min(totalVendorPayPages, currentVendorPayPage + 1),
+                                    }))
+                                  }
+                                  className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700"
+                                >
+                                  اگلا ›
+                                </button>
+                              </div>
+                            )}
+                          </div>
 
-                                  return (
-                                    <tr key={lot.id} className="hover:bg-slate-50/80">
-                                      <td className="py-2 px-2.5 font-mono font-bold text-slate-700">#{lot.lotNumber}</td>
-                                      <td className="py-2 px-2.5 text-slate-500 font-numbers">{lot.arrivalDate}</td>
-                                      <td className="py-2 px-2.5 font-bold text-slate-900">{lot.productUrdu}</td>
-                                      <td className="py-2 px-2.5 text-center font-numbers">{lot.totalQuantity} {lotUnitLabel}</td>
-                                      <td className="py-2 px-2.5 text-end font-bold font-numbers text-slate-900">
-                                        {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
+                          {vendor.paymentHistory.length === 0 ? (
+                            <div className="bg-white rounded-xl border border-dashed border-slate-300 p-3 text-center text-xs text-slate-500 font-urdu-sans">
+                              ابھی تک زمیندار کو کوئی نقد ادائیگی درج نہیں ہوئی۔ اوپر <b className="text-amber-700">"ادائیگی کا اندراج"</b> بٹن سے ادائیگی محفوظ کریں۔
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto bg-white rounded-xl border border-slate-200">
+                              <table className="w-full text-xs text-start font-urdu-sans">
+                                <thead>
+                                  <tr className="text-slate-400 border-b border-slate-200 text-[11px]">
+                                    <th className="py-1.5 px-2.5 text-start">{t.date}</th>
+                                    <th className="py-1.5 px-2.5 text-end">ادا شدہ رقم</th>
+                                    <th className="py-1.5 px-2.5 text-center">طریقہ کار</th>
+                                    <th className="py-1.5 px-2.5 text-start">تفصیل / لاٹ نمبر</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {paginatedVendorPayments.map((pay) => (
+                                    <tr key={pay.id} className="hover:bg-slate-50/80">
+                                      <td className="py-1.5 px-2.5 text-slate-500 font-numbers">{pay.date || pay.paymentDate || '-'}</td>
+                                      <td className="py-1.5 px-2.5 text-end font-bold font-numbers text-emerald-700">
+                                        +{formatPKR(pay.amount, settings.currencySymbol, settings.language)}
                                       </td>
-                                      <td className="py-2 px-2.5 text-end text-rose-700 font-numbers font-bold">
-                                        -{formatPKR(lot.summary.totalExpenses, settings.currencySymbol, settings.language)}
+                                      <td className="py-1.5 px-2.5 text-center">
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 text-slate-700">
+                                          {pay.paymentMethod === 'online' ? '🏦 آن لائن بینک' : pay.paymentMethod === 'cheque' ? '📜 چیک' : '💵 نقد'}
+                                        </span>
                                       </td>
-                                      <td className="py-2 px-2.5 text-end font-black font-numbers text-slate-950">
-                                        {formatPKR(lot.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
-                                      </td>
-                                      <td className="py-2 px-2.5 text-center">
-                                        <button
-                                          type="button"
-                                          onClick={() => onToggleVendorPaymentStatus && onToggleVendorPaymentStatus(lot.id)}
-                                          className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition ${
-                                            isLotPaid
-                                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                                              : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
-                                          }`}
-                                          title="کلک کر کے ادا شدہ / بقایا سوئچ کریں"
-                                        >
-                                          {isLotPaid ? '✅ ادا شدہ' : '⏳ بقایا'}
-                                        </button>
-                                      </td>
-                                      <td className="py-2 px-2.5 text-center">
-                                        <div className="flex items-center justify-center gap-1">
-                                          {onOpenReceipt && (
-                                            <button
-                                              type="button"
-                                              onClick={() => onOpenReceipt(lot.id)}
-                                              className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
-                                              title="پرچی رسید دیکھیں"
-                                            >
-                                              <Receipt className="w-3.5 h-3.5" />
-                                            </button>
-                                          )}
-                                          {onOpenExpenseSlip && (
-                                            <button
-                                              type="button"
-                                              onClick={() => onOpenExpenseSlip(lot.id)}
-                                              className="p-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
-                                              title="خرچہ پرچی دیکھیں"
-                                            >
-                                              <FileText className="w-3.5 h-3.5" />
-                                            </button>
-                                          )}
-                                        </div>
+                                      <td className="py-1.5 px-2.5 text-slate-600">
+                                        {pay.notes || (pay.lotNumber ? `لاٹ #${pay.lotNumber}` : 'نقد ادائیگی')}
                                       </td>
                                     </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       );
                     })()}

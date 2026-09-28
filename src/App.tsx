@@ -9,9 +9,10 @@ import {
   BuyerPaymentRecord,
   SavedVendor,
   ShopExpense,
+  DrawerAdjustment,
 } from './types';
 import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors, sampleExpenses } from './utils/sampleData';
-import { calculateLotSummary } from './utils/calculations';
+import { calculateLotSummary, calculateCashDrawerSummary } from './utils/calculations';
 import { sound } from './utils/sound';
 import {
   loadInitialApplicationData,
@@ -19,6 +20,7 @@ import {
   saveCustomersAsync,
   saveVendorsAsync,
   saveExpensesAsync,
+  saveDrawerAdjustmentsAsync,
   saveSettingsAsync,
   saveLotsToIndexedDB,
   saveCustomersToIndexedDB,
@@ -37,6 +39,7 @@ import { DailyHistoryView } from './components/DailyHistoryView';
 import { SettingsView } from './components/SettingsView';
 import { NewLotModal } from './components/NewLotModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
+import { CashDrawerModal } from './components/CashDrawerModal';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App as CapApp } from '@capacitor/app';
@@ -46,6 +49,7 @@ const STORAGE_KEY_SETTINGS = 'mandi_bolli_settings_v1';
 const STORAGE_KEY_CUSTOMERS = 'mandi_bolli_customers_v1';
 const STORAGE_KEY_VENDORS = 'mandi_bolli_vendors_v1';
 const STORAGE_KEY_EXPENSES = 'mandi_bolli_expenses_v1';
+const STORAGE_KEY_DRAWER = 'mandi_bolli_drawer_adjustments_v1';
 
 export default function App() {
   // 1. App Settings State
@@ -103,11 +107,23 @@ export default function App() {
     return sampleExpenses;
   });
 
-  // 6. Navigation and Modal States
+  // 6. Cash Drawer Manual Adjustments State
+  const [drawerAdjustments, setDrawerAdjustments] = useState<DrawerAdjustment[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_DRAWER);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // fallback
+    }
+    return [];
+  });
+
+  // 7. Navigation and Modal States
   const [activeTab, setActiveTab] = useState<ActiveTab>('bolli');
   const [selectedLotId, setSelectedLotId] = useState<string>(() => lots[0]?.id || '');
   const [isNewLotOpen, setIsNewLotOpen] = useState(false);
   const [isCloudSyncOpen, setIsCloudSyncOpen] = useState(false);
+  const [isCashDrawerOpen, setIsCashDrawerOpen] = useState(false);
 
   // Initial High-Speed IndexedDB bootstrap state
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -125,6 +141,8 @@ export default function App() {
       const backListener = CapApp.addListener('backButton', ({ canGoBack }) => {
         if (isNewLotOpen) {
           setIsNewLotOpen(false);
+        } else if (isCashDrawerOpen) {
+          setIsCashDrawerOpen(false);
         } else if (isCloudSyncOpen) {
           setIsCloudSyncOpen(false);
         } else if (activeTab !== 'bolli') {
@@ -140,7 +158,7 @@ export default function App() {
         backListener.then((l) => l.remove()).catch(() => {});
       };
     }
-  }, [isNewLotOpen, isCloudSyncOpen, activeTab]);
+  }, [isNewLotOpen, isCashDrawerOpen, isCloudSyncOpen, activeTab]);
 
   useEffect(() => {
     loadInitialApplicationData().then((data) => {
@@ -153,6 +171,9 @@ export default function App() {
         if (data.customers && data.customers.length > 0) setCustomers(data.customers);
         if (data.vendors && data.vendors.length > 0) setVendors(data.vendors);
         if (data.expenses && data.expenses.length > 0) setExpenses(data.expenses);
+        if (data.drawerAdjustments && data.drawerAdjustments.length > 0) {
+          setDrawerAdjustments(data.drawerAdjustments);
+        }
         isLoadedFromDbRef.current = true;
         setIsDataLoaded(true);
       }
@@ -192,6 +213,12 @@ export default function App() {
     saveExpensesAsync(expenses);
   }, [expenses, isDataLoaded]);
 
+  // Sync drawer adjustments with storage engine
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    saveDrawerAdjustmentsAsync(drawerAdjustments);
+  }, [drawerAdjustments, isDataLoaded]);
+
   // Make sure selectedLotId is valid
   useEffect(() => {
     if (!lots.some((l) => l.id === selectedLotId) && lots.length > 0) {
@@ -220,6 +247,32 @@ export default function App() {
   const handleDeleteExpense = (expenseId: string) => {
     sound.playTick();
     setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
+  };
+
+  const handleAddDrawerAdjustment = (adj: Omit<DrawerAdjustment, 'id' | 'timestamp'>) => {
+    sound.playCashChime();
+    const newEntry: DrawerAdjustment = {
+      ...adj,
+      id: `adj-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      timestamp: new Date().toISOString(),
+    };
+    setDrawerAdjustments((prev) => [newEntry, ...prev]);
+  };
+
+  const handleDeleteDrawerAdjustment = (id: string) => {
+    sound.playTick();
+    setDrawerAdjustments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const handleBatchUpdateLots = (updatedLots: VendorLot[]) => {
+    sound.playCashChime();
+    const updateMap = new Map(updatedLots.map((l) => [l.id, l]));
+    setLots((prev) =>
+      prev.map((lot) => {
+        const match = updateMap.get(lot.id);
+        return match || lot;
+      })
+    );
   };
 
   const handleSaveCustomer = (cust: CustomerBuyer) => {
@@ -481,8 +534,41 @@ export default function App() {
     sound.playCashChime();
     const paymentDate = payment.paymentDate || new Date().toISOString().slice(0, 10);
 
+    // 1. Create a persistent VendorPaymentRecord
+    const newVendorPaymentRecord: VendorPaymentRecord = {
+      id: `vpay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      vendorName,
+      lotId: payment.lotId,
+      amount: payment.amount,
+      paymentDate,
+      date: paymentDate,
+      paymentMethod: payment.paymentMethod || 'cash',
+      notes: payment.notes || (payment.lotId ? 'لاٹ کی ادائیگی' : 'مجموعی کھاتہ ادائیگی'),
+      timestamp: new Date().toISOString(),
+    };
+
+    setVendors((prevVendors) => {
+      const existing = prevVendors.find((v) => v.name.trim().toLowerCase() === vendorName.trim().toLowerCase());
+      if (existing) {
+        return prevVendors.map((v) =>
+          v.id === existing.id
+            ? { ...v, payments: [newVendorPaymentRecord, ...(v.payments || [])], updatedAt: new Date().toISOString() }
+            : v
+        );
+      } else {
+        const newV: SavedVendor = {
+          id: `vend-${Date.now()}`,
+          name: vendorName.trim(),
+          payments: [newVendorPaymentRecord],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        return [newV, ...prevVendors];
+      }
+    });
+
     setLots((prev) => {
-      // 1. If a specific lot is targeted:
+      // 2. If a specific lot is targeted:
       if (payment.lotId) {
         return prev.map((lot) => {
           if (lot.id !== payment.lotId) return lot;
@@ -510,7 +596,7 @@ export default function App() {
         });
       }
 
-      // 2. If recorded for the vendor across all lots incrementally:
+      // 3. If recorded for the vendor across all lots incrementally:
       let remainingToDistribute = payment.amount;
 
       // Sort vendor lots by date ascending (oldest first) or unpaid lots first
@@ -659,6 +745,11 @@ export default function App() {
     return profit;
   }, [lots, todayStr]);
 
+  // Overall Cash in Drawer Summary
+  const cashDrawerSummary = useMemo(() => {
+    return calculateCashDrawerSummary(lots, customers, expenses, drawerAdjustments, vendors);
+  }, [lots, customers, expenses, drawerAdjustments, vendors]);
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-urdu-sans text-slate-900 selection:bg-emerald-200">
       {/* Top Header */}
@@ -671,6 +762,8 @@ export default function App() {
         todayLotsCount={todayLotsCount}
         totalTodaySales={totalTodaySales}
         totalTodayProfit={totalTodayProfit}
+        cashInDrawer={cashDrawerSummary.netCashInDrawer}
+        onOpenCashDrawer={() => setIsCashDrawerOpen(true)}
       />
 
       {/* Navigation Bars (Desktop & Mobile) */}
@@ -772,6 +865,10 @@ export default function App() {
             lots={lots}
             customers={customers}
             expenses={expenses}
+            drawerAdjustments={drawerAdjustments}
+            onAddDrawerAdjustment={handleAddDrawerAdjustment}
+            onDeleteDrawerAdjustment={handleDeleteDrawerAdjustment}
+            onBatchUpdateLots={handleBatchUpdateLots}
             onSaveExpense={handleSaveExpense}
             onDeleteExpense={handleDeleteExpense}
             settings={settings}
@@ -820,6 +917,7 @@ export default function App() {
         existingLotsCount={lots.length}
         savedVendors={vendors}
         onSaveVendor={handleSaveVendor}
+        onUpdateSettings={handleUpdateSettings}
       />
 
       {/* Cloud Sync & Multi-Device Backup Modal */}
@@ -831,6 +929,19 @@ export default function App() {
         vendors={vendors}
         settings={settings}
         onApplyCloudData={handleApplyCloudData}
+      />
+
+      {/* Cash Drawer Modal */}
+      <CashDrawerModal
+        isOpen={isCashDrawerOpen}
+        onClose={() => setIsCashDrawerOpen(false)}
+        lots={lots}
+        customers={customers}
+        expenses={expenses}
+        drawerAdjustments={drawerAdjustments}
+        onAddAdjustment={handleAddDrawerAdjustment}
+        onDeleteAdjustment={handleDeleteDrawerAdjustment}
+        settings={settings}
       />
     </div>
   );

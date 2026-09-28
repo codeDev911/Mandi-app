@@ -63,7 +63,7 @@ export const translations = {
     selectSavedCustomer: 'محفوظ خریدار کا انتخاب کریں',
 
     // Custom Product ("Other")
-    otherProduct: 'دیگر جنس (Other)',
+    otherProduct: 'دیگر جنس',
     enterCustomProduct: 'اپنی مرضی کا پھل یا سبزی درج کریں',
     productUrduLabel: 'جنس کا نام (اردو میں)',
     productEnLabel: 'جنس کا نام (انگریزی)',
@@ -472,18 +472,18 @@ export interface ProductPreset {
 }
 
 export const commonMandiProducts: ProductPreset[] = [
-  { nameEn: 'Potatoes', nameUrdu: 'آلو (Potato)', emoji: '🥔', defaultUnit: 'bori', defaultAvgRate: 3200 },
-  { nameEn: 'Onions', nameUrdu: 'پیاز (Onion)', emoji: '🧅', defaultUnit: 'bori', defaultAvgRate: 3500 },
-  { nameEn: 'Tomatoes', nameUrdu: 'ٹماٹر (Tomato)', emoji: '🍅', defaultUnit: 'kainchi', defaultAvgRate: 2800 },
-  { nameEn: 'Green Chili', nameUrdu: 'سبز مرچ (Green Chili)', emoji: '🌶️', defaultUnit: 'shopper', defaultAvgRate: 2200 },
-  { nameEn: 'Cabbage', nameUrdu: 'بند گوبھی (Cabbage)', emoji: '🥬', defaultUnit: 'tora', defaultAvgRate: 1400 },
-  { nameEn: 'Cauliflower', nameUrdu: 'پھول گوبھی (Cauliflower)', emoji: '🥦', defaultUnit: 'tora', defaultAvgRate: 1800 },
-  { nameEn: 'Apples', nameUrdu: 'سیب (Apple)', emoji: '🍎', defaultUnit: 'peti', defaultAvgRate: 4500 },
-  { nameEn: 'Bananas', nameUrdu: 'کیلا (Banana)', emoji: '🍌', defaultUnit: 'peti', defaultAvgRate: 1800 },
-  { nameEn: 'Mangoes', nameUrdu: 'آم (Mango)', emoji: '🥭', defaultUnit: 'peti', defaultAvgRate: 5000 },
-  { nameEn: 'Cucumber', nameUrdu: 'کھیرا (Cucumber)', emoji: '🥒', defaultUnit: 'tora', defaultAvgRate: 1500 },
-  { nameEn: 'Eggplant', nameUrdu: 'بینگن (Eggplant)', emoji: '🍆', defaultUnit: 'tora', defaultAvgRate: 1200 },
-  { nameEn: 'Garlic', nameUrdu: 'لہسن (Garlic)', emoji: '🧄', defaultUnit: 'bori', defaultAvgRate: 6500 },
-  { nameEn: 'Ginger', nameUrdu: 'ادرک (Ginger)', emoji: '🫚', defaultUnit: 'bori', defaultAvgRate: 8000 },
-  { nameEn: 'Lemon', nameUrdu: 'لیمو (Lemon)', emoji: '🍋', defaultUnit: 'shopper', defaultAvgRate: 2400 },
+  { nameEn: 'آلو', nameUrdu: 'آلو', emoji: '🥔', defaultUnit: 'bori', defaultAvgRate: 3200 },
+  { nameEn: 'پیاز', nameUrdu: 'پیاز', emoji: '🧅', defaultUnit: 'bori', defaultAvgRate: 3500 },
+  { nameEn: 'ٹماٹر', nameUrdu: 'ٹماٹر', emoji: '🍅', defaultUnit: 'kainchi', defaultAvgRate: 2800 },
+  { nameEn: 'سبز مرچ', nameUrdu: 'سبز مرچ', emoji: '🌶️', defaultUnit: 'shopper', defaultAvgRate: 2200 },
+  { nameEn: 'بند گوبھی', nameUrdu: 'بند گوبھی', emoji: '🥬', defaultUnit: 'tora', defaultAvgRate: 1400 },
+  { nameEn: 'پھول گوبھی', nameUrdu: 'پھول گوبھی', emoji: '🥦', defaultUnit: 'tora', defaultAvgRate: 1800 },
+  { nameEn: 'سیب', nameUrdu: 'سیب', emoji: '🍎', defaultUnit: 'peti', defaultAvgRate: 4500 },
+  { nameEn: 'کیلا', nameUrdu: 'کیلا', emoji: '🍌', defaultUnit: 'peti', defaultAvgRate: 1800 },
+  { nameEn: 'آم', nameUrdu: 'آم', emoji: '🥭', defaultUnit: 'peti', defaultAvgRate: 5000 },
+  { nameEn: 'کھیرا', nameUrdu: 'کھیرا', emoji: '🥒', defaultUnit: 'tora', defaultAvgRate: 1500 },
+  { nameEn: 'بینگن', nameUrdu: 'بینگن', emoji: '🍆', defaultUnit: 'tora', defaultAvgRate: 1200 },
+  { nameEn: 'لہسن', nameUrdu: 'لہسن', emoji: '🧄', defaultUnit: 'bori', defaultAvgRate: 6500 },
+  { nameEn: 'ادرک', nameUrdu: 'ادرک', emoji: '🫚', defaultUnit: 'bori', defaultAvgRate: 8000 },
+  { nameEn: 'لیموں', nameUrdu: 'لیموں', emoji: '🍋', defaultUnit: 'shopper', defaultAvgRate: 2400 },
 ];

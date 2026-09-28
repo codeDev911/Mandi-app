@@ -7,11 +7,15 @@ import {
   ShopExpense,
   ExpenseCategory,
   expenseCategoryLabels,
+  DrawerAdjustment,
+  CashDrawerSummary,
 } from '../types';
 import { translations, unitLabels, commonMandiProducts } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
+import { calculateCashDrawerSummary, calculateLotSummary, distributeMunshianaToLots } from '../utils/calculations';
 import { sound } from '../utils/sound';
 import { VendorConsolidatedBillModal } from './VendorConsolidatedBillModal';
+import { CashDrawerModal } from './CashDrawerModal';
 import { ReportPDFPreviewModal } from './ReportPDFPreviewModal';
 import { PaginationControls } from './PaginationControls';
 import {
@@ -54,12 +58,19 @@ import {
   ArrowUpRight,
   Wallet,
   Trash2,
+  Coins,
+  Plus,
+  Minus,
 } from 'lucide-react';
 
 interface ReportsViewProps {
   lots: VendorLot[];
   customers: CustomerBuyer[];
   expenses?: ShopExpense[];
+  drawerAdjustments?: DrawerAdjustment[];
+  onAddDrawerAdjustment?: (adj: Omit<DrawerAdjustment, 'id' | 'timestamp'>) => void;
+  onDeleteDrawerAdjustment?: (id: string) => void;
+  onBatchUpdateLots?: (updatedLots: VendorLot[]) => void;
   onSaveExpense?: (expense: ShopExpense) => void;
   onDeleteExpense?: (expenseId: string) => void;
   settings: AppSettings;
@@ -86,6 +97,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   lots,
   customers,
   expenses = [],
+  drawerAdjustments = [],
+  onAddDrawerAdjustment,
+  onDeleteDrawerAdjustment,
+  onBatchUpdateLots,
   onSaveExpense,
   onDeleteExpense,
   settings,
@@ -118,6 +133,53 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   // State for PDF preview modal
   const [pdfPreview, setPdfPreview] = useState<PDFPreviewData | null>(null);
+
+  // State for Cash in Drawer modal
+  const [isCashDrawerModalOpen, setIsCashDrawerModalOpen] = useState(false);
+
+  // State for In-place Distribute Munshiana (سادہ ان پلیس فارم برائے منشیانہ تقسیم)
+  const [inlineMunshianaVendor, setInlineMunshianaVendor] = useState<string | null>(null);
+  const [inlineMunshianaAmount, setInlineMunshianaAmount] = useState<string>('150');
+  const [inlineMunshianaSuccess, setInlineMunshianaSuccess] = useState<string | null>(null);
+
+  const handleApplyInlineMunshiana = (vName: string, vendorLots: VendorLot[]) => {
+    const total = Math.max(0, Math.round(parseNumber(inlineMunshianaAmount) || 0));
+    if (vendorLots.length === 0) return;
+    sound.playCashChime();
+
+    const distributedAmounts = distributeMunshianaToLots(total, vendorLots.length);
+
+    const updatedLots: VendorLot[] = vendorLots.map((lot, idx) => {
+      const lotMunshiana = distributedAmounts[idx] ?? 0;
+      const updatedExpenses = {
+        ...lot.expenses,
+        munshiana: {
+          amount: lotMunshiana,
+          enabled: lotMunshiana > 0,
+        },
+      };
+
+      const summary = calculateLotSummary(lot.totalQuantity, lot.sales, updatedExpenses);
+
+      return {
+        ...lot,
+        expenses: updatedExpenses,
+        summary,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    if (onBatchUpdateLots) {
+      onBatchUpdateLots(updatedLots);
+    }
+
+    setInlineMunshianaSuccess(vName);
+    setTimeout(() => {
+      setInlineMunshianaSuccess(null);
+    }, 2500);
+
+    setInlineMunshianaVendor(null);
+  };
 
   // State for Consolidated Vendor Bill (مجموعی بل - تمام اجناس ایک ساتھ)
   const [consolidatedBillVendor, setConsolidatedBillVendor] = useState<{
@@ -297,15 +359,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
     const list = Array.from(custMap.values()).map((c) => {
       const savedCust = customers.find((sc) => sc.name.toLowerCase() === c.customerName.toLowerCase());
-      const khataPayments = (savedCust?.payments || [])
-        .filter((p) => dateFilter === 'all' || isLotInDateRange((p.paymentDate || p.date || '').slice(0, 10)))
-        .reduce((sum, p) => sum + (p.amount || 0), 0);
+      const customerPayments = (savedCust?.payments || []).filter(
+        (p) => dateFilter === 'all' || isLotInDateRange((p.paymentDate || p.date || '').slice(0, 10))
+      );
+      const khataPayments = customerPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
 
       const totalPaid = c.directCashPaid + khataPayments;
       const creditRemaining = Math.max(0, c.totalAmount - totalPaid);
 
       return {
         ...c,
+        payments: customerPayments,
         khataPaid: khataPayments,
         cashPaid: totalPaid,
         creditPending: creditRemaining,
@@ -328,12 +392,24 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     let vendorPaid = 0;
     let unitsSold = 0;
     let directCashReceived = 0;
+    let totalMazdoori = 0;
+    let totalMunshiana = 0;
 
     filteredLotsByDate.forEach((lot) => {
       grossSales += lot.summary.grossSales;
       commission += lot.summary.arhtiProfitCommission;
       totalExpenses += lot.summary.totalExpenses;
       vendorPayable += lot.summary.netPayableToVendor;
+
+      // Mazdoori deduction
+      if (lot.expenses?.mazdoori?.enabled) {
+        totalMazdoori += Number(lot.expenses.mazdoori.amount) || 0;
+      }
+
+      // Munshiana fee
+      if (lot.expenses?.munshiana?.enabled) {
+        totalMunshiana += Number(lot.expenses.munshiana.amount) || 0;
+      }
 
       const lotPaid =
         lot.vendorPaymentAmount !== undefined
@@ -370,8 +446,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       unitsSold,
       cashReceived,
       creditPending: totalCreditPending,
+      totalMazdoori,
+      totalMunshiana,
     };
   }, [filteredLotsByDate, customerReports]);
+
+  // Overall Cash in Drawer Summary
+  const cashDrawerSummary = useMemo(() => {
+    return calculateCashDrawerSummary(lots, customers, expenses, drawerAdjustments);
+  }, [lots, customers, expenses, drawerAdjustments]);
 
   // 2. VENDOR REPORT DATA
   const vendorReports = useMemo(() => {
@@ -699,17 +782,35 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         productRows,
       });
     } else if (activeReport === 'vendor') {
-      const vendorRows = vendorReports.map((v) => ({
-        vendorName: v.vendorName,
-        city: v.vendorCity || '',
-        phone: v.vendorPhone || '',
-        lotsCount: v.lotsCount,
-        totalUnits: v.totalUnits,
-        unitsSold: v.unitsSold,
-        grossSales: v.grossSales,
-        commission: v.commission,
-        netPayable: v.netPayable,
-      }));
+      const vendorRows = vendorReports.map((v) => {
+        const isPaid = v.pendingBalance <= 0 && v.netPayable > 0;
+        const isPartial = v.totalPaid > 0 && v.pendingBalance > 0;
+        const status: 'paid' | 'partial' | 'pending' | 'cash' | 'credit' = isPaid ? 'paid' : isPartial ? 'partial' : 'pending';
+
+        return {
+          vendorName: v.vendorName,
+          city: v.vendorCity || '',
+          phone: v.vendorPhone || '',
+          lotsCount: v.lotsCount,
+          totalUnits: v.totalUnits,
+          unitsSold: v.unitsSold,
+          grossSales: v.grossSales,
+          commission: v.commission,
+          netPayable: v.netPayable,
+          totalPaid: v.totalPaid,
+          pendingBalance: v.pendingBalance,
+          paymentStatus: status,
+        };
+      });
+
+      const totalVendorGross = vendorReports.reduce((a, b) => a + b.grossSales, 0);
+      const totalVendorCommission = vendorReports.reduce((a, b) => a + b.commission, 0);
+      const totalVendorExpenses = vendorReports.reduce((a, b) => a + b.totalExpenses, 0);
+      const totalVendorPayable = vendorReports.reduce((a, b) => a + b.netPayable, 0);
+      const totalVendorPaid = vendorReports.reduce((a, b) => a + b.totalPaid, 0);
+      const totalVendorPending = vendorReports.reduce((a, b) => a + b.pendingBalance, 0);
+      const totalUnitsSold = vendorReports.reduce((a, b) => a + b.unitsSold, 0);
+      const totalLotsCount = vendorReports.reduce((a, b) => a + b.lotsCount, 0);
 
       previewData = buildReportPDF({
         reportType: 'vendor',
@@ -717,13 +818,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         dateFilterLabel,
         dateRangeStr,
         summary: {
-          grossSales: vendorReports.reduce((a, b) => a + b.grossSales, 0),
-          commission: vendorReports.reduce((a, b) => a + b.commission, 0),
-          cashReceived: dateReportStats.cashReceived,
-          creditPending: dateReportStats.creditPending,
-          unitsSold: vendorReports.reduce((a, b) => a + b.unitsSold, 0),
-          lotsCount: vendorReports.reduce((a, b) => a + b.lotsCount, 0),
-          vendorPayable: dateReportStats.vendorPending,
+          grossSales: totalVendorGross,
+          commission: totalVendorCommission,
+          totalExpenses: totalVendorExpenses,
+          vendorPayable: totalVendorPayable,
+          vendorPaid: totalVendorPaid,
+          vendorPending: totalVendorPending,
+          cashReceived: totalVendorPaid, // Cash paid to vendors
+          creditPending: totalVendorPending, // Credit pending to vendors
+          unitsSold: totalUnitsSold,
+          lotsCount: totalLotsCount,
         },
         vendorRows,
       });
@@ -870,10 +974,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     } else {
       text += `💰 *کل فروخت:* ${formatPKR(dateReportStats.grossSales, settings.currencySymbol, settings.language)}\n`;
       text += `💎 *خالص کمیشن منافع:* ${formatPKR(dateReportStats.commission, settings.currencySymbol, settings.language)}\n`;
+      text += `👷 *کل مزدوری کٹوتی:* ${formatPKR(dateReportStats.totalMazdoori, settings.currencySymbol, settings.language)}\n`;
+      text += `✍️ *کل منشیانہ:* ${formatPKR(dateReportStats.totalMunshiana, settings.currencySymbol, settings.language)}\n`;
       text += `📦 *کل مال فروخت:* ${dateReportStats.unitsSold} تعداد\n`;
       text += `💵 *نقد وصولی:* ${formatPKR(dateReportStats.cashReceived, settings.currencySymbol, settings.language)}\n`;
       text += `⏳ *بقایا کھاتہ ادھار:* ${formatPKR(dateReportStats.creditPending, settings.currencySymbol, settings.language)}\n`;
       text += `🤝 *زمینداروں کا واجب الادا:* ${formatPKR(dateReportStats.vendorPending, settings.currencySymbol, settings.language)}\n`;
+      text += `💼 *موجودہ گلہ کیش:* ${formatPKR(cashDrawerSummary.netCashInDrawer, settings.currencySymbol, settings.language)}\n`;
     }
     text += `--------------------------\n`;
     text += `👤 *آڑھتی:* ${settings.arhtiNameUrdu}\n`;
@@ -949,10 +1056,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               handlePreviewEntireRecordPDF();
             }}
             className="px-3.5 py-2 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 font-urdu-sans shadow-md border border-emerald-600/30"
-            title="تمام ریکارڈز اور تفصیلی بولیوں کی مکمل مشترکہ پی ڈی ایف رپورٹ دیکھیں یا ڈاؤن لوڈ کریں"
+            title={isUrdu ? 'دکان کی تمام تفصیلات، مزدوری، منشیانہ، مجموعی فروخت اور منافع کی مکمل مشترکہ رپورٹ' : 'Complete Shop Report with labour, manshiyana, gross sales and profit'}
           >
             <FileCheck className="w-4 h-4 text-emerald-300 animate-pulse" />
-            <span>{isUrdu ? '📑 مکمل ریکارڈ رپورٹ (تمام تفصیلات)' : '📑 Entire Record Report (All Details)'}</span>
+            <span>{isUrdu ? '📑 مکمل دکان رپورٹ (تمام تفصیلات)' : '📑 Entire Shop Report (All Details)'}</span>
           </button>
 
           {/* Current Tab Dynamic PDF Report Preview Button */}
@@ -1007,8 +1114,72 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
       </div>
 
+      {/* Cash in Drawer Quick Status Bar */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white p-3.5 sm:p-4 rounded-2xl border border-slate-800 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-3 no-print">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xl border border-emerald-500/30">
+            <Wallet className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-300 font-urdu-sans">
+                {isUrdu ? 'موجودہ گلہ کیش (Cash in Drawer):' : 'Current Cash in Drawer:'}
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 font-bold font-urdu-sans border border-emerald-400/30">
+                {isUrdu ? 'دکان کیش دراز' : 'Live Shop Till'}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-0.5 flex-wrap">
+              <span className={`text-xl sm:text-2xl font-black font-numbers ${cashDrawerSummary.netCashInDrawer >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {formatPKR(cashDrawerSummary.netCashInDrawer, settings.currencySymbol, settings.language)}
+              </span>
+              <span className="text-[10px] text-slate-400 font-urdu-sans">
+                ({isUrdu ? 'کل آمد:' : 'In:'} {formatPKR(cashDrawerSummary.totalCashIn, settings.currencySymbol, settings.language)} - {isUrdu ? 'کل اخراج:' : 'Out:'} {formatPKR(cashDrawerSummary.totalCashOut, settings.currencySymbol, settings.language)})
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Cash in Drawer Controls */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              sound.playTick();
+              setIsCashDrawerModalOpen(true);
+            }}
+            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-xs"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>{isUrdu ? '+ کیش جمع' : '+ Add Cash'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              sound.playTick();
+              setIsCashDrawerModalOpen(true);
+            }}
+            className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-xs"
+          >
+            <Minus className="w-3.5 h-3.5" />
+            <span>{isUrdu ? '- کیش نکالیں' : '- Deduct Cash'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              sound.playTick();
+              setIsCashDrawerModalOpen(true);
+            }}
+            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 border border-white/15"
+          >
+            <Wallet className="w-3.5 h-3.5 text-emerald-300" />
+            <span>{isUrdu ? 'مکمل گلہ کھاتہ و فارمولا' : 'Drawer Details'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Overview Stat Cards at the Top */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2.5 sm:gap-3">
         {/* 1. Gross Total */}
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
           <span className="text-[11px] text-slate-500 font-bold font-urdu-sans block">{t.grossTotal}</span>
@@ -1031,7 +1202,33 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </span>
         </div>
 
-        {/* 3. Payable to Vendors (زمیندار واجب الادا) */}
+        {/* 3. Mazdoori (کل مزدوری) */}
+        <div className="bg-blue-50 p-3.5 sm:p-4 rounded-2xl border border-blue-200 shadow-xs">
+          <span className="text-[11px] text-blue-900 font-bold font-urdu-sans block">
+            {isUrdu ? 'کل مزدوری' : 'Total Mazdoori'}
+          </span>
+          <span className="text-base sm:text-lg font-black text-blue-950 font-numbers block mt-0.5">
+            {formatPKR(dateReportStats.totalMazdoori, settings.currencySymbol, settings.language)}
+          </span>
+          <span className="text-[10px] text-blue-700 font-urdu-sans">
+            {isUrdu ? 'حمالی و پلیداری کٹوتی' : 'Labor deduction'}
+          </span>
+        </div>
+
+        {/* 4. Munshiana (کل منشیانہ) */}
+        <div className="bg-purple-50 p-3.5 sm:p-4 rounded-2xl border border-purple-200 shadow-xs">
+          <span className="text-[11px] text-purple-900 font-bold font-urdu-sans block">
+            {isUrdu ? 'کل منشیانہ' : 'Total Munshiana'}
+          </span>
+          <span className="text-base sm:text-lg font-black text-purple-950 font-numbers block mt-0.5">
+            {formatPKR(dateReportStats.totalMunshiana, settings.currencySymbol, settings.language)}
+          </span>
+          <span className="text-[10px] text-purple-700 font-urdu-sans">
+            {isUrdu ? 'دفتر و رائٹنگ فیس' : 'Office fee'}
+          </span>
+        </div>
+
+        {/* 5. Payable to Vendors (زمیندار واجب الادا) */}
         <div className="bg-slate-900 text-white p-3.5 sm:p-4 rounded-2xl border border-slate-800 shadow-xs">
           <div className="flex items-center justify-between gap-1">
             <span className="text-[11px] text-slate-300 font-bold font-urdu-sans block">
@@ -1056,7 +1253,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
         </div>
 
-        {/* 4. Cash Received */}
+        {/* 6. Cash Received */}
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
           <span className="text-[11px] text-slate-500 font-bold font-urdu-sans block">{t.cashCollected} (نقد)</span>
           <span className="text-base sm:text-lg font-black text-emerald-700 font-numbers block mt-0.5">
@@ -1067,7 +1264,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </span>
         </div>
 
-        {/* 5. Customer Credit Outstanding */}
+        {/* 7. Customer Credit Outstanding */}
         <div className="bg-amber-50 p-3.5 sm:p-4 rounded-2xl border border-amber-200 shadow-xs">
           <span className="text-[11px] text-amber-900 font-bold font-urdu-sans block">{t.creditOutstanding} (ادھار)</span>
           <span className="text-base sm:text-lg font-black text-amber-800 font-numbers block mt-0.5">
@@ -1657,31 +1854,150 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           )}
                         </div>
 
-                        {/* "See All Products Bill" Button requested by user */}
-                        <button
-                          onClick={() => {
-                            sound.playTick();
-                            const dateLabel =
-                              dateFilter === 'today'
-                                ? isUrdu ? 'آج کی تاریخ' : "Today's Date"
-                                : dateFilter === 'yesterday'
-                                ? isUrdu ? 'گزشتہ کل' : 'Yesterday'
-                                : v.lots[0]?.arrivalDate || '';
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {/* Distribute Munshiana Button requested by user */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              sound.playTick();
+                              if (inlineMunshianaVendor === v.vendorName) {
+                                setInlineMunshianaVendor(null);
+                              } else {
+                                const curTotal = v.lots.reduce(
+                                  (sum, l) =>
+                                    sum + (l.expenses?.munshiana?.enabled ? Math.round(Number(l.expenses.munshiana.amount) || 0) : 0),
+                                  0
+                                );
+                                setInlineMunshianaAmount(curTotal > 0 ? String(curTotal) : '150');
+                                setInlineMunshianaVendor(v.vendorName);
+                              }
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-xs transition active:scale-95 ${
+                              inlineMunshianaVendor === v.vendorName
+                                ? 'bg-purple-900 text-white ring-2 ring-purple-400'
+                                : 'bg-purple-700 hover:bg-purple-800 text-white'
+                            }`}
+                            title={isUrdu ? 'اس زمیندار کی تمام لاٹس پر منشیانہ تقسیم کریں' : 'Distribute Munshiana to all lots of this vendor'}
+                          >
+                            <Coins className="w-3.5 h-3.5 text-purple-200" />
+                            <span>{isUrdu ? 'منشیانہ تقسیم کریں' : 'Distribute Munshiana'}</span>
+                          </button>
 
-                            setConsolidatedBillVendor({
-                              vendorName: v.vendorName,
-                              vendorPhone: v.vendorPhone,
-                              vendorCity: v.vendorCity,
-                              lots: v.lots,
-                              dateLabel,
-                            });
-                          }}
-                          className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-xs transition active:scale-95"
-                        >
-                          <Layers className="w-3.5 h-3.5" />
-                          <span>{isUrdu ? 'تمام اجناس کا بل دیکھیں (کل مشترکہ بل)' : 'See All Products Bill'}</span>
-                        </button>
+                          {inlineMunshianaSuccess === v.vendorName && (
+                            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-lg border border-emerald-300 flex items-center gap-1 font-urdu-sans animate-in fade-in">
+                              <Check className="w-3 h-3 text-emerald-700" />
+                              <span>{isUrdu ? 'منشیانہ تقسیم ہو گیا!' : 'Munshiana distributed!'}</span>
+                            </span>
+                          )}
+
+                          {/* "See All Products Bill" Button requested by user */}
+                          <button
+                            onClick={() => {
+                              sound.playTick();
+                              const dateLabel =
+                                dateFilter === 'today'
+                                  ? isUrdu ? 'آج کی تاریخ' : "Today's Date"
+                                  : dateFilter === 'yesterday'
+                                  ? isUrdu ? 'گزشتہ کل' : 'Yesterday'
+                                  : v.lots[0]?.arrivalDate || '';
+
+                              setConsolidatedBillVendor({
+                                vendorName: v.vendorName,
+                                vendorPhone: v.vendorPhone,
+                                vendorCity: v.vendorCity,
+                                lots: v.lots,
+                                dateLabel,
+                              });
+                            }}
+                            className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-xs transition active:scale-95"
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            <span>{isUrdu ? 'تمام اجناس کا بل دیکھیں (کل مشترکہ بل)' : 'See All Products Bill'}</span>
+                          </button>
+                        </div>
                       </div>
+
+                      {/* In-place Simple Distribute Munshiana Form */}
+                      {inlineMunshianaVendor === v.vendorName && (
+                        <div className="p-3 bg-purple-50/95 border-2 border-purple-300 rounded-2xl space-y-2.5 animate-in fade-in duration-150">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-purple-950 font-urdu-sans flex items-center gap-1.5">
+                              <Coins className="w-4 h-4 text-purple-700" />
+                              <span>{isUrdu ? `منشیانہ مساوی تقسیم (${v.lots.length} لاٹس)` : `Distribute Munshiana (${v.lots.length} lots)`}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setInlineMunshianaVendor(null)}
+                              className="text-purple-600 hover:text-purple-900 text-xs font-bold font-urdu-sans"
+                            >
+                              ✕ {isUrdu ? 'بند کریں' : 'Close'}
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                            <div className="flex-1 min-w-[130px] relative">
+                              <input
+                                type="number"
+                                min="0"
+                                value={inlineMunshianaAmount}
+                                onChange={(e) => setInlineMunshianaAmount(e.target.value)}
+                                placeholder="کل منشیانہ رقم"
+                                className="w-full px-3 py-1.5 bg-white border border-purple-300 focus:border-purple-600 rounded-xl text-sm font-bold font-numbers text-slate-900 focus:ring-2 focus:ring-purple-200"
+                                autoFocus
+                              />
+                              <span className="absolute end-2.5 top-2 text-[10px] text-purple-700 font-bold font-urdu-sans pointer-events-none">
+                                {settings.currencySymbol}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              {[2, 50, 100, 150, 200, 300].map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => {
+                                    sound.playTick();
+                                    setInlineMunshianaAmount(String(preset));
+                                  }}
+                                  className="px-2 py-1 bg-white hover:bg-purple-100 border border-purple-200 text-purple-900 rounded-lg text-xs font-numbers"
+                                >
+                                  {preset}
+                                </button>
+                              ))}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleApplyInlineMunshiana(v.vendorName, v.lots)}
+                              className="px-4 py-1.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-xs flex-shrink-0"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>{isUrdu ? 'لاگو کریں' : 'Apply'}</span>
+                            </button>
+                          </div>
+
+                          {/* Live preview */}
+                          {(() => {
+                            const parsed = Math.max(0, Math.round(parseNumber(inlineMunshianaAmount) || 0));
+                            const dist = distributeMunshianaToLots(parsed, v.lots.length);
+                            const previewText =
+                              dist.length <= 5
+                                ? dist.map((d) => `₨${d}`).join(' + ')
+                                : `₨${Math.floor(parsed / v.lots.length)} سے ₨${Math.ceil(parsed / v.lots.length)}`;
+                            return (
+                              <div className="text-[11px] text-purple-900 font-urdu-sans flex items-center justify-between bg-purple-100/70 px-2.5 py-1 rounded-xl">
+                                <span>
+                                  {isUrdu ? 'کل رقم:' : 'Total:'} <b>₨{parsed}</b> • {isUrdu ? 'لاٹس پر تقسیم:' : 'Per lot:'}{' '}
+                                  <b>{previewText} = ₨{parsed}</b>
+                                </span>
+                                <span className="text-[10px] text-emerald-800 font-bold font-urdu-sans">
+                                  ✓ {isUrdu ? 'کوئی اعشاریہ فرق نہیں' : 'Exact integer rupees'}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
 
                       <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                         {paginatedVendorLots.map((lot) => {
@@ -2429,6 +2745,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           isUrdu={isUrdu}
         />
       )}
+
+      {/* CASH IN DRAWER MODAL */}
+      <CashDrawerModal
+        isOpen={isCashDrawerModalOpen}
+        onClose={() => setIsCashDrawerModalOpen(false)}
+        lots={lots}
+        customers={customers}
+        expenses={expenses}
+        drawerAdjustments={drawerAdjustments}
+        onAddAdjustment={(adj) => {
+          if (onAddDrawerAdjustment) onAddDrawerAdjustment(adj);
+        }}
+        onDeleteAdjustment={(id) => {
+          if (onDeleteDrawerAdjustment) onDeleteDrawerAdjustment(id);
+        }}
+        settings={settings}
+      />
     </div>
   );
 };

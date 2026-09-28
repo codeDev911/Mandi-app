@@ -1,4 +1,4 @@
-import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense } from '../types';
+import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment } from '../types';
 import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors, sampleExpenses } from './sampleData';
 import * as Neutralino from '@neutralinojs/lib';
 
@@ -16,6 +16,7 @@ const NEU_KEY_CUSTOMERS = 'mandi_bolli_customers_v1';
 const NEU_KEY_VENDORS = 'mandi_bolli_vendors_v1';
 const NEU_KEY_SETTINGS = 'mandi_bolli_settings_v1';
 const NEU_KEY_EXPENSES = 'mandi_bolli_expenses_v1';
+const NEU_KEY_DRAWER = 'mandi_bolli_drawer_adjustments_v1';
 
 export interface DatabaseStats {
   totalLots: number;
@@ -177,16 +178,18 @@ export async function loadInitialApplicationData(): Promise<{
   customers: CustomerBuyer[];
   vendors: SavedVendor[];
   expenses: ShopExpense[];
+  drawerAdjustments?: DrawerAdjustment[];
 }> {
   // Layer 1: Check Neutralino Native Storage
   if (isNeutralinoActive()) {
     try {
-      const [neuLots, neuCustomers, neuVendors, neuSettings, neuExpenses] = await Promise.all([
+      const [neuLots, neuCustomers, neuVendors, neuSettings, neuExpenses, neuDrawer] = await Promise.all([
         readNeutralinoStorage<VendorLot[]>(NEU_KEY_LOTS),
         readNeutralinoStorage<CustomerBuyer[]>(NEU_KEY_CUSTOMERS),
         readNeutralinoStorage<SavedVendor[]>(NEU_KEY_VENDORS),
         readNeutralinoStorage<AppSettings>(NEU_KEY_SETTINGS),
         readNeutralinoStorage<ShopExpense[]>(NEU_KEY_EXPENSES),
+        readNeutralinoStorage<DrawerAdjustment[]>(NEU_KEY_DRAWER),
       ]);
 
       const hasNeuData =
@@ -206,6 +209,7 @@ export async function loadInitialApplicationData(): Promise<{
         const resolvedCustomers = neuCustomers && neuCustomers.length > 0 ? neuCustomers : sampleCustomers;
         const resolvedVendors = neuVendors && neuVendors.length > 0 ? neuVendors : sampleVendors;
         const resolvedExpenses = neuExpenses && neuExpenses.length > 0 ? neuExpenses : sampleExpenses;
+        const resolvedDrawer = neuDrawer || [];
 
         // Mirror to IndexedDB & LocalStorage
         getIndexedDB().then((db) => {
@@ -224,6 +228,7 @@ export async function loadInitialApplicationData(): Promise<{
           customers: resolvedCustomers,
           vendors: resolvedVendors,
           expenses: resolvedExpenses,
+          drawerAdjustments: resolvedDrawer,
         };
       }
     } catch (e) {
@@ -268,12 +273,22 @@ export async function loadInitialApplicationData(): Promise<{
         writeNeutralinoStorage(NEU_KEY_SETTINGS, resolvedSettings);
         writeNeutralinoStorage(NEU_KEY_EXPENSES, resolvedExpenses);
 
+        // Read drawer adjustments from localStorage/Neutralino
+        let resolvedDrawerAdjustments: DrawerAdjustment[] = [];
+        try {
+          const raw = localStorage.getItem('mandi_bolli_drawer_adjustments_v1');
+          if (raw) resolvedDrawerAdjustments = JSON.parse(raw);
+        } catch {
+          // ignore
+        }
+
         return {
           settings: resolvedSettings,
           lots: resolvedLots,
           customers: resolvedCustomers,
           vendors: resolvedVendors,
           expenses: resolvedExpenses,
+          drawerAdjustments: resolvedDrawerAdjustments,
         };
       }
     } catch (e) {
@@ -287,6 +302,7 @@ export async function loadInitialApplicationData(): Promise<{
   let initialCustomers: CustomerBuyer[] | null = null;
   let initialVendors: SavedVendor[] | null = null;
   let initialExpenses: ShopExpense[] | null = null;
+  let initialDrawerAdjustments: DrawerAdjustment[] = [];
 
   try {
     const savedSettings = localStorage.getItem('mandi_bolli_settings_v1');
@@ -303,6 +319,9 @@ export async function loadInitialApplicationData(): Promise<{
 
     const savedExpenses = localStorage.getItem('mandi_bolli_expenses_v1');
     if (savedExpenses) initialExpenses = JSON.parse(savedExpenses);
+
+    const savedDrawer = localStorage.getItem('mandi_bolli_drawer_adjustments_v1');
+    if (savedDrawer) initialDrawerAdjustments = JSON.parse(savedDrawer);
   } catch (e) {
     console.warn('LocalStorage parse error:', e);
   }
@@ -311,6 +330,7 @@ export async function loadInitialApplicationData(): Promise<{
   const finalCustomers = initialCustomers !== null ? initialCustomers : sampleCustomers;
   const finalVendors = initialVendors !== null ? initialVendors : sampleVendors;
   const finalExpenses = initialExpenses !== null ? initialExpenses : sampleExpenses;
+  const finalDrawerAdjustments = initialDrawerAdjustments;
 
   // Seed all tiers on genuine first run
   writeNeutralinoStorage(NEU_KEY_LOTS, finalLots);
@@ -318,6 +338,7 @@ export async function loadInitialApplicationData(): Promise<{
   writeNeutralinoStorage(NEU_KEY_VENDORS, finalVendors);
   writeNeutralinoStorage(NEU_KEY_SETTINGS, initialSettings);
   writeNeutralinoStorage(NEU_KEY_EXPENSES, finalExpenses);
+  writeNeutralinoStorage(NEU_KEY_DRAWER, finalDrawerAdjustments);
 
   if (db) {
     saveLotsToIndexedDB(finalLots).catch(() => {});
@@ -333,6 +354,7 @@ export async function loadInitialApplicationData(): Promise<{
     customers: finalCustomers,
     vendors: finalVendors,
     expenses: finalExpenses,
+    drawerAdjustments: finalDrawerAdjustments,
   };
 }
 
@@ -591,6 +613,29 @@ export async function saveExpensesToIndexedDB(expenses: ShopExpense[]): Promise<
       reject(e);
     }
   });
+}
+
+/**
+ * Drawer adjustments saver (Debounced)
+ */
+let saveDrawerTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingDrawerToSave: DrawerAdjustment[] | null = null;
+
+export function saveDrawerAdjustmentsAsync(adjustments: DrawerAdjustment[]): void {
+  pendingDrawerToSave = adjustments;
+  if (saveDrawerTimer) clearTimeout(saveDrawerTimer);
+  saveDrawerTimer = setTimeout(() => {
+    if (pendingDrawerToSave) {
+      const data = pendingDrawerToSave;
+      pendingDrawerToSave = null;
+      writeNeutralinoStorage(NEU_KEY_DRAWER, data);
+      try {
+        localStorage.setItem('mandi_bolli_drawer_adjustments_v1', JSON.stringify(data));
+      } catch {
+        // ignore
+      }
+    }
+  }, 250);
 }
 
 /**

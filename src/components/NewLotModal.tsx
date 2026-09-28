@@ -1,10 +1,25 @@
-import React, { useState } from 'react';
-import { UnitType, AppSettings, VendorLot, SavedVendor } from '../types';
+import React, { useState, useEffect } from 'react';
+import { UnitType, AppSettings, VendorLot, SavedVendor, MazdooriRateItem } from '../types';
 import { translations, commonMandiProducts, unitLabels, ProductPreset } from '../utils/localization';
-import { generateLotNumber, calculateLotSummary, getUnitMazdooriRate } from '../utils/calculations';
+import { generateLotNumber, calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
-import { PlusCircle, X, Check, Truck, MapPin, Phone, User, Package, Hash, BookmarkCheck } from 'lucide-react';
+import {
+  X,
+  Check,
+  Truck,
+  MapPin,
+  Phone,
+  User,
+  Package,
+  Hash,
+  BookmarkCheck,
+  PackageCheck,
+} from 'lucide-react';
+
+const cleanUrduTitle = (title: string): string => {
+  return title.replace(/\s*\([^)]*\)/g, '').trim() || title;
+};
 
 interface NewLotModalProps {
   settings: AppSettings;
@@ -14,6 +29,7 @@ interface NewLotModalProps {
   existingLotsCount: number;
   savedVendors?: SavedVendor[];
   onSaveVendor?: (vendor: SavedVendor) => void;
+  onUpdateSettings?: (settings: AppSettings) => void;
 }
 
 export const NewLotModal: React.FC<NewLotModalProps> = ({
@@ -36,7 +52,6 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const [selectedProduct, setSelectedProduct] = useState<ProductPreset | 'other'>(commonMandiProducts[0]);
   const [isOtherProduct, setIsOtherProduct] = useState(false);
   const [customProductUrdu, setCustomProductUrdu] = useState('');
-  const [customProductEn, setCustomProductEn] = useState('');
   const [customEmoji, setCustomEmoji] = useState('🥬');
   const [unitType, setUnitType] = useState<UnitType>(commonMandiProducts[0].defaultUnit);
   const [totalQuantity, setTotalQuantity] = useState<number>(30);
@@ -45,18 +60,42 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const [mazdooriRate, setMazdooriRate] = useState<number>(() =>
     getUnitMazdooriRate(commonMandiProducts[0].defaultUnit, settings)
   );
+  const [selectedMazdooriTitle, setSelectedMazdooriTitle] = useState<string>('');
+  const [selectedMazdooriId, setSelectedMazdooriId] = useState<string | null>(null);
+
   const [kirayaAmount, setKirayaAmount] = useState<number>(0);
   const [advanceAmount, setAdvanceAmount] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  // Sync / match mazdoori rate and title whenever unitType or settings change
+  useEffect(() => {
+    const items = getMazdooriItems(settings);
+    const matched = items.find(
+      (it) => it.unitType === unitType || it.title.toLowerCase().includes(unitType.toLowerCase())
+    );
+    if (matched) {
+      setSelectedMazdooriId(matched.id);
+      setSelectedMazdooriTitle(cleanUrduTitle(matched.title));
+      setMazdooriRate(matched.rate);
+    } else {
+      const uRate = getUnitMazdooriRate(unitType, settings);
+      setMazdooriRate(uRate);
+      setSelectedMazdooriTitle(unitLabels[unitType]?.[settings.language] || unitType);
+      setSelectedMazdooriId(null);
+    }
+  }, [unitType, settings.mazdooriItems, settings.unitMazdooriRates]);
 
-  const handleUnitChange = (newUnit: UnitType) => {
+  const handleSelectMazdooriItem = (item: MazdooriRateItem) => {
     sound.playTick();
-    setUnitType(newUnit);
-    const newRate = getUnitMazdooriRate(newUnit, settings);
-    setMazdooriRate(newRate);
+    setSelectedMazdooriId(item.id);
+    setSelectedMazdooriTitle(cleanUrduTitle(item.title));
+    setMazdooriRate(item.rate);
+    if (item.unitType) {
+      setUnitType(item.unitType);
+    }
   };
+
+  if (!isOpen) return null;
 
   const handleSelectProduct = (prod: ProductPreset) => {
     sound.playTick();
@@ -76,14 +115,14 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   };
 
   const otherPresets = [
-    { urdu: 'امرود (Guava)', en: 'Guava', emoji: '🍐', unit: 'peti' as UnitType },
-    { urdu: 'مٹر (Peas)', en: 'Green Peas', emoji: '🫛', unit: 'theli' as UnitType },
-    { urdu: 'شملہ مرچ (Capsicum)', en: 'Capsicum', emoji: '🫑', unit: 'theli' as UnitType },
-    { urdu: 'گوبھی (Cauliflower)', en: 'Cauliflower', emoji: '🥦', unit: 'theli' as UnitType },
-    { urdu: 'بھنڈی (Ladyfinger)', en: 'Ladyfinger', emoji: '🥬', unit: 'theli' as UnitType },
-    { urdu: 'کینو (Kinnow)', en: 'Kinnow Orange', emoji: '🍊', unit: 'peti' as UnitType },
-    { urdu: 'خربوزہ (Melon)', en: 'Melon', emoji: '🍈', unit: 'bori' as UnitType },
-    { urdu: 'تربوز (Watermelon)', en: 'Watermelon', emoji: '🍉', unit: 'nag' as UnitType },
+    { urdu: 'امرود', emoji: '🍐', unit: 'peti' as UnitType },
+    { urdu: 'مٹر', emoji: '🫛', unit: 'theli' as UnitType },
+    { urdu: 'شملہ مرچ', emoji: '🫑', unit: 'theli' as UnitType },
+    { urdu: 'گوبھی', emoji: '🥦', unit: 'theli' as UnitType },
+    { urdu: 'بھنڈی', emoji: '🥬', unit: 'theli' as UnitType },
+    { urdu: 'کینو', emoji: '🍊', unit: 'peti' as UnitType },
+    { urdu: 'خربوزہ', emoji: '🍈', unit: 'bori' as UnitType },
+    { urdu: 'تربوز', emoji: '🍉', unit: 'nag' as UnitType },
   ];
 
   const emojiOptions = ['🥬', '🥦', '🫑', '🫛', '🌽', '🥕', '🥔', '🧄', '🧅', '🥜', '🍄', '🍇', '🍈', '🍉', '🍊', '🍋', '🍌', '🍍', '🥭', '🍎', '🍏', '🍐', '🍑', '🍒', '🍓', '🥝', '🥥', '📦'];
@@ -113,11 +152,11 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
 
     if (isOtherProduct) {
       prodUrdu = customProductUrdu.trim();
-      prodName = customProductEn.trim() || customProductUrdu.trim();
+      prodName = customProductUrdu.trim();
       prodEmoji = customEmoji;
     } else {
       const preset = selectedProduct as ProductPreset;
-      prodName = preset.nameEn;
+      prodName = preset.nameUrdu;
       prodUrdu = preset.nameUrdu;
       prodEmoji = preset.emoji;
     }
@@ -154,6 +193,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
           ratePerUnit: mazdooriRate,
           amount: mazdooriRate * totalQuantity,
           enabled: mazdooriRate > 0,
+          title: selectedMazdooriTitle || undefined,
         },
         munshiana: {
           amount: settings.defaultMunshiana,
@@ -212,7 +252,6 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       setSelectedProduct(commonMandiProducts[0]);
       setUnitType(commonMandiProducts[0].defaultUnit);
       setCustomProductUrdu('');
-      setCustomProductEn('');
       setError(null);
     } else {
       onClose();
@@ -239,7 +278,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
         <div className="bg-slate-900 text-white p-3.5 sm:p-4 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-2.5 sm:gap-3">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-bold shadow-xs">
-              <PlusCircle className="w-4 h-4" />
+              <Package className="w-4 h-4" />
             </div>
             <div>
               <h3 className="font-bold text-sm sm:text-base font-urdu-nastaliq text-white">{t.newLot}</h3>
@@ -430,8 +469,8 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
                     }`}
                   >
                     <span className="text-xl leading-none">{prod.emoji}</span>
-                    <span className="text-[11px] truncate w-full font-urdu-sans">
-                      {isUrdu ? prod.nameUrdu.split(' ')[0] : prod.nameEn}
+                    <span className="text-[11px] truncate w-full font-urdu-sans font-bold">
+                      {prod.nameUrdu}
                     </span>
                   </button>
                 );
@@ -466,36 +505,21 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1 font-urdu-sans">
-                      {t.productUrduLabel} <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={customProductUrdu}
-                      onChange={(e) => {
-                        setCustomProductUrdu(e.target.value);
-                        setError(null);
-                      }}
-                      placeholder="مثلاً: امرود (Guava) یا سبز مٹر"
-                      className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-urdu-sans focus:ring-2 focus:ring-amber-500"
-                      autoFocus
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1 font-urdu-sans">
-                      {t.productEnLabel}
-                    </label>
-                    <input
-                      type="text"
-                      value={customProductEn}
-                      onChange={(e) => setCustomProductEn(e.target.value)}
-                      placeholder="e.g. Guava or Green Peas"
-                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-urdu-sans"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1 font-urdu-sans">
+                    {t.productUrduLabel} <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customProductUrdu}
+                    onChange={(e) => {
+                      setCustomProductUrdu(e.target.value);
+                      setError(null);
+                    }}
+                    placeholder="مثلاً: امرود یا سبز مٹر"
+                    className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-urdu-sans focus:ring-2 focus:ring-amber-500"
+                    autoFocus
+                  />
                 </div>
 
                 {/* Popular Other Preset Chips */}
@@ -507,10 +531,9 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
                     {otherPresets.map((item) => (
                       <button
                         type="button"
-                        key={item.en}
+                        key={item.urdu}
                         onClick={() => {
                           setCustomProductUrdu(item.urdu);
-                          setCustomProductEn(item.en);
                           setCustomEmoji(item.emoji);
                           setUnitType(item.unit);
                           setError(null);
@@ -518,7 +541,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
                         className="px-2 py-0.5 rounded-lg text-xs bg-white hover:bg-amber-100 border border-amber-200 text-slate-800 transition font-urdu-sans flex items-center gap-1 flex-shrink-0"
                       >
                         <span>{item.emoji}</span>
-                        <span>{item.urdu.split(' ')[0]}</span>
+                        <span>{item.urdu}</span>
                       </button>
                     ))}
                   </div>
@@ -547,72 +570,47 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               </div>
             )}
 
-            {/* Packaging Unit Type */}
+            {/* Packaging Unit & Labor Rate Selector (پیکنگ کی قسم و فی یونٹ مزدوری ریٹ) */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-bold text-slate-700 font-urdu-sans">
-                  {t.unitType} (پیکنگ کی قسم) <span className="text-rose-500">*</span>
+                <label className="block text-xs font-bold text-slate-800 font-urdu-sans flex items-center gap-1.5">
+                  <PackageCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{isUrdu ? 'پیکنگ کی قسم و فی یونٹ مزدوری' : 'Packaging Unit & Labor Rate'}</span>
+                  <span className="text-rose-500">*</span>
                 </label>
-                <span className="text-[11px] text-emerald-700 font-urdu-sans font-medium">
-                  {isUrdu ? 'مزدوری ریٹ خودکار لاگو ہوگا' : 'Labor rate auto-applied'}
+                <span className="text-[11px] text-emerald-800 font-urdu-sans font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                  {selectedMazdooriTitle || unitLabels[unitType]?.[settings.language]}: ₨{mazdooriRate}/یونٹ
                 </span>
               </div>
 
-              {/* Main Required Units: بوری, توڑہ, کینچی, شاپر */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
-                {(['bori', 'tora', 'kainchi', 'shopper'] as UnitType[]).map((u) => {
-                  const isSelected = unitType === u;
-                  const uRate = getUnitMazdooriRate(u, settings);
+              {/* Items Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {getMazdooriItems(settings).map((item) => {
+                  const isSelected =
+                    selectedMazdooriId === item.id ||
+                    (!selectedMazdooriId && mazdooriRate === item.rate && (unitType === item.unitType || selectedMazdooriTitle === cleanUrduTitle(item.title)));
                   return (
                     <button
                       type="button"
-                      key={u}
-                      onClick={() => handleUnitChange(u)}
+                      key={item.id}
+                      onClick={() => handleSelectMazdooriItem(item)}
                       className={`p-2 rounded-xl text-center border font-urdu-sans transition active:scale-95 flex flex-col items-center justify-center gap-0.5 relative ${
                         isSelected
                           ? 'bg-emerald-900 text-white font-bold border-emerald-900 shadow-md ring-2 ring-emerald-500/30'
                           : 'bg-white border-slate-300 text-slate-800 hover:bg-emerald-50 hover:border-emerald-300'
                       }`}
                     >
-                      <span className="text-sm font-bold">{unitLabels[u][settings.language]}</span>
+                      <span className="text-xs sm:text-sm font-bold truncate w-full">{cleanUrduTitle(item.title)}</span>
                       <span
                         className={`text-[10px] px-1.5 py-0.2 rounded-md font-numbers ${
                           isSelected ? 'bg-emerald-800 text-emerald-100 font-semibold' : 'bg-slate-100 text-slate-600'
                         }`}
                       >
-                        ₨{uRate}/{isUrdu ? unitLabels[u].ur.split(' ')[0] : u}
+                        ₨{item.rate}/یونٹ
                       </span>
                     </button>
                   );
                 })}
-              </div>
-
-              {/* Secondary / Other Units: کریٹ, پیٹی, تھیلی, کلو, نگ */}
-              <div className="pt-1.5 border-t border-slate-200/80">
-                <span className="block text-[10px] text-slate-500 mb-1 font-urdu-sans">
-                  {isUrdu ? 'دیگر متبادل پیکنگ یونٹس:' : 'Other unit types:'}
-                </span>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {(['crates', 'peti', 'theli', 'kg', 'nag'] as UnitType[]).map((u) => {
-                    const isSelected = unitType === u;
-                    const uRate = getUnitMazdooriRate(u, settings);
-                    return (
-                      <button
-                        type="button"
-                        key={u}
-                        onClick={() => handleUnitChange(u)}
-                        className={`py-1 px-1.5 rounded-lg text-xs text-center border font-urdu-sans transition active:scale-95 ${
-                          isSelected
-                            ? 'bg-slate-900 text-white font-bold border-slate-900 shadow-xs'
-                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100 text-[11px]'
-                        }`}
-                      >
-                        <span className="block truncate">{unitLabels[u][settings.language]}</span>
-                        <span className="text-[9px] opacity-75 font-numbers">₨{uRate}</span>
-                      </button>
-                    );
-                  })}
-                </div>
               </div>
             </div>
 
@@ -621,7 +619,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1 font-urdu-sans flex items-center gap-1">
                   <Hash className="w-3 h-3 text-slate-400" />
-                  <span>{t.totalQuantity} ({unitLabels[unitType][settings.language]})</span>
+                  <span>{t.totalQuantity} ({selectedMazdooriTitle || unitLabels[unitType][settings.language]})</span>
                   <span className="text-rose-500">*</span>
                 </label>
                 <div className="flex items-center gap-1.5">
@@ -703,6 +701,11 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
                   onChange={(e) => setMazdooriRate(parseNumber(e.target.value))}
                   className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
                 />
+                {selectedMazdooriTitle && (
+                  <span className="block text-[10px] text-emerald-700 font-urdu-sans truncate mt-0.5 font-medium text-center">
+                    {selectedMazdooriTitle}
+                  </span>
+                )}
               </div>
 
               <div>

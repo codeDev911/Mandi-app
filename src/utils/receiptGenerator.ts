@@ -403,11 +403,13 @@ export function generateVendorConsolidatedInvoiceCanvas(
   vendorCity: string | undefined,
   lots: VendorLot[],
   settings: AppSettings,
-  dateLabel: string
+  dateLabel: string,
+  isAveraged: boolean = false
 ): HTMLCanvasElement {
-  const width = 640;
+  // Width: 920px matches half of Landscape A4 paper at high resolution (148.5mm x 210mm)
+  const width = 920;
 
-  // Flatten all sales/lots into single unified items list
+  // Build items list: either detailed per sale or averaged by product (اجناس وار اوسط بل)
   const allItems: Array<{
     lotNumber: string;
     productUrdu: string;
@@ -415,12 +417,14 @@ export function generateVendorConsolidatedInvoiceCanvas(
     unitLabel: string;
     ratePerUnit: number;
     totalAmount: number;
+    buyerName?: string;
   }> = [];
 
   let totalGross = 0;
   let totalExpenses = 0;
   let totalNetPayable = 0;
   let totalUnits = 0;
+  let totalPaid = 0;
 
   const aggregatedExpenses = {
     commission: 0,
@@ -435,7 +439,6 @@ export function generateVendorConsolidatedInvoiceCanvas(
   let allLotsPaid = true;
 
   lots.forEach((lot) => {
-    const uLabel = unitLabels[lot.unitType][settings.language];
     totalGross += lot.summary.grossSales;
     totalExpenses += lot.summary.totalExpenses;
     totalNetPayable += lot.summary.netPayableToVendor;
@@ -444,27 +447,13 @@ export function generateVendorConsolidatedInvoiceCanvas(
       allLotsPaid = false;
     }
 
-    if (lot.sales && lot.sales.length > 0) {
-      lot.sales.forEach((s) => {
-        allItems.push({
-          lotNumber: lot.lotNumber,
-          productUrdu: lot.productUrdu,
-          quantity: s.quantity,
-          unitLabel: uLabel,
-          ratePerUnit: s.ratePerUnit,
-          totalAmount: s.totalAmount,
-        });
-      });
-    } else {
-      allItems.push({
-        lotNumber: lot.lotNumber,
-        productUrdu: lot.productUrdu,
-        quantity: lot.totalQuantity,
-        unitLabel: uLabel,
-        ratePerUnit: lot.totalQuantity ? Math.round(lot.summary.grossSales / lot.totalQuantity) : 0,
-        totalAmount: lot.summary.grossSales,
-      });
-    }
+    const lotPaid =
+      lot.vendorPaymentAmount !== undefined
+        ? lot.vendorPaymentAmount
+        : lot.vendorPaymentStatus === 'paid'
+        ? lot.summary.netPayableToVendor
+        : 0;
+    totalPaid += lotPaid;
 
     if (lot.expenses.commission.enabled) aggregatedExpenses.commission += lot.expenses.commission.amount;
     if (lot.expenses.kiraya.enabled) aggregatedExpenses.kiraya += lot.expenses.kiraya.amount;
@@ -477,13 +466,100 @@ export function generateVendorConsolidatedInvoiceCanvas(
     });
   });
 
-  const headerHeight = 220;
-  const tableHeaderHeight = 30;
-  const rowsHeight = allItems.length * 28 + 35; // +35 for gross total row
-  const deductionsHeight = 140;
-  const meezanHeight = 100;
-  const footerHeight = 80;
-  const totalHeight = headerHeight + tableHeaderHeight + rowsHeight + deductionsHeight + meezanHeight + footerHeight;
+  if (!isAveraged) {
+    // Detailed list: each sale or lot in separate rows
+    lots.forEach((lot) => {
+      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      if (lot.sales && lot.sales.length > 0) {
+        lot.sales.forEach((s) => {
+          allItems.push({
+            lotNumber: lot.lotNumber,
+            productUrdu: lot.productUrdu,
+            quantity: s.quantity,
+            unitLabel: uLabel,
+            ratePerUnit: s.ratePerUnit,
+            totalAmount: s.totalAmount,
+            buyerName: s.buyerName,
+          });
+        });
+      } else {
+        allItems.push({
+          lotNumber: lot.lotNumber,
+          productUrdu: lot.productUrdu,
+          quantity: lot.totalQuantity,
+          unitLabel: uLabel,
+          ratePerUnit: lot.totalQuantity ? Math.round(lot.summary.grossSales / lot.totalQuantity) : 0,
+          totalAmount: lot.summary.grossSales,
+        });
+      }
+    });
+  } else {
+    // Averaged bill: group all sales of the same product into 1 single line with weighted average rate
+    const productGroups = new Map<
+      string,
+      {
+        productUrdu: string;
+        quantity: number;
+        unitLabel: string;
+        totalAmount: number;
+        lotNumbers: Set<string>;
+      }
+    >();
+
+    lots.forEach((lot) => {
+      const prodKey = (lot.productUrdu || lot.productName || 'جنس').trim();
+      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+
+      if (!productGroups.has(prodKey)) {
+        productGroups.set(prodKey, {
+          productUrdu: prodKey,
+          quantity: 0,
+          unitLabel: uLabel,
+          totalAmount: 0,
+          lotNumbers: new Set<string>(),
+        });
+      }
+
+      const grp = productGroups.get(prodKey)!;
+      grp.lotNumbers.add(lot.lotNumber);
+
+      if (lot.sales && lot.sales.length > 0) {
+        lot.sales.forEach((s) => {
+          grp.quantity += s.quantity;
+          grp.totalAmount += s.totalAmount;
+        });
+      } else {
+        grp.quantity += lot.totalQuantity;
+        grp.totalAmount += lot.summary.grossSales;
+      }
+    });
+
+    productGroups.forEach((grp) => {
+      const avgRate = grp.quantity > 0 ? Math.round(grp.totalAmount / grp.quantity) : 0;
+      allItems.push({
+        lotNumber: Array.from(grp.lotNumbers).join(', '),
+        productUrdu: grp.productUrdu,
+        quantity: grp.quantity,
+        unitLabel: grp.unitLabel,
+        ratePerUnit: avgRate,
+        totalAmount: Math.round(grp.totalAmount),
+        buyerName: 'متعدد خریدار',
+      });
+    });
+  }
+
+  const isFullyPaid = (totalPaid >= totalNetPayable && totalNetPayable > 0) || (allLotsPaid && lots.length > 0);
+  const isPartialPaid = totalPaid > 0 && !isFullyPaid;
+
+  const headerHeight = 165; // Clean header without kamla
+  const metaHeight = 72;
+  const tableHeaderHeight = 40;
+  const rowsHeight = allItems.length * 42 + 46; // +46 for gross total row
+  const deductionsHeight = 155;
+  const meezanHeight = 120;
+  const paymentStatusHeight = 56;
+  const footerHeight = 85;
+  const totalHeight = headerHeight + metaHeight + tableHeaderHeight + rowsHeight + deductionsHeight + meezanHeight + paymentStatusHeight + footerHeight;
 
   const canvas = document.createElement('canvas');
   canvas.width = width * 2;
@@ -502,161 +578,163 @@ export function generateVendorConsolidatedInvoiceCanvas(
 
   // Outer Crisp Border
   ctx.strokeStyle = '#0f172a';
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(12, 12, width - 24, totalHeight - 24);
+  ctx.lineWidth = 2;
+  ctx.strokeRect(16, 16, width - 32, totalHeight - 32);
 
-  // Bismillah
+  // Main Shop Name (NO KAMLA / NO BISMILLAH AT TOP as requested)
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 15px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+  ctx.font = 'bold 32px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
   ctx.textAlign = 'center';
-  ctx.fillText('بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ', width / 2, 36);
+  ctx.fillText(settings.shopNameUrdu || settings.shopNameEn, width / 2, 54);
 
-  // Main Shop Name
-  ctx.font = 'bold 22px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-  ctx.fillText(settings.shopNameUrdu || settings.shopNameEn, width / 2, 68);
-
-  // Proprietor & Contact
+  // Proprietor & Contact (Bigger, readable text)
   ctx.fillStyle = '#1e293b';
-  ctx.font = 'bold 12px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText(`پروپرائٹر: ${settings.arhtiNameUrdu || settings.arhtiNameEn}`, width / 2, 88);
+  ctx.font = 'bold 16.5px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText(`پروپرائٹر: ${settings.arhtiNameUrdu || settings.arhtiNameEn}`, width / 2, 84);
 
   ctx.fillStyle = '#475569';
-  ctx.font = '11px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText(`📍 ${settings.shopAddressUrdu || settings.shopAddressEn}  •  📞 فون: ${settings.shopPhone}`, width / 2, 106);
+  ctx.font = '14.5px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText(`📍 ${settings.shopAddressUrdu || settings.shopAddressEn}  •  📞 فون: ${settings.shopPhone}`, width / 2, 110);
 
   // POS Consolidated Badge
-  ctx.fillStyle = '#f1f5f9';
-  ctx.fillRect(24, 118, width - 48, 22);
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(24, 118, width - 48, 22);
+  ctx.fillStyle = isAveraged ? '#fef3c7' : '#f1f5f9';
+  ctx.fillRect(28, 126, width - 56, 30);
+  ctx.strokeStyle = isAveraged ? '#d97706' : '#cbd5e1';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(28, 126, width - 56, 30);
 
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('پکی پرچی بل برائے زمیندار', width / 2, 133);
+  ctx.fillStyle = isAveraged ? '#92400e' : '#0f172a';
+  ctx.font = 'bold 15px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText(
+    isAveraged
+      ? 'پکی پرچی بل برائے زمیندار (خلاصہ اجناس وار بل بمعہ اوسط ریٹ)'
+      : 'پکی پرچی بل برائے زمیندار (تفصیلی بل تمام لاٹس)',
+    width / 2,
+    146
+  );
 
   // Dashed Separator
   const drawDashedLine = (y: number) => {
     ctx.strokeStyle = '#94a3b8';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([5, 5]);
     ctx.beginPath();
-    ctx.moveTo(24, y);
-    ctx.lineTo(width - 24, y);
+    ctx.moveTo(28, y);
+    ctx.lineTo(width - 28, y);
     ctx.stroke();
     ctx.setLineDash([]);
   };
 
-  drawDashedLine(148);
+  drawDashedLine(166);
 
-  // Vendor & Date Metadata
-  const metaY = 164;
+  // Vendor & Date Metadata (Bigger text)
+  const metaY = 192;
   ctx.textAlign = 'right';
 
   ctx.fillStyle = '#64748b';
-  ctx.font = '11px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('زمیندار:', width - 30, metaY);
+  ctx.font = '14px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText('زمیندار / کاشتکار:', width - 36, metaY);
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 13px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-  ctx.fillText(`${vendorName} ${vendorCity ? `(${vendorCity})` : ''}`, width - 80, metaY);
+  ctx.font = 'bold 18px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+  ctx.fillText(`${vendorName} ${vendorCity ? `(${vendorCity})` : ''}`, width - 155, metaY);
 
   ctx.fillStyle = '#64748b';
-  ctx.font = '11px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('تاریخ حساب:', width / 2 - 20, metaY);
+  ctx.font = '14px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText('تاریخ حساب:', width / 2 - 10, metaY);
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 11px system-ui, sans-serif';
-  ctx.fillText(dateLabel, width / 2 - 85, metaY);
+  ctx.font = 'bold 15.5px system-ui, sans-serif';
+  ctx.fillText(dateLabel, width / 2 - 95, metaY);
 
   ctx.fillStyle = '#64748b';
-  ctx.font = '11px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('کل اجناس:', width - 30, metaY + 22);
+  ctx.font = '14px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText('کل اجناس:', width - 36, metaY + 28);
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 11px system-ui, sans-serif';
-  ctx.fillText(`${lots.length} لاٹ • ${totalUnits} کل نگ`, width - 85, metaY + 22);
+  ctx.font = 'bold 15.5px system-ui, sans-serif';
+  ctx.fillText(`${lots.length} لاٹ • ${totalUnits} کل تعداد`, width - 115, metaY + 28);
 
-  let currentY = metaY + 36;
+  let currentY = metaY + 46;
   drawDashedLine(currentY);
-  currentY += 12;
+  currentY += 14;
 
-  // 2. ONE SINGLE TABLE FOR ALL PRODUCTS
+  // 2. ONE SINGLE TABLE FOR ALL PRODUCTS (BIGGER TEXT & WIDER COLUMNS)
   // Table Header
-  ctx.fillStyle = '#f1f5f9';
-  ctx.fillRect(24, currentY, width - 48, 24);
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.strokeRect(24, currentY, width - 48, 24);
-
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 10.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('#', 40, currentY + 16);
-  ctx.textAlign = 'right';
-  ctx.fillText('تفصیلِ جنس', width - 55, currentY + 16);
-  ctx.textAlign = 'center';
-  ctx.fillText('تعداد بمعہ پیکنگ', width - 210, currentY + 16);
-  ctx.textAlign = 'right';
-  ctx.fillText('ریٹ', width - 310, currentY + 16);
-  ctx.fillText('کل رقم', 90, currentY + 16);
+  ctx.fillRect(28, currentY, width - 56, 38);
 
-  currentY += 24;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 15.5px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('#', 55, currentY + 25);
 
-  // Table Body Rows
+  ctx.textAlign = 'right';
+  ctx.fillText(isAveraged ? 'تفصیلِ جنس (سبزی / پھل)' : 'تفصیلِ جنس', width - 60, currentY + 25);
+  ctx.textAlign = 'center';
+  ctx.fillText(isAveraged ? 'کل فروخت تعداد' : 'تعداد بمعہ پیکنگ', width - 360, currentY + 25);
+  ctx.textAlign = 'right';
+  ctx.fillText(isAveraged ? 'اوسط ریٹ فی یونٹ' : 'ریٹ فی عدد', width - 560, currentY + 25);
+  ctx.fillText('کل رقم (روپے)', 110, currentY + 25);
+
+  currentY += 38;
+
+  // Table Body Rows (Spacious 42px per row, larger fonts, NO buyer name)
   allItems.forEach((item, idx) => {
     ctx.fillStyle = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-    ctx.fillRect(24, currentY, width - 48, 26);
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.strokeRect(24, currentY, width - 48, 26);
+    ctx.fillRect(28, currentY, width - 56, 42);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(28, currentY, width - 56, 42);
 
     ctx.fillStyle = '#64748b';
-    ctx.font = '10px system-ui';
+    ctx.font = 'bold 14px system-ui';
     ctx.textAlign = 'center';
-    ctx.fillText(`${idx + 1}`, 40, currentY + 17);
+    ctx.fillText(`${idx + 1}`, 55, currentY + 26);
 
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 11px "Noto Sans Arabic", system-ui';
+    ctx.font = 'bold 16.5px "Noto Nastaliq Urdu", "Noto Sans Arabic", system-ui';
     ctx.textAlign = 'right';
-    ctx.fillText(item.productUrdu, width - 55, currentY + 17);
+    ctx.fillText(item.productUrdu, width - 60, currentY + 26);
 
-    ctx.font = 'bold 10.5px system-ui';
+    ctx.font = 'bold 16px system-ui';
     ctx.textAlign = 'center';
-    ctx.fillText(`${item.quantity} ${item.unitLabel}`, width - 210, currentY + 17);
+    ctx.fillText(`${item.quantity} ${item.unitLabel}`, width - 360, currentY + 26);
 
-    ctx.font = '10px system-ui';
+    ctx.font = 'bold 15.5px system-ui';
     ctx.textAlign = 'right';
-    ctx.fillText(`Rs. ${item.ratePerUnit.toLocaleString()}`, width - 310, currentY + 17);
+    ctx.fillText(`₨ ${item.ratePerUnit.toLocaleString()}`, width - 560, currentY + 26);
 
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 11px system-ui';
-    ctx.fillText(`Rs. ${item.totalAmount.toLocaleString()}`, 90, currentY + 17);
+    ctx.font = 'bold 16.5px system-ui';
+    ctx.fillText(`₨ ${item.totalAmount.toLocaleString()}`, 110, currentY + 26);
 
-    currentY += 26;
+    currentY += 42;
   });
 
-  // Table Gross Total Footer Row
+  // Table Gross Total Footer Row (Bigger font)
   ctx.fillStyle = '#f1f5f9';
-  ctx.fillRect(24, currentY, width - 48, 26);
+  ctx.fillRect(28, currentY, width - 56, 42);
   ctx.strokeStyle = '#0f172a';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(24, currentY, width - 48, 26);
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(28, currentY, width - 56, 42);
 
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.font = 'bold 16.5px "Noto Sans Arabic", system-ui, sans-serif';
   ctx.textAlign = 'right';
-  ctx.fillText('مجموعی کل فروخت:', width - 36, currentY + 17);
+  ctx.fillText('مجموعی کل فروخت (Gross Total):', width - 40, currentY + 26);
 
-  ctx.font = 'bold 13px system-ui';
-  ctx.fillText(formatPKR(totalGross, 'Rs.', 'en'), 90, currentY + 17);
+  ctx.font = 'bold 19px system-ui, monospace';
+  ctx.fillText(formatPKR(totalGross, '₨', 'en'), 110, currentY + 26);
 
-  currentY += 34;
+  currentY += 50;
   drawDashedLine(currentY);
-  currentY += 12;
+  currentY += 14;
 
-  // 3. Deductions & Katote Box Directly Below Table
+  // 3. Deductions & Katote Box Directly Below Table (Bigger text)
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+  ctx.font = 'bold 16px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
   ctx.textAlign = 'right';
-  ctx.fillText('منہا کٹوتیاں و اخراجات:', width - 30, currentY + 4);
+  ctx.fillText('منہا کٹوتیاں و اخراجات (Deductions):', width - 36, currentY + 4);
 
-  currentY += 18;
+  currentY += 24;
 
   const expItems = [
     { label: 'کمیشن', val: aggregatedExpenses.commission },
@@ -668,89 +746,102 @@ export function generateVendorConsolidatedInvoiceCanvas(
     { label: 'دیگر اخراجات', val: aggregatedExpenses.customTotal },
   ].filter((item) => item.val > 0);
 
-  let expX = width - 34;
+  let expX = width - 40;
   let expY = currentY;
   expItems.forEach((it, i) => {
     if (i === 3) {
-      expX = width - 34;
-      expY += 20;
+      expX = width - 40;
+      expY += 28;
     }
     ctx.textAlign = 'right';
     ctx.fillStyle = '#475569';
-    ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
+    ctx.font = '14.5px "Noto Sans Arabic", system-ui, sans-serif';
     ctx.fillText(`${it.label}:`, expX, expY);
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 10px system-ui';
-    ctx.fillText(`- Rs. ${it.val.toLocaleString()}`, expX - 60, expY);
-    expX -= 190;
+    ctx.font = 'bold 15px system-ui';
+    ctx.fillText(`- ₨ ${it.val.toLocaleString()}`, expX - 95, expY);
+    expX -= 280;
   });
 
-  currentY = expY + 22;
+  currentY = expY + 30;
 
   ctx.fillStyle = '#b91c1c';
-  ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.font = 'bold 16.5px "Noto Sans Arabic", system-ui, sans-serif';
   ctx.textAlign = 'right';
-  ctx.fillText('کل منہا کٹوتیاں:', width - 30, currentY + 10);
-  ctx.font = 'bold 12px system-ui, sans-serif';
-  ctx.fillText(`- ${formatPKR(totalExpenses, 'Rs.', 'en')}`, 90, currentY + 10);
+  ctx.fillText('کل منہا کٹوتیاں:', width - 36, currentY + 10);
+  ctx.font = 'bold 17.5px system-ui, sans-serif';
+  ctx.fillText(`- ${formatPKR(totalExpenses, '₨', 'en')}`, 110, currentY + 10);
 
-  currentY += 26;
+  currentY += 32;
   drawDashedLine(currentY);
-  currentY += 12;
+  currentY += 16;
 
-  // 4. Final Net Meezan Box
+  // 4. Final Net Meezan Box (Half Landscape A4 Prominent Net Box)
   ctx.fillStyle = '#0f172a';
-  ctx.fillRect(24, currentY, width - 48, 48);
+  ctx.fillRect(28, currentY, width - 56, 60);
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 13px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+  ctx.font = 'bold 18.5px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
   ctx.textAlign = 'right';
-  ctx.fillText('صافی رقم برائے ادائیگی:', width - 36, currentY + 30);
+  ctx.fillText('صافی رقم برائے ادائیگی (میزان):', width - 46, currentY + 38);
 
-  ctx.font = 'bold 20px system-ui, monospace, sans-serif';
+  ctx.font = 'bold 30px system-ui, monospace, sans-serif';
+  ctx.fillStyle = '#facc15'; // Gold / Yellow
   ctx.textAlign = 'left';
-  ctx.fillText(formatPKR(totalNetPayable, '₨', 'en'), 36, currentY + 32);
+  ctx.fillText(formatPKR(totalNetPayable, '₨', 'en'), 46, currentY + 39);
 
-  currentY += 58;
+  currentY += 72;
 
-  // Payment Status Box
-  ctx.fillStyle = allLotsPaid ? '#ecfdf5' : '#fef2f2';
-  ctx.fillRect(24, currentY, width - 48, 30);
-  ctx.strokeStyle = allLotsPaid ? '#059669' : '#dc2626';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(24, currentY, width - 48, 30);
+  // Payment Status Box (Cash or Credit Status with exact numbers)
+  ctx.fillStyle = isFullyPaid ? '#ecfdf5' : isPartialPaid ? '#fefce8' : '#fef2f2';
+  ctx.fillRect(28, currentY, width - 56, 42);
+  ctx.strokeStyle = isFullyPaid ? '#059669' : isPartialPaid ? '#d97706' : '#dc2626';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(28, currentY, width - 56, 42);
 
-  ctx.fillStyle = allLotsPaid ? '#065f46' : '#991b1b';
-  ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillStyle = isFullyPaid ? '#065f46' : isPartialPaid ? '#854d0e' : '#991b1b';
+  ctx.font = 'bold 15px "Noto Sans Arabic", system-ui, sans-serif';
   ctx.textAlign = 'right';
   ctx.fillText(
-    allLotsPaid ? '✅ ادائیگی کی کیفیت: تمام اجناس ادا شدہ ہیں' : '⚠️ ادائیگی کی کیفیت: ادائیگی بقایا ہے',
-    width - 34,
-    currentY + 20
+    isFullyPaid
+      ? '✅ حیثیت ادائیگی: نقد ادا شدہ (All Paid in Full)'
+      : isPartialPaid
+      ? '⚠️ حیثیت ادائیگی: جزوی نقد ادائیگی (Partial Paid)'
+      : '⏳ حیثیت ادائیگی: ادھار / ادائیگی بقایا ہے (Payment Pending)',
+    width - 44,
+    currentY + 26
   );
 
-  currentY += 40;
+  ctx.font = 'bold 14px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(
+    `ادا شدہ: ₨ ${totalPaid.toLocaleString()} | بقایا: ₨ ${Math.max(0, totalNetPayable - totalPaid).toLocaleString()}`,
+    46,
+    currentY + 26
+  );
+
+  currentY += 54;
 
   // Signatures
   ctx.strokeStyle = '#94a3b8';
-  ctx.setLineDash([3, 3]);
+  ctx.setLineDash([4, 4]);
   ctx.beginPath();
-  ctx.moveTo(35, currentY + 14);
-  ctx.lineTo(160, currentY + 14);
-  ctx.moveTo(width - 160, currentY + 14);
-  ctx.lineTo(width - 35, currentY + 14);
+  ctx.moveTo(45, currentY + 14);
+  ctx.lineTo(210, currentY + 14);
+  ctx.moveTo(width - 210, currentY + 14);
+  ctx.lineTo(width - 45, currentY + 14);
   ctx.stroke();
   ctx.setLineDash([]);
 
   ctx.fillStyle = '#475569';
-  ctx.font = 'bold 9.5px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.font = 'bold 14px "Noto Sans Arabic", system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('دستخط منشی / کیشیئر', 98, currentY + 26);
-  ctx.fillText('دستخط و مہر آڑھتی', width - 98, currentY + 26);
+  ctx.fillText('دستخط منشی / کیشیئر', 128, currentY + 28);
+  ctx.fillText('دستخط و مہر آڑھتی', width - 128, currentY + 28);
 
   ctx.fillStyle = '#94a3b8';
-  ctx.font = '8.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('کمپیوٹرائزڈ رسید برائے زمیندار | شکریہ', width / 2, totalHeight - 14);
+  ctx.font = '12px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText('کمپیوٹرائزڈ رسید برائے زمیندار | شکریہ', width / 2, totalHeight - 16);
 
   return canvas;
 }
@@ -953,9 +1044,10 @@ export function printConsolidatedThermalPOSReceipt(
   vendorCity: string | undefined,
   lots: VendorLot[],
   settings: AppSettings,
-  dateLabel?: string
+  dateLabel?: string,
+  isAveraged: boolean = false
 ): void {
-  // Flatten all products/lots into single unified items
+  // Items list: either detailed or averaged by product
   const allItems: Array<{
     lotNumber: string;
     productUrdu: string;
@@ -984,6 +1076,24 @@ export function printConsolidatedThermalPOSReceipt(
       const lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : (lot.vendorPaymentStatus === 'paid' ? lot.summary.netPayableToVendor : 0);
       acc.totalPaid += lotPaid;
 
+      if (lot.expenses.commission.enabled) aggregatedExpenses.commission += lot.expenses.commission.amount;
+      if (lot.expenses.kiraya.enabled) aggregatedExpenses.kiraya += lot.expenses.kiraya.amount;
+      if (lot.expenses.mazdoori.enabled) aggregatedExpenses.mazdoori += lot.expenses.mazdoori.amount;
+      if (lot.expenses.munshiana.enabled) aggregatedExpenses.munshiana += lot.expenses.munshiana.amount;
+      if (lot.expenses.naqdAdvance.enabled) aggregatedExpenses.naqdAdvance += lot.expenses.naqdAdvance.amount;
+      if (lot.expenses.marketFee.enabled) aggregatedExpenses.marketFee += lot.expenses.marketFee.amount;
+      lot.expenses.customExpenses?.forEach((ce) => {
+        aggregatedExpenses.customTotal += ce.amount;
+      });
+
+      return acc;
+    },
+    { grossSales: 0, totalExpenses: 0, netPayable: 0, totalPaid: 0 }
+  );
+
+  if (!isAveraged) {
+    lots.forEach((lot) => {
+      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
       if (lot.sales && lot.sales.length > 0) {
         lot.sales.forEach((s) => {
           allItems.push({
@@ -1005,24 +1115,64 @@ export function printConsolidatedThermalPOSReceipt(
           totalAmount: lot.summary.grossSales,
         });
       }
+    });
+  } else {
+    // Averaged: Group by Agnaas / Product
+    const productGroups = new Map<
+      string,
+      {
+        productUrdu: string;
+        quantity: number;
+        unitLabel: string;
+        totalAmount: number;
+        lotNumbers: Set<string>;
+      }
+    >();
 
-      if (lot.expenses.commission.enabled) aggregatedExpenses.commission += lot.expenses.commission.amount;
-      if (lot.expenses.kiraya.enabled) aggregatedExpenses.kiraya += lot.expenses.kiraya.amount;
-      if (lot.expenses.mazdoori.enabled) aggregatedExpenses.mazdoori += lot.expenses.mazdoori.amount;
-      if (lot.expenses.munshiana.enabled) aggregatedExpenses.munshiana += lot.expenses.munshiana.amount;
-      if (lot.expenses.naqdAdvance.enabled) aggregatedExpenses.naqdAdvance += lot.expenses.naqdAdvance.amount;
-      if (lot.expenses.marketFee.enabled) aggregatedExpenses.marketFee += lot.expenses.marketFee.amount;
-      lot.expenses.customExpenses?.forEach((ce) => {
-        aggregatedExpenses.customTotal += ce.amount;
+    lots.forEach((lot) => {
+      const prodKey = (lot.productUrdu || lot.productName || 'جنس').trim();
+      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+
+      if (!productGroups.has(prodKey)) {
+        productGroups.set(prodKey, {
+          productUrdu: prodKey,
+          quantity: 0,
+          unitLabel: uLabel,
+          totalAmount: 0,
+          lotNumbers: new Set<string>(),
+        });
+      }
+
+      const grp = productGroups.get(prodKey)!;
+      grp.lotNumbers.add(lot.lotNumber);
+
+      if (lot.sales && lot.sales.length > 0) {
+        lot.sales.forEach((s) => {
+          grp.quantity += s.quantity;
+          grp.totalAmount += s.totalAmount;
+        });
+      } else {
+        grp.quantity += lot.totalQuantity;
+        grp.totalAmount += lot.summary.grossSales;
+      }
+    });
+
+    productGroups.forEach((grp) => {
+      const avgRate = grp.quantity > 0 ? Math.round(grp.totalAmount / grp.quantity) : 0;
+      allItems.push({
+        lotNumber: Array.from(grp.lotNumbers).join(', '),
+        productUrdu: grp.productUrdu,
+        quantity: grp.quantity,
+        unitLabel: grp.unitLabel,
+        ratePerUnit: avgRate,
+        totalAmount: Math.round(grp.totalAmount),
       });
-
-      return acc;
-    },
-    { grossSales: 0, totalExpenses: 0, netPayable: 0, totalPaid: 0 }
-  );
+    });
+  }
 
   const displayDate = dateLabel || lots[0]?.arrivalDate || new Date().toISOString().slice(0, 10);
   const allLotsPaid = totals.totalPaid >= totals.netPayable && totals.netPayable > 0;
+  const isPartialPaid = totals.totalPaid > 0 && !allLotsPaid;
 
   const itemsRowsHtml = allItems.map((item, idx) => `
     <tr>
@@ -1088,12 +1238,11 @@ export function printConsolidatedThermalPOSReceipt(
     </head>
     <body>
       <div class="text-center" style="margin-bottom: 4px;">
-        <div style="font-size: 11px; font-weight: bold;">بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ</div>
         <div style="font-size: 16px; font-weight: bold; margin: 1px 0;">${settings.shopNameUrdu || settings.shopNameEn}</div>
         <div style="font-size: 11px;">پروپرائٹر: <b>${settings.arhtiNameUrdu || settings.arhtiNameEn}</b></div>
         <div style="font-size: 9.5px;">📍 ${settings.shopAddressUrdu || settings.shopAddressEn} | 📞 ${settings.shopPhone}</div>
         <div style="font-size: 10px; font-weight: bold; border: 1px solid #000; display: inline-block; padding: 1px 6px; margin-top: 3px;">
-          پکی پرچی بل برائے زمیندار (${lots.length} اجناس)
+          ${isAveraged ? 'پکی پرچی بل برائے زمیندار (خلاصہ اجناس وار)' : `پکی پرچی بل برائے زمیندار (${lots.length} اجناس)`}
         </div>
       </div>
 
@@ -1112,9 +1261,9 @@ export function printConsolidatedThermalPOSReceipt(
       <table>
         <thead>
           <tr>
-            <th style="text-align: right;">تفصیلِ جنس</th>
+            <th style="text-align: right;">${isAveraged ? 'تفصیلِ جنس' : 'جنس'}</th>
             <th style="text-align: center;">تعداد</th>
-            <th style="text-align: left;">ریٹ</th>
+            <th style="text-align: left;">${isAveraged ? 'اوسط ریٹ' : 'ریٹ'}</th>
             <th style="text-align: left;">رقم</th>
           </tr>
         </thead>
@@ -1152,7 +1301,7 @@ export function printConsolidatedThermalPOSReceipt(
       </div>
 
       <div style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-size: 9.5px; font-weight: bold; margin: 2px 0;">
-        کیفیت: ${allLotsPaid ? '✅ تمام اجناس ادا شدہ (ALL PAID)' : '⏳ ادائیگی بقایا (PAYMENT PENDING)'}
+        کیفیت: ${allLotsPaid ? '✅ تمام اجناس ادا شدہ (ALL PAID)' : isPartialPaid ? '⚠️ جزوی نقد ادائیگی (PARTIAL PAID)' : '⏳ ادائیگی بقایا (PAYMENT PENDING)'}
       </div>
 
       <div class="dashed"></div>

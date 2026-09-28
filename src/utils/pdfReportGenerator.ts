@@ -14,7 +14,12 @@ export interface PDFPreviewData {
     grossSales: number;
     commission: number;
     totalExpenses?: number;
+    totalMazdoori?: number;
+    totalMunshiana?: number;
+    shopProfit?: number;
     vendorPayable?: number;
+    vendorPaid?: number;
+    vendorPending?: number;
     cashReceived?: number;
     creditPending?: number;
     unitsSold?: number;
@@ -61,6 +66,9 @@ export interface PDFPreviewData {
     grossSales: number;
     commission: number;
     netPayable: number;
+    totalPaid?: number;
+    pendingBalance?: number;
+    paymentStatus?: 'cash' | 'credit' | 'partial' | 'paid' | 'pending';
   }>;
   expenseRows?: ShopExpense[];
   entireLots?: VendorLot[];
@@ -108,6 +116,8 @@ export interface PDFPreviewData {
     totalExpenses: number;
     commission: number;
     netPayable: number;
+    totalPaid?: number;
+    pendingBalance?: number;
     lots: VendorLot[];
   };
   pdfDoc?: jsPDF;
@@ -217,6 +227,8 @@ interface GenerateReportPDFParams {
     commission: number;
     totalExpenses?: number;
     vendorPayable?: number;
+    vendorPaid?: number;
+    vendorPending?: number;
     cashReceived?: number;
     creditPending?: number;
     unitsSold?: number;
@@ -263,6 +275,9 @@ interface GenerateReportPDFParams {
     grossSales: number;
     commission: number;
     netPayable: number;
+    totalPaid?: number;
+    pendingBalance?: number;
+    paymentStatus?: 'cash' | 'credit' | 'partial' | 'paid' | 'pending';
   }>;
 }
 
@@ -300,26 +315,51 @@ export function buildReportPDF({
   doc.setDrawColor(215, 225, 215);
   doc.roundedRect(14, currentY, pageWidth - 28, 15, 2, 2, 'D');
 
-  doc.setFontSize(7.5);
-  doc.setTextColor(100, 100, 100);
-  doc.text('TOTAL GROSS SALES', 20, currentY + 4.5);
-  doc.text('COMMISSION EARNED', 72, currentY + 4.5);
-  doc.text('CASH COLLECTED', 124, currentY + 4.5);
-  doc.text('PENDING CREDIT (UDHAAR)', 162, currentY + 4.5);
+  if (reportType === 'vendor') {
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 100, 100);
+    doc.text('TOTAL GROSS SALES', 20, currentY + 4.5);
+    doc.text('COMMISSION EARNED', 72, currentY + 4.5);
+    doc.text('PAID TO VENDORS (CASH)', 118, currentY + 4.5);
+    doc.text('PENDING TO VENDORS (CREDIT)', 158, currentY + 4.5);
 
-  doc.setFontSize(9.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(20, 20, 20);
-  doc.text(`Rs. ${summary.grossSales.toLocaleString()}`, 20, currentY + 10.5);
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(20, 20, 20);
+    doc.text(`Rs. ${summary.grossSales.toLocaleString()}`, 20, currentY + 10.5);
 
-  doc.setTextColor(15, 120, 60);
-  doc.text(`Rs. ${summary.commission.toLocaleString()}`, 72, currentY + 10.5);
+    doc.setTextColor(15, 120, 60);
+    doc.text(`Rs. ${summary.commission.toLocaleString()}`, 72, currentY + 10.5);
 
-  doc.setTextColor(20, 100, 40);
-  doc.text(`Rs. ${(summary.cashReceived || 0).toLocaleString()}`, 124, currentY + 10.5);
+    doc.setTextColor(15, 120, 50);
+    const paidVal = summary.vendorPaid !== undefined ? summary.vendorPaid : (summary.cashReceived || 0);
+    doc.text(`Rs. ${paidVal.toLocaleString()}`, 118, currentY + 10.5);
 
-  doc.setTextColor(180, 80, 20);
-  doc.text(`Rs. ${(summary.creditPending || 0).toLocaleString()}`, 162, currentY + 10.5);
+    doc.setTextColor(180, 40, 20);
+    const pendingVal = summary.vendorPending !== undefined ? summary.vendorPending : (summary.vendorPayable || summary.creditPending || 0);
+    doc.text(`Rs. ${pendingVal.toLocaleString()}`, 158, currentY + 10.5);
+  } else {
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 100, 100);
+    doc.text('TOTAL GROSS SALES', 20, currentY + 4.5);
+    doc.text('COMMISSION EARNED', 72, currentY + 4.5);
+    doc.text('CASH COLLECTED', 124, currentY + 4.5);
+    doc.text('PENDING CREDIT (UDHAAR)', 162, currentY + 4.5);
+
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(20, 20, 20);
+    doc.text(`Rs. ${summary.grossSales.toLocaleString()}`, 20, currentY + 10.5);
+
+    doc.setTextColor(15, 120, 60);
+    doc.text(`Rs. ${summary.commission.toLocaleString()}`, 72, currentY + 10.5);
+
+    doc.setTextColor(20, 100, 40);
+    doc.text(`Rs. ${(summary.cashReceived || 0).toLocaleString()}`, 124, currentY + 10.5);
+
+    doc.setTextColor(180, 80, 20);
+    doc.text(`Rs. ${(summary.creditPending || 0).toLocaleString()}`, 162, currentY + 10.5);
+  }
 
   currentY += 19;
 
@@ -490,59 +530,70 @@ export function buildReportPDF({
       },
     });
   } else if (reportType === 'vendor') {
-    const tableBody = vendorRows.map((row, idx) => [
-      idx + 1,
-      row.vendorName,
-      row.city || '-',
-      row.phone || '-',
-      row.lotsCount,
-      `${row.unitsSold} / ${row.totalUnits}`,
-      `Rs. ${row.grossSales.toLocaleString()}`,
-      `Rs. ${row.commission.toLocaleString()}`,
-      `Rs. ${row.netPayable.toLocaleString()}`,
-    ]);
+    const tableBody = vendorRows.map((row, idx) => {
+      const isPaid = (row.pendingBalance !== undefined && row.pendingBalance <= 0 && row.netPayable > 0) || row.paymentStatus === 'paid' || row.paymentStatus === 'cash';
+      const isPartial = (row.totalPaid && row.totalPaid > 0 && row.pendingBalance && row.pendingBalance > 0) || row.paymentStatus === 'partial';
+      const statusStr = isPaid ? 'Cash (Paid)' : isPartial ? 'Partial' : 'Credit (Pending)';
+
+      return [
+        idx + 1,
+        row.vendorName,
+        row.city || '-',
+        row.lotsCount,
+        `${row.unitsSold} / ${row.totalUnits}`,
+        `Rs. ${row.grossSales.toLocaleString()}`,
+        `Rs. ${row.netPayable.toLocaleString()}`,
+        `Rs. ${(row.totalPaid || 0).toLocaleString()}`,
+        `Rs. ${(row.pendingBalance !== undefined ? row.pendingBalance : Math.max(0, row.netPayable - (row.totalPaid || 0))).toLocaleString()}`,
+        statusStr,
+      ];
+    });
 
     autoTable(doc, {
       startY: currentY,
-      head: [['#', 'Vendor / Zamindar', 'City', 'Phone', 'Lots', 'Sold/Total', 'Gross Sales', 'Commission', 'Net Payable']],
+      head: [['#', 'Vendor / Zamindar', 'City', 'Lots', 'Sold/Total', 'Gross Sales', 'Net Payable', 'Cash Paid', 'Pending (Credit)', 'Status']],
       body: tableBody,
       theme: 'grid',
       headStyles: {
         fillColor: [70, 40, 20],
         textColor: 255,
         fontStyle: 'bold',
-        fontSize: 8.5,
+        fontSize: 8,
       },
       styles: {
-        fontSize: 8,
-        cellPadding: 2.5,
+        fontSize: 7.5,
+        cellPadding: 2,
         textColor: [30, 30, 30],
       },
       columnStyles: {
-        0: { cellWidth: 8, halign: 'center' },
+        0: { cellWidth: 7, halign: 'center' },
         1: { fontStyle: 'bold' },
+        2: { halign: 'center' },
+        3: { halign: 'center' },
         4: { halign: 'center' },
-        5: { halign: 'center' },
-        6: { halign: 'right', fontStyle: 'bold' },
-        7: { halign: 'right', textColor: [15, 120, 50] },
-        8: { halign: 'right', fontStyle: 'bold', textColor: [20, 30, 70] },
+        5: { halign: 'right' },
+        6: { halign: 'right', fontStyle: 'bold', textColor: [20, 30, 70] },
+        7: { halign: 'right', textColor: [15, 120, 50], fontStyle: 'bold' },
+        8: { halign: 'right', textColor: [180, 40, 20], fontStyle: 'bold' },
+        9: { halign: 'center', fontStyle: 'bold' },
       },
       foot: [[
         'Total',
         `${vendorRows.length} Vendors`,
         '',
-        '',
         vendorRows.reduce((a, b) => a + b.lotsCount, 0),
         vendorRows.reduce((a, b) => a + b.unitsSold, 0),
         `Rs. ${vendorRows.reduce((a, b) => a + b.grossSales, 0).toLocaleString()}`,
-        `Rs. ${vendorRows.reduce((a, b) => a + b.commission, 0).toLocaleString()}`,
         `Rs. ${vendorRows.reduce((a, b) => a + b.netPayable, 0).toLocaleString()}`,
+        `Rs. ${vendorRows.reduce((a, b) => a + (b.totalPaid || 0), 0).toLocaleString()}`,
+        `Rs. ${vendorRows.reduce((a, b) => a + (b.pendingBalance !== undefined ? b.pendingBalance : Math.max(0, b.netPayable - (b.totalPaid || 0))), 0).toLocaleString()}`,
+        '',
       ]],
       footStyles: {
         fillColor: [250, 245, 240],
         textColor: [20, 20, 20],
         fontStyle: 'bold',
-        fontSize: 8.5,
+        fontSize: 8,
       },
     });
   }
@@ -583,12 +634,21 @@ export function buildEntireRecordReportPDF({
 
   const pageWidth = doc.internal.pageSize.getWidth();
 
-  // Grand summary stats
+  // Grand summary stats for the Shop
   const totalLots = lots.length;
   const totalUnits = lots.reduce((a, b) => a + b.totalQuantity, 0);
   const totalSold = lots.reduce((a, b) => a + b.summary.totalSoldQuantity, 0);
   const grossSales = lots.reduce((a, b) => a + b.summary.grossSales, 0);
-  const commission = lots.reduce((a, b) => a + b.summary.arhtiProfitCommission, 0);
+  const totalCommission = lots.reduce((a, b) => a + (b.summary.arhtiProfitCommission || 0), 0);
+  const totalMazdoori = lots.reduce(
+    (a, b) => a + (b.expenses?.mazdoori?.enabled ? Number(b.expenses.mazdoori.amount) || 0 : 0),
+    0
+  );
+  const totalMunshiana = lots.reduce(
+    (a, b) => a + (b.expenses?.munshiana?.enabled ? Number(b.expenses.munshiana.amount) || 0 : 0),
+    0
+  );
+  const totalShopProfit = totalCommission + totalMunshiana;
   const netVendorPayable = lots.reduce((a, b) => a + b.summary.netPayableToVendor, 0);
 
   const allSales = lots.flatMap((l) => l.sales);
@@ -598,140 +658,184 @@ export function buildEntireRecordReportPDF({
   let currentY = addPDFHeader(
     doc,
     settings,
-    'COMPLETE MANDI COMPREHENSIVE REPORT (ALL RECORDS & DETAILED AUDIT)',
-    `Period / Scope: ${dateFilterLabel} (${dateRangeStr}) | Total Lots: ${totalLots}`
+    'COMPLETE SHOP FINANCIAL AUDIT REPORT (مکمل دکان رپورٹ و حساب)',
+    `Period / Scope: ${dateFilterLabel} (${dateRangeStr})`
   );
 
-  // Financial KPI Overview
+  // Financial KPI Overview - Shop Centric (No vendor product details)
   doc.setFillColor(245, 247, 245);
   doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'F');
   doc.setDrawColor(215, 225, 215);
   doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'D');
 
-  doc.setFontSize(7.5);
+  doc.setFontSize(7);
   doc.setTextColor(100, 100, 100);
-  doc.text('TOTAL GROSS SALES', 20, currentY + 4.5);
-  doc.text('ARHTI COMMISSION', 68, currentY + 4.5);
-  doc.text('CASH COLLECTED', 115, currentY + 4.5);
-  doc.text('PENDING UDHAAR (CREDIT)', 158, currentY + 4.5);
+  doc.text('TOTAL GROSS SELL (مجموعی فروخت)', 18, currentY + 4.5);
+  doc.text('LABOUR & MANSHIYANA (مزدوری و منشیانہ)', 62, currentY + 4.5);
+  doc.text('SHOP PROFIT (خالص دکان منافع)', 118, currentY + 4.5);
+  doc.text('CASH / UDHAAR (نقد و ادھار)', 162, currentY + 4.5);
 
-  doc.setFontSize(9.5);
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20, 20, 20);
-  doc.text(`Rs. ${grossSales.toLocaleString()}`, 20, currentY + 11);
+  doc.text(`Rs. ${grossSales.toLocaleString()}`, 18, currentY + 11);
 
-  doc.setTextColor(15, 120, 50);
-  doc.text(`Rs. ${commission.toLocaleString()}`, 68, currentY + 11);
+  doc.setTextColor(109, 40, 217);
+  doc.text(`Rs. ${(totalMazdoori + totalMunshiana).toLocaleString()}`, 62, currentY + 11);
 
-  doc.setTextColor(20, 100, 40);
-  doc.text(`Rs. ${cashReceived.toLocaleString()}`, 115, currentY + 11);
+  doc.setTextColor(4, 120, 87);
+  doc.text(`Rs. ${totalShopProfit.toLocaleString()}`, 118, currentY + 11);
 
   doc.setTextColor(180, 80, 20);
-  doc.text(`Rs. ${creditPending.toLocaleString()}`, 158, currentY + 11);
+  doc.text(`${Math.round(cashReceived / 1000)}k / ${Math.round(creditPending / 1000)}k`, 162, currentY + 11);
 
   currentY += 21;
 
-  // SECTION 1: MASTER LOTS INVENTORY & SUMMARY
+  // SECTION 1: MASTER SHOP FINANCIAL AUDIT LINE BY LINE (NO VENDOR PRODUCT DETAILS)
   doc.setFontSize(10.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 80, 50);
-  doc.text('1. ALL COMMODITIES SUMMARY (ARRIVAL, COMMODITIES & FINANCIALS)', 14, currentY);
+  doc.text('1. SHOP FINANCIAL REVENUE, LABOUR, MANSHIYANA & PROFIT (دکان مالیاتی حسابات و منافع)', 14, currentY);
   currentY += 3;
 
-  const lotRows = lots.map((l, idx) => [
-    idx + 1,
-    l.arrivalDate,
-    `${l.vendorName} ${l.vendorCity ? `(${l.vendorCity})` : ''}`,
-    `${l.productUrdu || l.productName} (${l.unitType})`,
-    `${l.summary.totalSoldQuantity} / ${l.totalQuantity}`,
-    `Rs. ${l.summary.grossSales.toLocaleString()}`,
-    `Rs. ${l.summary.arhtiProfitCommission.toLocaleString()}`,
-    `Rs. ${l.summary.netPayableToVendor.toLocaleString()}`,
-  ]);
+  // Group shop financial figures by date
+  const dateMap = new Map<
+    string,
+    {
+      date: string;
+      grossSales: number;
+      mazdoori: number;
+      munshiana: number;
+      commission: number;
+      shopProfit: number;
+      cashReceived: number;
+      creditPending: number;
+    }
+  >();
+
+  lots.forEach((l) => {
+    const d = l.arrivalDate || 'N/A';
+    if (!dateMap.has(d)) {
+      dateMap.set(d, {
+        date: d,
+        grossSales: 0,
+        mazdoori: 0,
+        munshiana: 0,
+        commission: 0,
+        shopProfit: 0,
+        cashReceived: 0,
+        creditPending: 0,
+      });
+    }
+
+    const row = dateMap.get(d)!;
+    row.grossSales += l.summary.grossSales;
+    const maz = l.expenses?.mazdoori?.enabled ? Number(l.expenses.mazdoori.amount) || 0 : 0;
+    const mun = l.expenses?.munshiana?.enabled ? Number(l.expenses.munshiana.amount) || 0 : 0;
+    const com = l.summary?.arhtiProfitCommission || 0;
+    row.mazdoori += maz;
+    row.munshiana += mun;
+    row.commission += com;
+    row.shopProfit += (com + mun);
+
+    (l.sales || []).forEach((s) => {
+      if (s.paymentStatus === 'cash') {
+        row.cashReceived += s.totalAmount;
+      } else {
+        const paid = s.paidAmount || 0;
+        row.cashReceived += paid;
+        row.creditPending += Math.max(0, s.totalAmount - paid);
+      }
+    });
+  });
+
+  const shopFinancialDateRows = Array.from(dateMap.values())
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map((r, idx) => [
+      idx + 1,
+      r.date,
+      'دکان کاروباری سیل و آمدن',
+      `Rs. ${r.grossSales.toLocaleString()}`,
+      `Rs. ${r.mazdoori.toLocaleString()}`,
+      `Rs. ${r.munshiana.toLocaleString()}`,
+      `Rs. ${r.commission.toLocaleString()}`,
+      `Rs. ${r.shopProfit.toLocaleString()}`,
+      `Rs. ${r.cashReceived.toLocaleString()}`,
+      `Rs. ${r.creditPending.toLocaleString()}`,
+    ]);
 
   autoTable(doc, {
     startY: currentY,
-    head: [['#', 'Date', 'Vendor (Zamindar)', 'Commodity', 'Sold / Total', 'Gross Sale', 'Commission', 'Net Payable']],
-    body: lotRows,
+    head: [['#', 'Date', 'Shop Financial Head', 'Gross Sell', 'Labour', 'Manshiyana', 'Commission', 'Shop Profit', 'Cash Received', 'Market Udhaar']],
+    body: shopFinancialDateRows,
     theme: 'grid',
-    headStyles: { fillColor: [15, 80, 50], textColor: 255, fontSize: 8, fontStyle: 'bold' },
-    styles: { fontSize: 7.5, cellPadding: 2 },
+    headStyles: { fillColor: [15, 80, 50], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
+    styles: { fontSize: 7, cellPadding: 2 },
     columnStyles: {
-      0: { cellWidth: 7, halign: 'center' },
-      1: { halign: 'center' },
-      4: { halign: 'center' },
-      5: { halign: 'right', fontStyle: 'bold' },
-      6: { halign: 'right', textColor: [15, 120, 50] },
-      7: { halign: 'right', fontStyle: 'bold' },
+      0: { cellWidth: 8, halign: 'center' },
+      1: { cellWidth: 20, halign: 'center' },
+      2: { halign: 'left', fontStyle: 'bold' },
+      3: { cellWidth: 22, halign: 'right', fontStyle: 'bold' },
+      4: { cellWidth: 18, halign: 'right' },
+      5: { cellWidth: 18, halign: 'right', textColor: [109, 40, 217] },
+      6: { cellWidth: 18, halign: 'right', textColor: [6, 95, 70] },
+      7: { cellWidth: 22, halign: 'right', fontStyle: 'bold', textColor: [4, 120, 87] },
+      8: { cellWidth: 22, halign: 'right', textColor: [6, 95, 70] },
+      9: { cellWidth: 22, halign: 'right', textColor: [180, 40, 20] },
     },
     foot: [[
       'Total',
-      `${lots.length} Items`,
-      '',
-      '',
-      `${totalSold} / ${totalUnits}`,
+      `${shopFinancialDateRows.length} Days`,
+      'Grand Shop Totals',
       `Rs. ${grossSales.toLocaleString()}`,
-      `Rs. ${commission.toLocaleString()}`,
-      `Rs. ${netVendorPayable.toLocaleString()}`,
+      `Rs. ${totalMazdoori.toLocaleString()}`,
+      `Rs. ${totalMunshiana.toLocaleString()}`,
+      `Rs. ${totalCommission.toLocaleString()}`,
+      `Rs. ${totalShopProfit.toLocaleString()}`,
+      `Rs. ${cashReceived.toLocaleString()}`,
+      `Rs. ${creditPending.toLocaleString()}`,
     ]],
-    footStyles: { fillColor: [240, 245, 240], textColor: [20, 20, 20], fontStyle: 'bold', fontSize: 8 },
+    footStyles: { fillColor: [240, 245, 240], textColor: [20, 20, 20], fontStyle: 'bold', fontSize: 7.5 },
   });
 
-  // SECTION 2: DETAILED SALES & BID-BY-BID LOGS
+  // SECTION 2: SHOP FINANCIAL SUMMARY & POSITION STATEMENT
   doc.addPage();
   currentY = 15;
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(30, 41, 59);
-  doc.text('2. DETAILED BID & SALES TRANSACTIONS (BUYER-BY-BUYER AUDIT)', 14, currentY);
+  doc.text('2. SHOP FINANCIAL POSITION & SUMMARY STATEMENT (خلاصہ مالی گوشوارہ دکان)', 14, currentY);
   currentY += 4;
 
-  const detailedSalesRows = lots.flatMap((l) =>
-    l.sales.map((s, sIdx) => [
-      sIdx + 1,
-      l.arrivalDate,
-      l.productUrdu || l.productName,
-      s.buyerName,
-      s.quantity,
-      `Rs. ${s.ratePerUnit}`,
-      `Rs. ${s.totalAmount.toLocaleString()}`,
-      s.paymentStatus === 'cash' ? 'CASH' : 'UDHAAR',
-      l.vendorName,
-    ])
-  );
+  const summaryStatementRows = [
+    ['1', 'مجموعی دکان کاروبار / ٹرن اوور (Gross Sales Turnover)', `Rs. ${grossSales.toLocaleString()}`, 'دکان پر ہوئی کل نیلامی کی مالیت'],
+    ['2', 'چنائی و اترائی لیبر / مزدوری فنڈ (Total Labour Handled)', `Rs. ${totalMazdoori.toLocaleString()}`, 'مزدوروں اور پلے داروں کیلئے منہا کردہ رقم'],
+    ['3', 'منشیانہ فیس آمدن (Munshiana / Desk Fee Income)', `Rs. ${totalMunshiana.toLocaleString()}`, 'دکان کی خالص منشیانہ فیس'],
+    ['4', 'آڑھت کمیشن آمدن (Arhti Commission Income)', `Rs. ${totalCommission.toLocaleString()}`, 'دکان کا خالص طے شدہ کمیشن'],
+    ['5', 'مجموعی کاروباری آمدن (Total Gross Shop Revenue)', `Rs. ${(totalCommission + totalMunshiana).toLocaleString()}`, 'کمیشن + منشیانہ کی مجموعی رقم'],
+    ['6', 'دکان پر نقد وصولی (Total Cash Collected In Hand)', `Rs. ${cashReceived.toLocaleString()}`, 'خریداروں سے نقد موصول ہوئی رقم'],
+    ['7', 'مارکیٹ میں بقایا ادھار کھاتہ (Market Udhaar Outstanding)', `Rs. ${creditPending.toLocaleString()}`, 'خریداروں کی طرف بقایا رقم'],
+    ['8', 'زمینداروں کی صافی واجب الادا رقم (Net Vendor Payable)', `Rs. ${netVendorPayable.toLocaleString()}`, 'تمام اخراجات منہا کرنے کے بعد کاشتکاروں کا حق'],
+  ];
 
   autoTable(doc, {
     startY: currentY,
-    head: [['#', 'Date', 'Commodity', 'Buyer (Customer)', 'Qty', 'Rate', 'Total Amount', 'Payment', 'Vendor']],
-    body: detailedSalesRows,
+    head: [['#', 'Financial Account Head (کھاتہ / مد)', 'Amount (روپے)', 'Description (تفصیل و وضاحتی نوٹ)']],
+    body: summaryStatementRows,
     theme: 'grid',
-    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 8, fontStyle: 'bold' },
-    styles: { fontSize: 7.5, cellPadding: 2 },
+    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 8.5, fontStyle: 'bold' },
+    styles: { fontSize: 8, cellPadding: 3 },
     columnStyles: {
-      0: { cellWidth: 7, halign: 'center' },
-      1: { halign: 'center' },
-      4: { halign: 'center' },
-      5: { halign: 'center' },
-      6: { halign: 'right', fontStyle: 'bold' },
-      7: { halign: 'center' },
+      0: { cellWidth: 8, halign: 'center' },
+      1: { cellWidth: 75, halign: 'right', fontStyle: 'bold' },
+      2: { cellWidth: 35, halign: 'right', fontStyle: 'bold', textColor: [4, 120, 87] },
+      3: { halign: 'right' },
     },
-    foot: [[
-      'Total',
-      '',
-      '',
-      `${detailedSalesRows.length} Sales`,
-      totalSold,
-      '',
-      `Rs. ${grossSales.toLocaleString()}`,
-      `Cash: Rs. ${cashReceived.toLocaleString()} | Udhaar: Rs. ${creditPending.toLocaleString()}`,
-      '',
-    ]],
-    footStyles: { fillColor: [240, 243, 246], textColor: [20, 20, 20], fontStyle: 'bold', fontSize: 8 },
   });
 
-  const filename = `mandi_entire_record_report_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = `mandi_entire_shop_report_${new Date().toISOString().slice(0, 10)}.pdf`;
   const totalExpenses = lots.reduce((a, b) => a + b.summary.totalExpenses, 0);
-  return createPreviewData(doc, 'COMPLETE MANDI RECORD REPORT (ALL DETAILS)', filename, {
+  return createPreviewData(doc, 'COMPLETE SHOP FINANCIAL RECORD (تمام دکان تفصیلات)', filename, {
     reportType: 'entire_record',
     settings,
     dateFilterLabel,
@@ -739,8 +843,11 @@ export function buildEntireRecordReportPDF({
     entireLots: lots,
     summary: {
       grossSales,
-      commission,
+      commission: totalCommission,
       totalExpenses,
+      totalMazdoori,
+      totalMunshiana,
+      shopProfit: totalShopProfit,
       vendorPayable: netVendorPayable,
       cashReceived,
       creditPending,
@@ -867,6 +974,13 @@ export function buildSingleCustomerReportPDF(
     totalAmount: number;
     cashPaid: number;
     creditPending: number;
+    payments?: Array<{
+      date?: string;
+      paymentDate?: string;
+      amount: number;
+      paymentMethod?: string;
+      notes?: string;
+    }>;
     transactions: Array<{
       date: string;
       lotId: string;
@@ -903,10 +1017,10 @@ export function buildSingleCustomerReportPDF(
 
   doc.setFontSize(7.5);
   doc.setTextColor(100, 100, 100);
-  doc.text('TOTAL PURCHASES', 20, currentY + 4.5);
-  doc.text('TOTAL UNITS BOUGHT', 68, currentY + 4.5);
-  doc.text('CASH PAID', 115, currentY + 4.5);
-  doc.text('REMAINING UDHAAR (BALANCE)', 155, currentY + 4.5);
+  doc.text('TOTAL PURCHASES (کل خریداری)', 20, currentY + 4.5);
+  doc.text('TOTAL UNITS BOUGHT (تعداد)', 68, currentY + 4.5);
+  doc.text('CASH PAID (نقد وصول شدہ)', 115, currentY + 4.5);
+  doc.text('REMAINING UDHAAR (بقایا ادھار)', 155, currentY + 4.5);
 
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'bold');
@@ -922,7 +1036,7 @@ export function buildSingleCustomerReportPDF(
 
   currentY += 21;
 
-  // Transactions Table
+  // Purchases Table (NO MISLEADING KHATA UDHAAR STATUS)
   const txRows = customer.transactions.map((tx, idx) => [
     idx + 1,
     tx.date,
@@ -930,24 +1044,22 @@ export function buildSingleCustomerReportPDF(
     tx.quantity,
     `Rs. ${tx.ratePerUnit}`,
     `Rs. ${tx.totalAmount.toLocaleString()}`,
-    tx.paymentStatus === 'cash' ? 'CASH (PAID)' : 'UDHAAR (PENDING)',
   ]);
 
   autoTable(doc, {
     startY: currentY,
-    head: [['#', 'Date', 'Product / Commodity', 'Qty', 'Rate (PKR)', 'Total Amount', 'Status']],
+    head: [['#', 'Date', 'Product / Commodity (جنس)', 'Qty', 'Rate (PKR)', 'Total Amount (PKR)']],
     body: txRows,
     theme: 'grid',
     headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 8.5, fontStyle: 'bold' },
     styles: { fontSize: 8, cellPadding: 2.5 },
     columnStyles: {
       0: { cellWidth: 8, halign: 'center' },
-      1: { halign: 'center' },
+      1: { cellWidth: 26, halign: 'center' },
       2: { fontStyle: 'bold' },
-      3: { halign: 'center' },
-      4: { halign: 'center' },
-      5: { halign: 'right', fontStyle: 'bold' },
-      6: { halign: 'center' },
+      3: { cellWidth: 20, halign: 'center' },
+      4: { cellWidth: 28, halign: 'center' },
+      5: { cellWidth: 38, halign: 'right', fontStyle: 'bold' },
     },
     foot: [[
       'Total',
@@ -956,10 +1068,62 @@ export function buildSingleCustomerReportPDF(
       customer.totalUnitsBought,
       '',
       `Rs. ${customer.totalAmount.toLocaleString()}`,
-      `Udhaar: Rs. ${customer.creditPending.toLocaleString()}`,
     ]],
     footStyles: { fillColor: [240, 243, 246], textColor: [20, 20, 20], fontStyle: 'bold', fontSize: 8.5 },
   });
+
+  currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 8 : currentY + 30;
+
+  // Section 2: Payments Received & Khata Recovery Table
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 110, 50);
+  doc.text('PAYMENTS RECEIVED & KHATA RECOVERY (وصول شدہ نقد ادائیگیاں)', 14, currentY);
+  currentY += 3;
+
+  const paymentRows = (customer.payments || []).map((p, idx) => [
+    idx + 1,
+    p.date || p.paymentDate || '-',
+    p.paymentMethod === 'online' ? 'Online Bank' : p.paymentMethod === 'cheque' ? 'Cheque' : 'Cash (نقد)',
+    p.notes || 'نقد وصولی',
+    `Rs. ${p.amount.toLocaleString()}`,
+  ]);
+
+  if (paymentRows.length === 0 && customer.cashPaid > 0) {
+    paymentRows.push([
+      1,
+      '-',
+      'Cash Direct',
+      'نقد وصولی بموقع خریداری',
+      `Rs. ${customer.cashPaid.toLocaleString()}`,
+    ]);
+  }
+
+  if (paymentRows.length > 0) {
+    autoTable(doc, {
+      startY: currentY,
+      head: [['#', 'Date', 'Payment Method', 'Notes / Description', 'Amount Received (PKR)']],
+      body: paymentRows,
+      theme: 'grid',
+      headStyles: { fillColor: [15, 110, 50], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+      styles: { fontSize: 8, cellPadding: 2.2 },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 26, halign: 'center' },
+        2: { cellWidth: 32, halign: 'center' },
+        3: { halign: 'left' },
+        4: { cellWidth: 42, halign: 'right', fontStyle: 'bold', textColor: [15, 110, 50] },
+      },
+      foot: [[
+        'Total',
+        '',
+        '',
+        'Total Cash Received (کل نقد وصول شدہ)',
+        `Rs. ${customer.cashPaid.toLocaleString()}`,
+      ]],
+      footStyles: { fillColor: [240, 248, 240], textColor: [15, 110, 50], fontStyle: 'bold', fontSize: 8.5 },
+    });
+  }
 
   const filename = `customer_${customer.customerName}_statement_${new Date().toISOString().slice(0, 10)}.pdf`;
   return createPreviewData(doc, `${customer.customerName} Statement`, filename, {
@@ -1106,6 +1270,8 @@ export function buildSingleVendorReportPDF(
     totalExpenses: number;
     commission: number;
     netPayable: number;
+    totalPaid?: number;
+    pendingBalance?: number;
     lots: VendorLot[];
   },
   settings: AppSettings,
@@ -1125,6 +1291,9 @@ export function buildSingleVendorReportPDF(
     subInfo
   );
 
+  const svPaid = vendor.totalPaid !== undefined ? vendor.totalPaid : 0;
+  const svPending = vendor.pendingBalance !== undefined ? vendor.pendingBalance : Math.max(0, vendor.netPayable - svPaid);
+
   // Stats Card
   doc.setFillColor(252, 248, 245);
   doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'F');
@@ -1134,42 +1303,54 @@ export function buildSingleVendorReportPDF(
   doc.setFontSize(7.5);
   doc.setTextColor(100, 100, 100);
   doc.text('TOTAL GROSS SALES', 20, currentY + 4.5);
-  doc.text('COMMISSION FEE', 68, currentY + 4.5);
-  doc.text('TOTAL EXPENSES', 115, currentY + 4.5);
-  doc.text('NET PAYABLE TO VENDOR', 155, currentY + 4.5);
+  doc.text('COMMISSION & EXPENSES', 65, currentY + 4.5);
+  doc.text('CASH PAID (نقد ادا)', 118, currentY + 4.5);
+  doc.text('PENDING CREDIT (ادھار بقایا)', 155, currentY + 4.5);
 
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20, 20, 20);
   doc.text(`Rs. ${vendor.grossSales.toLocaleString()}`, 20, currentY + 11);
 
-  doc.setTextColor(15, 120, 50);
-  doc.text(`Rs. ${vendor.commission.toLocaleString()}`, 68, currentY + 11);
-
   doc.setTextColor(140, 60, 20);
-  doc.text(`Rs. ${vendor.totalExpenses.toLocaleString()}`, 115, currentY + 11);
+  doc.text(`Rs. ${(vendor.commission + vendor.totalExpenses).toLocaleString()}`, 65, currentY + 11);
 
-  doc.setTextColor(20, 40, 90);
-  doc.text(`Rs. ${vendor.netPayable.toLocaleString()}`, 155, currentY + 11);
+  doc.setTextColor(15, 120, 50);
+  doc.text(`Rs. ${svPaid.toLocaleString()}`, 118, currentY + 11);
+
+  if (svPending > 0) {
+    doc.setTextColor(180, 40, 20);
+  } else {
+    doc.setTextColor(20, 40, 90);
+  }
+  doc.text(`Rs. ${svPending.toLocaleString()}`, 155, currentY + 11);
 
   currentY += 21;
 
   // Vendor's Lots Breakdown
-  const lotRows = vendor.lots.map((l, idx) => [
-    idx + 1,
-    l.arrivalDate,
-    l.lotNumber,
-    `${l.productUrdu || l.productName} (${l.unitType})`,
-    l.vehicleNumber || '-',
-    `${l.summary.totalSoldQuantity} / ${l.totalQuantity}`,
-    `Rs. ${l.summary.grossSales.toLocaleString()}`,
-    `Rs. ${l.summary.arhtiProfitCommission.toLocaleString()}`,
-    `Rs. ${l.summary.netPayableToVendor.toLocaleString()}`,
-  ]);
+  const lotRows = vendor.lots.map((l, idx) => {
+    const lotNet = l.summary.netPayableToVendor;
+    const lotPaid = l.vendorPaymentAmount !== undefined ? l.vendorPaymentAmount : (l.vendorPaymentStatus === 'paid' ? lotNet : 0);
+    const isPaid = l.vendorPaymentStatus === 'paid' || lotPaid >= lotNet;
+    const isPartial = l.vendorPaymentStatus === 'partial' || (lotPaid > 0 && lotPaid < lotNet);
+    const statusStr = isPaid ? 'Cash (Paid)' : isPartial ? 'Partial' : 'Credit (Pending)';
+
+    return [
+      idx + 1,
+      l.arrivalDate,
+      l.lotNumber,
+      `${l.productUrdu || l.productName} (${l.unitType})`,
+      l.vehicleNumber || '-',
+      `${l.summary.totalSoldQuantity} / ${l.totalQuantity}`,
+      `Rs. ${l.summary.grossSales.toLocaleString()}`,
+      `Rs. ${lotNet.toLocaleString()}`,
+      statusStr,
+    ];
+  });
 
   autoTable(doc, {
     startY: currentY,
-    head: [['#', 'Date', 'Lot #', 'Commodity', 'Vehicle', 'Sold / Total', 'Gross Sales', 'Commission', 'Net Payable']],
+    head: [['#', 'Date', 'Lot #', 'Commodity', 'Vehicle', 'Sold / Total', 'Gross Sales', 'Net Payable', 'Status (Cash/Credit)']],
     body: lotRows,
     theme: 'grid',
     headStyles: { fillColor: [70, 40, 20], textColor: 255, fontSize: 8.5, fontStyle: 'bold' },
@@ -1181,9 +1362,9 @@ export function buildSingleVendorReportPDF(
       3: { fontStyle: 'bold' },
       4: { halign: 'center' },
       5: { halign: 'center' },
-      6: { halign: 'right', fontStyle: 'bold' },
-      7: { halign: 'right', textColor: [15, 120, 50] },
-      8: { halign: 'right', fontStyle: 'bold', textColor: [20, 30, 80] },
+      6: { halign: 'right' },
+      7: { halign: 'right', fontStyle: 'bold', textColor: [20, 30, 80] },
+      8: { halign: 'center', fontStyle: 'bold' },
     },
     foot: [[
       'Total',
@@ -1193,8 +1374,8 @@ export function buildSingleVendorReportPDF(
       '',
       `${vendor.unitsSold} / ${vendor.totalUnits}`,
       `Rs. ${vendor.grossSales.toLocaleString()}`,
-      `Rs. ${vendor.commission.toLocaleString()}`,
       `Rs. ${vendor.netPayable.toLocaleString()}`,
+      `Paid: Rs. ${svPaid.toLocaleString()} | Credit: Rs. ${svPending.toLocaleString()}`,
     ]],
     footStyles: { fillColor: [250, 245, 240], textColor: [20, 20, 20], fontStyle: 'bold', fontSize: 8.5 },
   });

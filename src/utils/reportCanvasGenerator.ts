@@ -214,15 +214,16 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
     };
     rows = sv.lots || [];
     colDefs = [
-      { title: '#', w: 35, align: 'center' },
-      { title: 'آمد تاریخ', w: 80, align: 'center' },
-      { title: 'لاٹ #', w: 70, align: 'center' },
-      { title: 'جنس و تفصیل', w: 135, align: 'right' },
-      { title: 'گاڑی نمبر', w: 80, align: 'center' },
-      { title: 'فروخت / کل نگ', w: 85, align: 'center' },
-      { title: 'کل فروخت', w: 98, align: 'right' },
-      { title: 'کمیشن', w: 85, align: 'right' },
-      { title: 'صافی واجب الادا', w: 110, align: 'right' },
+      { title: '#', w: 28, align: 'center' },
+      { title: 'آمد تاریخ', w: 72, align: 'center' },
+      { title: 'لاٹ #', w: 62, align: 'center' },
+      { title: 'جنس و تفصیل', w: 125, align: 'right' },
+      { title: 'گاڑی نمبر', w: 65, align: 'center' },
+      { title: 'فروخت / کل', w: 75, align: 'center' },
+      { title: 'کل فروخت', w: 80, align: 'right' },
+      { title: 'کمیشن', w: 65, align: 'right' },
+      { title: 'صافی رقم', w: 88, align: 'right' },
+      { title: 'حیثیت (نقد/ادھار)', w: 110, align: 'center' },
     ];
     drawRowFn = (ctx, lot, idx, y) => {
       let currentX = tableX;
@@ -230,57 +231,71 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       ctx.fillStyle = '#64748b';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${idx + 1}`, currentX + 17, y + 17);
-      currentX += 35;
+      ctx.fillText(`${idx + 1}`, currentX + 14, y + 17);
+      currentX += 28;
       // Date
       ctx.fillStyle = '#334155';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(lot.arrivalDate || '-', currentX + 40, y + 17);
-      currentX += 80;
+      ctx.fillText(lot.arrivalDate || '-', currentX + 36, y + 17);
+      currentX += 72;
       // Lot #
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.font = 'bold 10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(lot.lotNumber || '-', currentX + 35, y + 17);
-      currentX += 70;
+      ctx.fillText(lot.lotNumber || '-', currentX + 31, y + 17);
+      currentX += 62;
       // Product
       ctx.fillStyle = '#0f172a';
       ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
       ctx.textAlign = 'right';
-      ctx.fillText(`${lot.productUrdu || lot.productName} (${lot.unitType})`, currentX + 127, y + 17);
-      currentX += 135;
+      ctx.fillText(`${lot.productUrdu || lot.productName} (${lot.unitType})`, currentX + 118, y + 17);
+      currentX += 125;
       // Vehicle
       ctx.fillStyle = '#475569';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(lot.vehicleNumber || '-', currentX + 40, y + 17);
-      currentX += 80;
+      ctx.fillText(lot.vehicleNumber || '-', currentX + 32, y + 17);
+      currentX += 65;
       // Sold / Total
       ctx.fillStyle = '#334155';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${lot.summary?.totalSoldQuantity ?? 0} / ${lot.totalQuantity}`, currentX + 42, y + 17);
-      currentX += 85;
+      ctx.fillText(`${lot.summary?.totalSoldQuantity ?? 0} / ${lot.totalQuantity}`, currentX + 37, y + 17);
+      currentX += 75;
       // Gross
       ctx.fillStyle = '#0f172a';
       ctx.font = 'bold 10px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(formatPKR(lot.summary?.grossSales || 0, '', 'en'), currentX + 90, y + 17);
-      currentX += 98;
+      ctx.fillText(formatPKR(lot.summary?.grossSales || 0, '', 'en'), currentX + 75, y + 17);
+      currentX += 80;
       // Commission
       ctx.fillStyle = '#065f46';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(formatPKR(lot.summary?.arhtiProfitCommission || 0, '', 'en'), currentX + 77, y + 17);
-      currentX += 85;
+      ctx.fillText(formatPKR(lot.summary?.arhtiProfitCommission || 0, '', 'en'), currentX + 60, y + 17);
+      currentX += 65;
       // Net
       ctx.fillStyle = '#1e3a8a';
       ctx.font = 'bold 10.5px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(formatPKR(lot.summary?.netPayableToVendor || 0, '', 'en'), currentX + 102, y + 17);
+      ctx.fillText(formatPKR(lot.summary?.netPayableToVendor || 0, '', 'en'), currentX + 82, y + 17);
+      currentX += 88;
+      // Payment Status (Cash or Credit)
+      const lotNet = lot.summary?.netPayableToVendor || 0;
+      const lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : (lot.vendorPaymentStatus === 'paid' ? lotNet : 0);
+      const isPaid = lot.vendorPaymentStatus === 'paid' || lotPaid >= lotNet;
+      const isPartial = lot.vendorPaymentStatus === 'partial' || (lotPaid > 0 && lotPaid < lotNet);
+      const statusText = isPaid ? 'نقد (ادا شدہ)' : isPartial ? 'جزوی نقد' : 'ادھار (بقایا)';
+      const statusColor = isPaid ? '#065f46' : isPartial ? '#b45309' : '#9f1239';
+      ctx.fillStyle = statusColor;
+      ctx.font = 'bold 10px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(statusText, currentX + 55, y + 17);
     };
-    totalSummaryText = `کل لاٹس: ${rows.length} • کل مال فروخت: ${formatPKR(sv.grossSales, 'Rs.', 'en')} • کمیشن: ${formatPKR(sv.commission, 'Rs.', 'en')} • کٹوتیاں: ${formatPKR(sv.totalExpenses, 'Rs.', 'en')} • صافی میزان زمیندار: ${formatPKR(sv.netPayable, 'Rs.', 'en')}`;
+    const svPaid = sv.totalPaid !== undefined ? sv.totalPaid : 0;
+    const svPending = sv.pendingBalance !== undefined ? sv.pendingBalance : Math.max(0, sv.netPayable - svPaid);
+    totalSummaryText = `کل لاٹس: ${rows.length} • کل مال فروخت: ${formatPKR(sv.grossSales, 'Rs.', 'en')} • کمیشن: ${formatPKR(sv.commission, 'Rs.', 'en')} • صافی رقم: ${formatPKR(sv.netPayable, 'Rs.', 'en')} • ادا شدہ نقد: ${formatPKR(svPaid, 'Rs.', 'en')} • واجب الادا بقایا: ${formatPKR(svPending, 'Rs.', 'en')}`;
   }
   // 2. Single Customer Statement
   else if (singleCustomer || reportType === 'single_customer') {
@@ -297,11 +312,10 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
     colDefs = [
       { title: '#', w: 35, align: 'center' },
       { title: 'تاریخ', w: 85, align: 'center' },
-      { title: 'جنس و تفصیل', w: 190, align: 'right' },
-      { title: 'تعداد (نگ)', w: 85, align: 'center' },
-      { title: 'ریٹ (روپے)', w: 85, align: 'right' },
-      { title: 'کل رقم', w: 148, align: 'right' },
-      { title: 'حیثیت ادائیگی', w: 150, align: 'center' },
+      { title: 'جنس و تفصیل', w: 230, align: 'right' },
+      { title: 'تعداد (نگ)', w: 95, align: 'center' },
+      { title: 'ریٹ (روپے)', w: 105, align: 'right' },
+      { title: 'کل خریداری رقم', w: 228, align: 'right' },
     ];
     drawRowFn = (ctx, tx, idx, y) => {
       let currentX = tableX;
@@ -321,32 +335,25 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       ctx.fillStyle = '#0f172a';
       ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
       ctx.textAlign = 'right';
-      ctx.fillText(tx.productUrdu || (tx as any).productName || '-', currentX + 182, y + 17);
-      currentX += 190;
+      ctx.fillText(tx.productUrdu || (tx as any).productName || '-', currentX + 220, y + 17);
+      currentX += 230;
       // Qty
       ctx.fillStyle = '#0f172a';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${tx.quantity}`, currentX + 42, y + 17);
-      currentX += 85;
+      ctx.fillText(`${tx.quantity}`, currentX + 47, y + 17);
+      currentX += 95;
       // Rate
       ctx.fillStyle = '#334155';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(`Rs. ${tx.ratePerUnit}`, currentX + 75, y + 17);
-      currentX += 85;
+      ctx.fillText(`Rs. ${tx.ratePerUnit}`, currentX + 95, y + 17);
+      currentX += 105;
       // Total
       ctx.fillStyle = '#0f172a';
       ctx.font = 'bold 10.5px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(formatPKR(tx.totalAmount, '', 'en'), currentX + 138, y + 17);
-      currentX += 148;
-      // Status
-      const isCash = tx.paymentStatus === 'cash';
-      ctx.fillStyle = isCash ? '#065f46' : '#9f1239';
-      ctx.font = 'bold 10.5px "Noto Sans Arabic", system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(isCash ? 'نقد (ادا شدہ)' : 'ادھار (کھاتہ)', currentX + 75, y + 17);
+      ctx.fillText(formatPKR(tx.totalAmount, '', 'en'), currentX + 218, y + 17);
     };
     totalSummaryText = `کل خریداری: ${rows.length} بار • مجموعی مال خریدا: ${formatPKR(sc.totalAmount, 'Rs.', 'en')} • نقد وصولی: ${formatPKR(sc.cashPaid, 'Rs.', 'en')} • بقایا ادھار: ${formatPKR(sc.creditPending, 'Rs.', 'en')}`;
   }
@@ -549,6 +556,149 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
     };
     const totalExp = rows.reduce((sum, r) => sum + (r.amount || 0), 0);
     totalSummaryText = `کل اخراجات کے اندراجات: ${rows.length} • مجموعی دکان اخراجات: ${formatPKR(totalExp, 'Rs.', 'en')}`;
+  } else if (reportType === 'entire_record' || previewData.entireLots) {
+    const lots = previewData.entireLots || [];
+
+    // Group purely by date into shop financial lines (NO vendor products or lots)
+    const dateMap = new Map<
+      string,
+      {
+        date: string;
+        grossSales: number;
+        mazdoori: number;
+        munshiana: number;
+        commission: number;
+        shopProfit: number;
+        cashReceived: number;
+        creditPending: number;
+      }
+    >();
+
+    lots.forEach((l: any) => {
+      const d = l.arrivalDate || 'N/A';
+      if (!dateMap.has(d)) {
+        dateMap.set(d, {
+          date: d,
+          grossSales: 0,
+          mazdoori: 0,
+          munshiana: 0,
+          commission: 0,
+          shopProfit: 0,
+          cashReceived: 0,
+          creditPending: 0,
+        });
+      }
+      const entry = dateMap.get(d)!;
+      entry.grossSales += (l.summary?.grossSales || 0);
+      const maz = l.expenses?.mazdoori?.enabled ? Number(l.expenses.mazdoori.amount) || 0 : 0;
+      const mun = l.expenses?.munshiana?.enabled ? Number(l.expenses.munshiana.amount) || 0 : 0;
+      const com = l.summary?.arhtiProfitCommission || 0;
+      entry.mazdoori += maz;
+      entry.munshiana += mun;
+      entry.commission += com;
+      entry.shopProfit += (com + mun);
+
+      (l.sales || []).forEach((s: any) => {
+        if (s.paymentStatus === 'cash') {
+          entry.cashReceived += s.totalAmount;
+        } else {
+          const paid = s.paidAmount || 0;
+          entry.cashReceived += paid;
+          entry.creditPending += Math.max(0, s.totalAmount - paid);
+        }
+      });
+    });
+
+    const shopRows = Array.from(dateMap.values()).sort((a, b) => b.date.localeCompare(a.date));
+    rows = shopRows;
+
+    colDefs = [
+      { title: '#', w: 32, align: 'center' },
+      { title: 'تاریخ', w: 85, align: 'center' },
+      { title: 'مالی کھاتہ / تفصیل', w: 155, align: 'right' },
+      { title: 'مجموعی فروخت', w: 96, align: 'right' },
+      { title: 'مزدوری فنڈ', w: 78, align: 'right' },
+      { title: 'منشیانہ', w: 74, align: 'right' },
+      { title: 'کمیشن', w: 78, align: 'right' },
+      { title: 'دکان منافع', w: 85, align: 'right' },
+      { title: 'نقد / ادھار', w: 95, align: 'center' },
+    ];
+    drawRowFn = (ctx, r: any, idx, y) => {
+      let currentX = tableX;
+      // Col 1: #
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${idx + 1}`, currentX + 16, y + 17);
+      currentX += 32;
+
+      // Col 2: Date
+      ctx.fillStyle = '#334155';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(r.date, currentX + 42, y + 17);
+      currentX += 85;
+
+      // Col 3: Financial Head (NO VENDOR PRODUCTS)
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText('دکان کاروباری سیل و حساب', currentX + 145, y + 17);
+      currentX += 155;
+
+      // Col 4: Gross Sell
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(r.grossSales || 0, '', 'en'), currentX + 88, y + 17);
+      currentX += 96;
+
+      // Col 5: Labour (Mazdoori)
+      ctx.fillStyle = '#1e293b';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(r.mazdoori || 0, '', 'en'), currentX + 70, y + 17);
+      currentX += 78;
+
+      // Col 6: Manshiyana (Munshiana)
+      ctx.fillStyle = '#6d28d9';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(r.munshiana || 0, '', 'en'), currentX + 68, y + 17);
+      currentX += 74;
+
+      // Col 7: Commission
+      ctx.fillStyle = '#065f46';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(r.commission || 0, '', 'en'), currentX + 72, y + 17);
+      currentX += 78;
+
+      // Col 8: Shop Profit
+      ctx.fillStyle = '#047857';
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(r.shopProfit || 0, '', 'en'), currentX + 78, y + 17);
+      currentX += 85;
+
+      // Col 9: Cash / Udhaar
+      const cash = r.cashReceived || 0;
+      const udh = r.creditPending || 0;
+      ctx.fillStyle = udh > 0 ? '#b45309' : '#047857';
+      ctx.font = '9.5px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(udh > 0 ? `ن:${Math.round(cash / 1000)}k | اد:${Math.round(udh / 1000)}k` : `نقد:${Math.round(cash / 1000)}k`, currentX + 47, y + 17);
+    };
+
+    const totalGross = summary?.grossSales || lots.reduce((a: number, b: any) => a + (b.summary?.grossSales || 0), 0);
+    const totalMaz = summary?.totalMazdoori !== undefined ? summary.totalMazdoori : lots.reduce((a: number, b: any) => a + (b.expenses?.mazdoori?.enabled ? Number(b.expenses.mazdoori.amount) || 0 : 0), 0);
+    const totalMun = summary?.totalMunshiana !== undefined ? summary.totalMunshiana : lots.reduce((a: number, b: any) => a + (b.expenses?.munshiana?.enabled ? Number(b.expenses.munshiana.amount) || 0 : 0), 0);
+    const totalCom = summary?.commission || lots.reduce((a: number, b: any) => a + (b.summary?.arhtiProfitCommission || 0), 0);
+    const totalProf = summary?.shopProfit || (totalCom + totalMun);
+    const totalCash = summary?.cashReceived || 0;
+    const totalUdh = summary?.creditPending || 0;
+
+    totalSummaryText = `مجموعی دکان کاروبار: ${formatPKR(totalGross, 'Rs.', 'en')} • کل مزدوری: ${formatPKR(totalMaz, 'Rs.', 'en')} • کل منشیانہ: ${formatPKR(totalMun, 'Rs.', 'en')} • خالص دکان منافع: ${formatPKR(totalProf, 'Rs.', 'en')} • نقد وصولی: ${formatPKR(totalCash, 'Rs.', 'en')} • بقایا ادھار: ${formatPKR(totalUdh, 'Rs.', 'en')}`;
   } else if (dateRows && dateRows.length > 0) {
     rows = dateRows;
     colDefs = [
@@ -671,14 +821,16 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
   } else if (vendorRows && vendorRows.length > 0) {
     rows = vendorRows;
     colDefs = [
-      { title: '#', w: 35, align: 'center' },
-      { title: 'زمیندار / کاشتکار', w: 220, align: 'right' },
-      { title: 'شہر', w: 100, align: 'right' },
-      { title: 'اجناس', w: 60, align: 'center' },
-      { title: 'فروخت / آمد', w: 85, align: 'center' },
-      { title: 'کل رقم', w: 100, align: 'right' },
-      { title: 'کمیشن', w: 80, align: 'right' },
-      { title: 'صافی واجب الادا', w: 98, align: 'right' },
+      { title: '#', w: 26, align: 'center' },
+      { title: 'زمیندار / کاشتکار', w: 165, align: 'right' },
+      { title: 'شہر', w: 65, align: 'center' },
+      { title: 'لاٹس', w: 38, align: 'center' },
+      { title: 'فروخت/آمد', w: 68, align: 'center' },
+      { title: 'کل رقم', w: 76, align: 'right' },
+      { title: 'صافی میزان', w: 82, align: 'right' },
+      { title: 'ادا شدہ', w: 76, align: 'right' },
+      { title: 'بقایا ادھار', w: 76, align: 'right' },
+      { title: 'حیثیت (نقد/ادھار)', w: 98, align: 'center' },
     ];
     drawRowFn = (ctx, v, idx, y) => {
       let currentX = tableX;
@@ -686,51 +838,72 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       ctx.fillStyle = '#64748b';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${idx + 1}`, currentX + 17, y + 17);
-      currentX += 35;
+      ctx.fillText(`${idx + 1}`, currentX + 13, y + 17);
+      currentX += 26;
       // Name
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 11.5px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
       ctx.textAlign = 'right';
-      ctx.fillText(v.vendorName, currentX + 210, y + 17);
-      currentX += 220;
+      ctx.fillText(v.vendorName, currentX + 155, y + 17);
+      currentX += 165;
       // City
       ctx.fillStyle = '#475569';
-      ctx.font = '11px "Noto Sans Arabic", system-ui, sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(v.city || '-', currentX + 90, y + 17);
-      currentX += 100;
+      ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(v.city || '-', currentX + 32, y + 17);
+      currentX += 65;
       // Lots
       ctx.fillStyle = '#334155';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${v.lotsCount}`, currentX + 30, y + 17);
-      currentX += 60;
+      ctx.fillText(`${v.lotsCount}`, currentX + 19, y + 17);
+      currentX += 38;
       // Units
       ctx.fillStyle = '#334155';
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${v.unitsSold} / ${v.totalUnits}`, currentX + 42, y + 17);
-      currentX += 85;
+      ctx.fillText(`${v.unitsSold} / ${v.totalUnits}`, currentX + 34, y + 17);
+      currentX += 68;
       // Gross
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(formatPKR(v.grossSales, '', 'en'), currentX + 92, y + 17);
-      currentX += 100;
-      // Commission
-      ctx.fillStyle = '#065f46';
-      ctx.font = '10.5px system-ui, sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(formatPKR(v.commission, '', 'en'), currentX + 72, y + 17);
-      currentX += 80;
+      ctx.fillText(formatPKR(v.grossSales, '', 'en'), currentX + 70, y + 17);
+      currentX += 76;
       // Net
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.font = 'bold 10px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(formatPKR(v.netPayable, '', 'en'), currentX + 90, y + 17);
+      ctx.fillText(formatPKR(v.netPayable, '', 'en'), currentX + 76, y + 17);
+      currentX += 82;
+      // Paid (نقد)
+      const paidVal = v.totalPaid !== undefined ? v.totalPaid : 0;
+      ctx.fillStyle = '#065f46';
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(paidVal, '', 'en'), currentX + 70, y + 17);
+      currentX += 76;
+      // Pending (بقایا ادھار)
+      const pendingVal = v.pendingBalance !== undefined ? v.pendingBalance : Math.max(0, v.netPayable - paidVal);
+      ctx.fillStyle = pendingVal > 0 ? '#9f1239' : '#64748b';
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatPKR(pendingVal, '', 'en'), currentX + 70, y + 17);
+      currentX += 76;
+      // Status (نقد / ادھار)
+      const isPaid = (v.pendingBalance !== undefined && v.pendingBalance <= 0 && v.netPayable > 0) || v.paymentStatus === 'paid' || v.paymentStatus === 'cash';
+      const isPartial = (paidVal > 0 && pendingVal > 0) || v.paymentStatus === 'partial';
+      const statusText = isPaid ? 'نقد (ادا شدہ)' : isPartial ? 'جزوی نقد' : 'ادھار (بقایا)';
+      const statusColor = isPaid ? '#065f46' : isPartial ? '#b45309' : '#9f1239';
+      ctx.fillStyle = statusColor;
+      ctx.font = 'bold 9.5px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(statusText, currentX + 49, y + 17);
     };
-    totalSummaryText = `کل زمیندار: ${rows.length} • مجموعی مال فروخت: ${formatPKR(summary?.grossSales || 0, 'Rs.', 'en')} • صافی میزان: ${formatPKR(summary?.vendorPayable || (summary as any)?.netPayableToVendor || 0, 'Rs.', 'en')}`;
+    const totalVendorGross = summary?.grossSales || rows.reduce((a, b) => a + (b.grossSales || 0), 0);
+    const totalVendorPaid = summary?.vendorPaid !== undefined ? summary.vendorPaid : rows.reduce((a, b) => a + (b.totalPaid || 0), 0);
+    const totalVendorPending = summary?.vendorPending !== undefined ? summary.vendorPending : rows.reduce((a, b) => a + (b.pendingBalance !== undefined ? b.pendingBalance : Math.max(0, b.netPayable - (b.totalPaid || 0))), 0);
+    totalSummaryText = `کل زمیندار: ${rows.length} • مجموعی مال فروخت: ${formatPKR(totalVendorGross, 'Rs.', 'en')} • ادا شدہ نقد: ${formatPKR(totalVendorPaid, 'Rs.', 'en')} • واجب الادا بقایا: ${formatPKR(totalVendorPending, 'Rs.', 'en')}`;
   } else if (productRows && productRows.length > 0) {
     rows = productRows;
     colDefs = [
@@ -907,36 +1080,91 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         let card4Border = '#fecdd3';
         let card4Text = '#9f1239';
 
-        if (singleVendor || reportType === 'single_vendor') {
+        if (reportType === 'entire_record' || previewData.entireLots) {
+          card1Title = 'مجموعی دکان فروخت (Gross)';
+          card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
+
+          card2Title = 'مزدوری و منشیانہ';
+          const combinedMazMun = (summary.totalMazdoori || 0) + (summary.totalMunshiana || 0);
+          card2Val = formatPKR(combinedMazMun, 'Rs.', 'en');
+          card2Bg = '#faf5ff';
+          card2Border = '#e9d5ff';
+          card2Text = '#6b21a8';
+
+          card3Title = 'خالص دکان منافع (Profit)';
+          const prof = summary.shopProfit || ((summary.commission || 0) + (summary.totalMunshiana || 0));
+          card3Val = formatPKR(prof, 'Rs.', 'en');
+          card3Bg = '#ecfdf5';
+          card3Border = '#a7f3d0';
+          card3Text = '#047857';
+
+          card4Title = 'نقد وصولی و بقایا ادھار';
+          card4Val = `ن:${Math.round((summary.cashReceived || 0) / 1000)}k | اد:${Math.round((summary.creditPending || 0) / 1000)}k`;
+          card4Bg = '#eff6ff';
+          card4Border = '#bfdbfe';
+          card4Text = '#1e40af';
+        } else if (singleVendor || reportType === 'single_vendor') {
           card1Title = 'مجموعی مال فروخت';
           card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
 
           card2Title = 'کمیشن فیس';
           card2Val = formatPKR(summary.commission, 'Rs.', 'en');
 
-          card3Title = 'کل کٹوتیاں و اخراجات';
-          card3Val = formatPKR(summary.totalExpenses || 0, 'Rs.', 'en');
-          card3Bg = '#fef2f2';
-          card3Border = '#fecaca';
-          card3Text = '#991b1b';
+          card3Title = 'زمیندار کو نقد ادا';
+          const svPaid = summary.vendorPaid !== undefined ? summary.vendorPaid : (singleVendor?.totalPaid || 0);
+          card3Val = formatPKR(svPaid, 'Rs.', 'en');
+          card3Bg = '#ecfdf5';
+          card3Border = '#a7f3d0';
+          card3Text = '#065f46';
 
-          card4Title = 'صافی میزان (واجب الادا)';
-          card4Val = formatPKR(summary.vendorPayable || (summary as any)?.netPayableToVendor || 0, 'Rs.', 'en');
-          card4Bg = '#f0fdf4';
-          card4Border = '#bbf7d0';
-          card4Text = '#166534';
+          card4Title = 'واجب الادا بقایا (ادھار)';
+          const svPending = summary.vendorPending !== undefined ? summary.vendorPending : (singleVendor?.pendingBalance ?? summary.vendorPayable ?? 0);
+          card4Val = formatPKR(svPending, 'Rs.', 'en');
+          card4Bg = '#fff1f2';
+          card4Border = '#fecdd3';
+          card4Text = '#9f1239';
+        } else if (reportType === 'vendor' || (vendorRows && vendorRows.length > 0)) {
+          card1Title = 'مجموعی مال فروخت (زمیندار)';
+          card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
+
+          card2Title = 'کمیشن فیس آڑھت';
+          card2Val = formatPKR(summary.commission, 'Rs.', 'en');
+
+          card3Title = 'زمینداروں کو نقد ادا';
+          const vPaid = summary.vendorPaid !== undefined ? summary.vendorPaid : (summary.cashReceived || 0);
+          card3Val = formatPKR(vPaid, 'Rs.', 'en');
+          card3Bg = '#ecfdf5';
+          card3Border = '#a7f3d0';
+          card3Text = '#065f46';
+
+          card4Title = 'واجب الادا بقایا (ادھار)';
+          const vPending = summary.vendorPending !== undefined ? summary.vendorPending : (summary.vendorPayable || summary.creditPending || 0);
+          card4Val = formatPKR(vPending, 'Rs.', 'en');
+          card4Bg = '#fff1f2';
+          card4Border = '#fecdd3';
+          card4Text = '#9f1239';
         } else if (singleCustomer || reportType === 'single_customer') {
           card1Title = 'مجموعی مال خریدا';
           card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
 
-          card2Title = 'خریدے گئے نگ';
-          card2Val = `${summary.unitsSold || 0} نگ`;
+          card2Title = 'نقد ادا شدہ (وصول)';
+          card2Val = formatPKR(summary.cashReceived || 0, 'Rs.', 'en');
+          card2Bg = '#ecfdf5';
+          card2Border = '#a7f3d0';
+          card2Text = '#065f46';
 
-          card3Title = 'نقد وصولی';
-          card3Val = formatPKR(summary.cashReceived || 0, 'Rs.', 'en');
+          card3Title = 'صافی بقایا ادھار';
+          card3Val = formatPKR(summary.creditPending || 0, 'Rs.', 'en');
+          card3Bg = (summary.creditPending || 0) > 0 ? '#fff1f2' : '#ecfdf5';
+          card3Border = (summary.creditPending || 0) > 0 ? '#fecdd3' : '#a7f3d0';
+          card3Text = (summary.creditPending || 0) > 0 ? '#9f1239' : '#065f46';
 
-          card4Title = 'بقایا ادھار (کھاتہ)';
-          card4Val = formatPKR(summary.creditPending || 0, 'Rs.', 'en');
+          const isFullySettled = (summary.creditPending || 0) <= 0;
+          card4Title = 'کیفیت کھاتہ';
+          card4Val = isFullySettled ? '✅ مکمل ادا شدہ' : '⚠️ بقایا ادھار';
+          card4Bg = isFullySettled ? '#ecfdf5' : '#fff1f2';
+          card4Border = isFullySettled ? '#a7f3d0' : '#fecdd3';
+          card4Text = isFullySettled ? '#065f46' : '#9f1239';
         } else if (singleProduct || reportType === 'single_product') {
           card1Title = 'مجموعی ٹرن اوور';
           card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
