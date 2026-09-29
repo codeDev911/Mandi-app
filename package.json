@@ -1,9 +1,9 @@
 {
-  "name": "react-example",
+  "name": "Mandi App",
   "private": true,
   "version": "1.0.0",
   "description": "Mandi Bolli Commission Billing and Khata App",
-  "author": "Mandi Bolli App",
+  "author": " Afnan Ahad",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -59,6 +59,7 @@
   "optionalDependencies": {
     "@rollup/rollup-win32-x64-msvc": "^4.34.8",
     "@rollup/rollup-linux-x64-gnu": "^4.34.8",
+    
     "lightningcss-win32-x64-msvc": "^1.29.1",
     "lightningcss-linux-x64-gnu": "^1.29.1",
     "@tailwindcss/oxide-win32-x64-msvc": "^4.1.14"
