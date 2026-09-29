@@ -194,6 +194,7 @@ export interface BuyerPaymentRecord {
 
 export type ExpenseCategory =
   | 'tea_food'     // چائے / لنگر / کھانا
+  | 'tea'          // alias for tea_food
   | 'electricity'  // بجلی / جنریٹر فیول
   | 'rent'         // دکان / گودام کرایہ
   | 'salary'       // ملازمین تنخواہ / روزانہ دیہاڑی
@@ -222,6 +223,7 @@ export const expenseCategoryLabels: Record<
   { ur: string; en: string; icon: string; color: string }
 > = {
   tea_food: { ur: 'چائے و کھانا', en: 'Tea & Food', icon: '☕', color: 'amber' },
+  tea: { ur: 'چائے و کھانا', en: 'Tea & Food', icon: '☕', color: 'amber' },
   electricity: { ur: 'بجلی و جنریٹر فیول', en: 'Electricity & Fuel', icon: '⚡', color: 'yellow' },
   rent: { ur: 'دکان و گودام کرایہ', en: 'Shop Rent', icon: '🏪', color: 'purple' },
   salary: { ur: 'ملازمین تنخواہ', en: 'Staff Salary', icon: '👤', color: 'blue' },

@@ -325,14 +325,14 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       isAveraged
     );
 
-    // Half of A4 in Landscape: 210mm wide x 148.5mm high
+    // Half of A4 in Portrait: 148.8mm wide x 210mm high
     const pdf = new jsPDF({
-      orientation: 'landscape',
+      orientation: 'portrait',
       unit: 'mm',
-      format: [148.5, 210],
+      format: [148.8, 210],
     });
-    const pdfPageWidth = pdf.internal.pageSize.getWidth(); // 210mm
-    const pdfPageHeight = pdf.internal.pageSize.getHeight(); // 148.5mm
+    const pdfPageWidth = pdf.internal.pageSize.getWidth(); // 148.8mm
+    const pdfPageHeight = pdf.internal.pageSize.getHeight(); // 210mm
     const pxPageHeight = Math.floor((canvas.width * pdfPageHeight) / pdfPageWidth);
     const totalCanvasHeight = canvas.height;
     let renderedHeight = 0;
@@ -355,7 +355,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       }
       const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.95);
       if (pageIndex > 0) {
-        pdf.addPage([148.5, 210], 'landscape');
+        pdf.addPage([148.8, 210], 'portrait');
       }
       const renderedSliceMmHeight = (sliceHeight * pdfPageWidth) / canvas.width;
       pdf.addImage(pageImgData, 'JPEG', 0, 0, pdfPageWidth, renderedSliceMmHeight, undefined, 'FAST');
@@ -767,11 +767,10 @@ ${itemsText}
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className="transition-all duration-150 ease-out flex justify-center max-w-full cursor-default my-2"
+          className="transition-all duration-150 ease-out flex justify-center cursor-default my-2"
           style={{
-            width: `${zoomLevel}%`,
-            maxWidth: '820px',
-            minWidth: '320px',
+            transform: `scale(${zoomLevel / 100})`,
+            transformOrigin: 'top center',
           }}
         >
           <InsafMandiBillView

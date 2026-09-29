@@ -604,8 +604,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   const searchedExpenses = useMemo(() => {
     return filteredExpensesByDate.filter((e) => {
-      if (selectedExpenseCategoryFilter !== 'all' && e.category !== selectedExpenseCategoryFilter) {
-        return false;
+      if (selectedExpenseCategoryFilter !== 'all') {
+        const matchesCat =
+          e.category === selectedExpenseCategoryFilter ||
+          (selectedExpenseCategoryFilter === 'tea_food' && (e.category as string) === 'tea');
+        if (!matchesCat) return false;
       }
       if (selectedExpensePaymentMethodFilter !== 'all' && e.paymentMethod !== selectedExpensePaymentMethodFilter) {
         return false;
@@ -1146,28 +1149,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
         {/* Cash in Drawer Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              sound.playTick();
-              setIsCashDrawerModalOpen(true);
-            }}
-            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{isUrdu ? '+ کیش جمع' : '+ Add Cash'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              sound.playTick();
-              setIsCashDrawerModalOpen(true);
-            }}
-            className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-xs"
-          >
-            <Minus className="w-3.5 h-3.5" />
-            <span>{isUrdu ? '- کیش نکالیں' : '- Deduct Cash'}</span>
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -2591,7 +2572,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               >
                 {isUrdu ? 'تمام کیٹیگریز' : 'All Categories'}
               </button>
-              {(Object.keys(expenseCategoryLabels) as ExpenseCategory[]).map((catKey) => {
+              {(Object.keys(expenseCategoryLabels) as ExpenseCategory[])
+                .filter((c) => c !== 'tea')
+                .map((catKey) => {
                 const label = expenseCategoryLabels[catKey];
                 return (
                   <button

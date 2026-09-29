@@ -6,6 +6,7 @@ import { sound } from '../utils/sound';
 import confetti from 'canvas-confetti';
 import { AddBidSaleModal } from './AddBidSaleModal';
 import { AllLotsModal } from './AllLotsModal';
+import { PinPromptModal } from './PinPromptModal';
 import {
   Gavel,
   Plus,
@@ -76,6 +77,8 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
   const [isAddBidOpen, setIsAddBidOpen] = useState(false);
   const [isAllLotsOpen, setIsAllLotsOpen] = useState(false);
   const [filterTab, setFilterTab] = useState<'active' | 'completed' | 'all'>('active');
+  const [pendingDeleteSale, setPendingDeleteSale] = useState<{ lotId: string; saleId: string; description: string } | null>(null);
+  const [pendingDeleteLot, setPendingDeleteLot] = useState<{ lotId: string; description: string } | null>(null);
 
   const selectedLot = lots.find((l) => l.id === selectedLotId) || lots[0];
 
@@ -368,6 +371,26 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                   <FileText className="w-3.5 h-3.5 text-slate-600" />
                   <span>{t.tabReceipt}</span>
                 </button>
+
+                {onDeleteLot && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.playTick();
+                      setPendingDeleteLot({
+                        lotId: selectedLot.id,
+                        description: isUrdu
+                          ? `لاٹ ریکارڈ حذف کریں: #${selectedLot.lotNumber} - ${selectedLot.vendorName} (${selectedLot.productUrdu})`
+                          : `Delete Lot Record: #${selectedLot.lotNumber} - ${selectedLot.vendorName}`,
+                      });
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition flex items-center gap-1.5 border border-rose-200 font-urdu-sans active:scale-95 cursor-pointer"
+                    title={isUrdu ? 'لاٹ حذف کریں' : 'Delete Lot'}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>{isUrdu ? 'لاٹ حذف' : 'Delete Lot'}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -546,12 +569,18 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                           </span>
                         </div>
                         <button
+                          type="button"
                           onClick={() => {
-                            if (confirm(isUrdu ? 'کیا آپ اس بولی کو حذف کرنا چاہتے ہیں؟' : 'Delete this bid?')) {
-                              onDeleteSale(selectedLot.id, sale.id);
-                            }
+                            sound.playTick();
+                            setPendingDeleteSale({
+                              lotId: selectedLot.id,
+                              saleId: sale.id,
+                              description: isUrdu
+                                ? `بولی حذف کریں: ${sale.buyerName} (${sale.quantity} ${unitLabel} @ ${formatPKR(sale.ratePerUnit, settings.currencySymbol, settings.language)})`
+                                : `Delete bid: ${sale.buyerName} (${sale.quantity} ${unitLabel})`,
+                            });
                           }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
                           title={t.delete}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -594,6 +623,40 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
           settings={settings}
         />
       )}
+
+      {/* PinPromptModal for Deleting a Bid / Sale */}
+      <PinPromptModal
+        isOpen={!!pendingDeleteSale}
+        onClose={() => setPendingDeleteSale(null)}
+        onSuccess={() => {
+          if (pendingDeleteSale) {
+            sound.playTrash();
+            onDeleteSale(pendingDeleteSale.lotId, pendingDeleteSale.saleId);
+            setPendingDeleteSale(null);
+          }
+        }}
+        correctPin={settings.securityPin || '1234'}
+        isUrdu={isUrdu}
+        title={isUrdu ? 'بولی ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Bid Deletion'}
+        itemDescription={pendingDeleteSale?.description}
+      />
+
+      {/* PinPromptModal for Deleting a Lot Record */}
+      <PinPromptModal
+        isOpen={!!pendingDeleteLot}
+        onClose={() => setPendingDeleteLot(null)}
+        onSuccess={() => {
+          if (pendingDeleteLot && onDeleteLot) {
+            sound.playTrash();
+            onDeleteLot(pendingDeleteLot.lotId);
+            setPendingDeleteLot(null);
+          }
+        }}
+        correctPin={settings.securityPin || '1234'}
+        isUrdu={isUrdu}
+        title={isUrdu ? 'لاٹ ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Lot Deletion'}
+        itemDescription={pendingDeleteLot?.description}
+      />
     </div>
   );
 };

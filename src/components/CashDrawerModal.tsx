@@ -196,31 +196,6 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
                 : `In: ${formatPKR(overallSummary.totalCashIn, settings.currencySymbol, settings.language)} | Out: ${formatPKR(overallSummary.totalCashOut, settings.currencySymbol, settings.language)}`}
             </span>
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                sound.playTick();
-                setAdjType('in');
-                setActiveTab('add_entry');
-              }}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-xs transition active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{isUrdu ? '+ کیش جمع کریں' : '+ Add Cash'}</span>
-            </button>
-            <button
-              onClick={() => {
-                sound.playTick();
-                setAdjType('out');
-                setActiveTab('add_entry');
-              }}
-              className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold font-urdu-sans flex items-center gap-1.5 shadow-xs transition active:scale-95"
-            >
-              <Minus className="w-4 h-4" />
-              <span>{isUrdu ? '- کیش نکالیں' : '- Deduct Cash'}</span>
-            </button>
-          </div>
         </div>
 
         {/* Navigation Tabs */}

@@ -13,6 +13,7 @@ import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt } from '../utils/receiptGenerator';
 import { PaginationControls } from './PaginationControls';
+import { PinPromptModal } from './PinPromptModal';
 import {
   Users,
   Search,
@@ -74,6 +75,8 @@ interface BuyersKhataViewProps {
   onToggleVendorPaymentStatus?: (lotId: string, customStatus?: 'pending' | 'paid') => void;
   onOpenReceipt?: (lotId: string) => void;
   onOpenExpenseSlip?: (lotId: string) => void;
+  onDeleteSale?: (lotId: string, saleId: string) => void;
+  onDeleteLot?: (lotId: string) => void;
   settings: AppSettings;
 }
 
@@ -93,6 +96,8 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   onToggleVendorPaymentStatus,
   onOpenReceipt,
   onOpenExpenseSlip,
+  onDeleteSale,
+  onDeleteLot,
   settings,
 }) => {
   const t = translations[settings.language];
@@ -100,6 +105,14 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
 
   // Primary Tab: Customer Khata vs. Vendor Khata & Payments
   const [activeKhataSection, setActiveKhataSection] = useState<'customers' | 'vendors'>('customers');
+
+  // Unified PIN Security Delete Action State
+  const [pendingDeleteAction, setPendingDeleteAction] = useState<{
+    type: 'buyer_sale' | 'customer_payment' | 'vendor_payment' | 'vendor_lot';
+    title: string;
+    description: string;
+    execute: () => void;
+  } | null>(null);
 
   // Customer Section States
   const [viewMode, setViewMode] = useState<'khatas' | 'transactions'>('khatas');
@@ -1312,6 +1325,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                       <th className="py-1.5 px-2.5 text-center">{t.qty}</th>
                                       <th className="py-1.5 px-2.5 text-center">{t.rate}</th>
                                       <th className="py-1.5 px-2.5 text-end">{t.totalAmount}</th>
+                                      {onDeleteSale && <th className="py-1.5 px-2 text-center">{isUrdu ? 'حذف' : 'Action'}</th>}
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
@@ -1326,6 +1340,32 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                         <td className="py-1.5 px-2.5 text-end font-bold font-numbers text-slate-900">
                                           {formatPKR(sale.totalAmount, settings.currencySymbol, settings.language)}
                                         </td>
+                                        {onDeleteSale && (
+                                          <td className="py-1.5 px-2 text-center">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                sound.playTick();
+                                                setPendingDeleteAction({
+                                                  type: 'buyer_sale',
+                                                  title: isUrdu ? 'بولی ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Bid Deletion',
+                                                  description: isUrdu
+                                                    ? `خریدار بولی حذف کریں: ${cust.name} - ${sale.productUrdu} (${sale.quantity} ${sale.unitLabel} @ ${formatPKR(sale.ratePerUnit, settings.currencySymbol, settings.language)})`
+                                                    : `Delete buyer bid: ${cust.name} - ${sale.productUrdu} (${sale.quantity} ${sale.unitLabel})`,
+                                                  execute: () => {
+                                                    if (onDeleteSale) {
+                                                      onDeleteSale(sale.lotId, sale.saleId);
+                                                    }
+                                                  },
+                                                });
+                                              }}
+                                              className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                                              title={isUrdu ? 'بولی حذف کریں' : 'Delete bid'}
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          </td>
+                                        )}
                                       </tr>
                                     ))}
                                   </tbody>
@@ -1399,11 +1439,19 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                           <button
                                             type="button"
                                             onClick={() => {
-                                              if (window.confirm(isUrdu ? 'کیا آپ واقعی یہ ادائیگی حذف کرنا چاہتے ہیں؟' : 'Delete this payment record?')) {
-                                                if (onDeleteCustomerPayment) {
-                                                  onDeleteCustomerPayment(cust.name, pay.id);
-                                                }
-                                              }
+                                              sound.playTick();
+                                              setPendingDeleteAction({
+                                                type: 'customer_payment',
+                                                title: isUrdu ? 'گاہک ادائیگی ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Customer Payment Deletion',
+                                                description: isUrdu
+                                                  ? `گاہک ادائیگی حذف کریں: ${cust.name} - رقم: ${formatPKR(pay.amount, settings.currencySymbol, settings.language)} (${pay.date || ''})`
+                                                  : `Delete customer payment: ${cust.name} - Amount: ${formatPKR(pay.amount, settings.currencySymbol, settings.language)}`,
+                                                execute: () => {
+                                                  if (onDeleteCustomerPayment) {
+                                                    onDeleteCustomerPayment(cust.name, pay.id);
+                                                  }
+                                                },
+                                              });
                                             }}
                                             className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition"
                                             title={isUrdu ? 'ادائیگی حذف کریں' : 'Delete payment'}
@@ -1458,6 +1506,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                       <th className="py-2.5 px-3 text-center">{t.rate}</th>
                       <th className="py-2.5 px-3 text-end">{t.totalAmount}</th>
                       <th className="py-2.5 px-3 text-center">{t.paymentMethod || (isUrdu ? 'ادائیگی نوعیت' : 'Type')}</th>
+                      {onDeleteSale && <th className="py-2.5 px-2 text-center">{isUrdu ? 'حذف' : 'Action'}</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1483,6 +1532,32 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                             {sale.paymentStatus === 'cash' ? t.paymentCash : t.paymentCredit}
                           </span>
                         </td>
+                        {onDeleteSale && (
+                          <td className="py-2 px-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                sound.playTick();
+                                setPendingDeleteAction({
+                                  type: 'buyer_sale',
+                                  title: isUrdu ? 'بولی ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Bid Deletion',
+                                  description: isUrdu
+                                    ? `بولی ریکارڈ حذف کریں: ${sale.buyerName} - ${sale.productUrdu} (${sale.quantity} ${sale.unitLabel})`
+                                    : `Delete bid transaction: ${sale.buyerName} - ${sale.productUrdu} (${sale.quantity} ${sale.unitLabel})`,
+                                  execute: () => {
+                                    if (onDeleteSale) {
+                                      onDeleteSale(sale.lotId, sale.saleId);
+                                    }
+                                  },
+                                });
+                              }}
+                              className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                              title={isUrdu ? 'بولی حذف کریں' : 'Delete bid'}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -2075,6 +2150,30 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                                 <FileText className="w-3.5 h-3.5" />
                                               </button>
                                             )}
+                                            {onDeleteLot && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  sound.playTick();
+                                                  setPendingDeleteAction({
+                                                    type: 'vendor_lot',
+                                                    title: isUrdu ? 'لاٹ ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Lot Deletion',
+                                                    description: isUrdu
+                                                      ? `لاٹ ریکارڈ حذف کریں: #${lot.lotNumber} - ${vendor.name} (${lot.productUrdu})`
+                                                      : `Delete lot record: #${lot.lotNumber} - ${vendor.name} (${lot.productUrdu})`,
+                                                    execute: () => {
+                                                      if (onDeleteLot) {
+                                                        onDeleteLot(lot.id);
+                                                      }
+                                                    },
+                                                  });
+                                                }}
+                                                className="p-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition cursor-pointer"
+                                                title={isUrdu ? 'لاٹ حذف کریں' : 'Delete lot'}
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            )}
                                           </div>
                                         </td>
                                       </tr>
@@ -2163,11 +2262,19 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            if (window.confirm(isUrdu ? 'کیا آپ واقعی زمیندار کی یہ ادائیگی حذف کرنا چاہتے ہیں؟' : 'Delete this payment record?')) {
-                                              if (onDeleteVendorPayment) {
-                                                onDeleteVendorPayment(vendor.name, pay.id, pay.lotId, pay.amount);
-                                              }
-                                            }
+                                            sound.playTick();
+                                            setPendingDeleteAction({
+                                              type: 'vendor_payment',
+                                              title: isUrdu ? 'زمیندار ادائیگی ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Vendor Payment Deletion',
+                                              description: isUrdu
+                                                ? `زمیندار ادائیگی حذف کریں: ${vendor.name} - رقم: ${formatPKR(pay.amount, settings.currencySymbol, settings.language)} (${pay.paymentDate || ''})`
+                                                : `Delete vendor payment: ${vendor.name} - Amount: ${formatPKR(pay.amount, settings.currencySymbol, settings.language)}`,
+                                              execute: () => {
+                                                if (onDeleteVendorPayment) {
+                                                  onDeleteVendorPayment(vendor.name, pay.id, pay.lotId, pay.amount);
+                                                }
+                                              },
+                                            });
                                           }}
                                           className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition"
                                           title={isUrdu ? 'ادائیگی حذف کریں' : 'Delete payment'}
@@ -2441,6 +2548,23 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Unified PIN Security Prompt Modal for Deletion Actions */}
+      <PinPromptModal
+        isOpen={!!pendingDeleteAction}
+        onClose={() => setPendingDeleteAction(null)}
+        onSuccess={() => {
+          if (pendingDeleteAction) {
+            sound.playTrash();
+            pendingDeleteAction.execute();
+            setPendingDeleteAction(null);
+          }
+        }}
+        correctPin={settings.securityPin || '1234'}
+        isUrdu={isUrdu}
+        title={pendingDeleteAction?.title}
+        itemDescription={pendingDeleteAction?.description}
+      />
     </div>
   );
 };

@@ -406,8 +406,8 @@ export function generateVendorConsolidatedInvoiceCanvas(
   dateLabel: string,
   isAveraged: boolean = false
 ): HTMLCanvasElement {
-  // Width: 1050px matches half of Landscape A4 paper (210mm x 148.5mm, Ratio 1.4142)
-  const width = 1050;
+  // Width: 744px and Height: 1050px matches Portrait half-A4 paper (148.8mm x 210mm, Ratio 148.8 / 210 = 0.70857)
+  const width = 744;
 
   // Build items list: either detailed per sale or averaged by product (اجناس وار اوسط بل)
   const allItems: Array<{
@@ -560,7 +560,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   const isFullyPaid = (totalPaid >= totalNetPayable && totalNetPayable > 0) || (allLotsPaid && lots.length > 0);
   const isPartialPaid = totalPaid > 0 && !isFullyPaid;
 
-  const totalHeight = 742;
+  const totalHeight = 1050;
   const canvas = document.createElement('canvas');
   canvas.width = width * 2;
   canvas.height = totalHeight * 2;
@@ -711,10 +711,10 @@ export function generateVendorConsolidatedInvoiceCanvas(
 
   // 5. MAIN RED-RULED TABLE
   const tableY = subY + subH + 4;
-  const tableH = 560;
-  const leftColW = Math.round(headerW * 0.28);
+  const tableH = 820;
+  const leftColW = Math.round(headerW * 0.30);
   const rightColW = headerW - leftColW;
-  const totalSubColW = 85;
+  const totalSubColW = 80;
 
   ctx.strokeStyle = '#b91c1c';
   ctx.lineWidth = 2;
@@ -745,7 +745,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   // Vertical line separating ٹوٹل and تفصیل
   ctx.beginPath();
   ctx.moveTo(headerX + leftColW + totalSubColW, tableY);
-  ctx.lineTo(headerX + leftColW + totalSubColW, tableY + tableH - 96); // stops above summary bars
+  ctx.lineTo(headerX + leftColW + totalSubColW, tableY + tableH - 84); // stops above summary bars
   ctx.stroke();
 
   ctx.fillText('ٹوٹل', headerX + leftColW + totalSubColW / 2, tableY + 21);
@@ -762,12 +762,12 @@ export function generateVendorConsolidatedInvoiceCanvas(
     { label: 'میزان', val: meezanExpenses, color: '#9333ea', isMeezan: true },
   ];
 
-  let badgeY = tableY + tHeaderH + 10;
+  let badgeY = tableY + tHeaderH + 12;
   badgesData.forEach((b) => {
-    const pillW = 58;
-    const pillH = 27;
-    const boxW = leftColW - pillW - 18;
-    const boxH = 27;
+    const pillW = 52;
+    const pillH = 26;
+    const boxW = leftColW - pillW - 14;
+    const boxH = 26;
 
     const boxX = headerX + 6;
     const pillX = headerX + leftColW - pillW - 6;
@@ -797,7 +797,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
     ctx.textAlign = 'center';
     ctx.fillText(b.label, pillX + pillW / 2, badgeY + 18);
 
-    badgeY += 28;
+    badgeY += 34;
   });
 
   // Bottom Left: ICS Trust Badge
@@ -823,8 +823,8 @@ export function generateVendorConsolidatedInvoiceCanvas(
 
   // 5B. RIGHT COLUMN: SALE ITEMS + EMPTY ROWS + 3 SUMMARY BARS
   let rowY = tableY + tHeaderH;
-  const rowH = 26;
-  const maxRowsOnPage = 10;
+  const rowH = 28;
+  const maxRowsOnPage = 18;
 
   for (let i = 0; i < maxRowsOnPage; i++) {
     const item = allItems[i];
@@ -865,7 +865,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   }
 
   // Bottom 3 Summary Bars
-  const summaryBarH = 26;
+  const summaryBarH = 28;
   const sumY1 = tableY + tableH - summaryBarH * 3;
   const sumY2 = tableY + tableH - summaryBarH * 2;
   const sumY3 = tableY + tableH - summaryBarH;

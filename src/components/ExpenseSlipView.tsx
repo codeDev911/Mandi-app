@@ -62,7 +62,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
 
   const [formDate, setFormDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [formCategory, setFormCategory] = useState<ExpenseCategory>('tea');
+  const [formCategory, setFormCategory] = useState<ExpenseCategory>('tea_food');
   const [formTitle, setFormTitle] = useState('');
   const [formAmount, setFormAmount] = useState<number | ''>('');
   const [formPaidTo, setFormPaidTo] = useState('');
@@ -87,7 +87,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
     sound.playTick();
     setEditingExpenseId(null);
     setFormDate(new Date().toISOString().slice(0, 10));
-    setFormCategory('tea');
+    setFormCategory('tea_food');
     setFormTitle('');
     setFormAmount('');
     setFormPaidTo('');
@@ -100,7 +100,7 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
     sound.playTick();
     setEditingExpenseId(exp.id);
     setFormDate(exp.date);
-    setFormCategory(exp.category);
+    setFormCategory(exp.category === 'tea' ? 'tea_food' : exp.category);
     setFormTitle(exp.title);
     setFormAmount(exp.amount);
     setFormPaidTo(exp.paidTo || '');
@@ -114,10 +114,12 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
     const numAmount = parseNumber(formAmount);
     if (!formTitle.trim() || numAmount <= 0) return;
 
+    const finalCategory: ExpenseCategory = formCategory === 'tea' ? 'tea_food' : formCategory;
+
     const payload: ShopExpense = {
       id: editingExpenseId || `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       date: formDate,
-      category: formCategory,
+      category: finalCategory,
       title: formTitle.trim(),
       amount: numAmount,
       paidTo: formPaidTo.trim() || undefined,
@@ -184,7 +186,12 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
   // Filtered Shop Expenses
   const filteredShopExpenses = useMemo(() => {
     return shopExpenses.filter((exp) => {
-      if (categoryFilter !== 'all' && exp.category !== categoryFilter) return false;
+      if (categoryFilter !== 'all') {
+        const matchesCategory =
+          exp.category === categoryFilter ||
+          (categoryFilter === 'tea_food' && (exp.category as string) === 'tea');
+        if (!matchesCategory) return false;
+      }
       if (!isExpenseInDateRange(exp.date)) return false;
 
       if (searchTerm.trim()) {
@@ -515,7 +522,9 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
           >
             {isUrdu ? 'تمام مدات' : 'All Categories'}
           </button>
-          {(Object.keys(expenseCategoryLabels) as ExpenseCategory[]).map((cat) => {
+          {(Object.keys(expenseCategoryLabels) as ExpenseCategory[])
+            .filter((cat) => cat !== 'tea')
+            .map((cat) => {
             const info = expenseCategoryLabels[cat];
             const isActive = categoryFilter === cat;
             return (
@@ -776,7 +785,9 @@ export const ExpenseSlipView: React.FC<ExpenseSlipViewProps> = ({
                     onChange={(e) => setFormCategory(e.target.value as ExpenseCategory)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                   >
-                    {(Object.keys(expenseCategoryLabels) as ExpenseCategory[]).map((cat) => (
+                    {(Object.keys(expenseCategoryLabels) as ExpenseCategory[])
+                      .filter((cat) => cat !== 'tea')
+                      .map((cat) => (
                       <option key={cat} value={cat}>
                         {expenseCategoryLabels[cat].icon} {isUrdu ? expenseCategoryLabels[cat].ur : expenseCategoryLabels[cat].en}
                       </option>

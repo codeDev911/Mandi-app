@@ -320,7 +320,7 @@ export function generateInsafMandiBillHtmlSingle(
     .join('');
 
   return `
-    <div dir="rtl" class="insaf-mandi-bill-wrapper" style="width: 210mm; height: 148.5mm; max-height: 148.5mm; margin: 0 auto; background: #ffffff; color: #0f172a; box-sizing: border-box; font-family: 'Noto Sans Arabic', 'Plus Jakarta Sans', system-ui, sans-serif; display: flex; border: 1.5px solid #cbd5e1; overflow: hidden;">
+    <div dir="rtl" class="insaf-mandi-bill-wrapper" style="width: 148.8mm; height: 210mm; min-height: 210mm; max-height: 210mm; margin: 0 auto; background: #ffffff; color: #0f172a; box-sizing: border-box; font-family: 'Noto Sans Arabic', 'Plus Jakarta Sans', system-ui, sans-serif; display: flex; border: 1.5px solid #cbd5e1; overflow: hidden;">
       <!-- Right Produce Border -->
       <div style="width: 7mm; background-image: url('${origin}/bill_produce_border.jpg'); background-size: 100% auto; background-repeat: repeat-y; flex-shrink: 0; border-left: 1px solid #e2e8f0;"></div>
 
@@ -600,26 +600,27 @@ export function printVendorBillSlipA4(
       <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;600;700;900&family=Noto+Sans+Arabic:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
       <style>
         @page {
-          size: 210mm 148.5mm;
+          size: 148.8mm 210mm;
           margin: 0;
         }
         @media print {
           @page {
-            size: 210mm 148.5mm;
+            size: 148.8mm 210mm;
             margin: 0;
           }
           html, body {
-            width: 210mm !important;
-            height: 148.5mm !important;
+            width: 148.8mm !important;
+            height: 210mm !important;
             margin: 0 !important;
             padding: 0 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
           .insaf-mandi-bill-wrapper {
-            width: 210mm !important;
-            height: 148.5mm !important;
-            max-height: 148.5mm !important;
+            width: 148.8mm !important;
+            height: 210mm !important;
+            min-height: 210mm !important;
+            max-height: 210mm !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
             margin: 0 !important;
@@ -669,7 +670,7 @@ export function printBatchVendorBillsA4(
   const billsPagesHtml = vendorDataList
     .map(
       (v) => `
-    <div class="bill-page" style="page-break-after: always; break-after: page; width: 210mm; height: 148.5mm; max-height: 148.5mm; overflow: hidden; display: flex; justify-content: center; box-sizing: border-box; margin: 0 auto;">
+    <div class="bill-page" style="page-break-after: always; break-after: page; width: 148.8mm; height: 210mm; min-height: 210mm; max-height: 210mm; overflow: hidden; display: flex; justify-content: center; box-sizing: border-box; margin: 0 auto;">
       ${generateInsafMandiBillHtmlSingle(
         v.vendorName,
         v.vendorPhone,
@@ -696,17 +697,17 @@ export function printBatchVendorBillsA4(
       <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;600;700;900&family=Noto+Sans+Arabic:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
       <style>
         @page {
-          size: 210mm 148.5mm;
+          size: 148.8mm 210mm;
           margin: 0;
         }
         @media print {
           @page {
-            size: 210mm 148.5mm;
+            size: 148.8mm 210mm;
             margin: 0;
           }
           html, body {
-            width: 210mm !important;
-            height: 148.5mm !important;
+            width: 148.8mm !important;
+            height: 210mm !important;
             margin: 0 !important;
             padding: 0 !important;
             -webkit-print-color-adjust: exact !important;
@@ -715,9 +716,10 @@ export function printBatchVendorBillsA4(
           .bill-page, .insaf-mandi-bill-wrapper {
             page-break-after: always !important;
             break-after: page !important;
-            width: 210mm !important;
-            height: 148.5mm !important;
-            max-height: 148.5mm !important;
+            width: 148.8mm !important;
+            height: 210mm !important;
+            min-height: 210mm !important;
+            max-height: 210mm !important;
             margin: 0 !important;
             padding: 0 !important;
             box-sizing: border-box !important;

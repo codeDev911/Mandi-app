@@ -60,9 +60,9 @@ export const Header: React.FC<HeaderProps> = ({
   });
 
   return (
-    <header className="relative w-full bg-emerald-800 text-white shadow-md transition-all border-b border-emerald-700 pt-[max(env(safe-area-inset-top,0px),2.25rem)] sm:pt-3">
+    <header className="relative w-full bg-emerald-800 text-white shadow-md transition-all border-b border-emerald-700">
       {/* Top Bar */}
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2 sm:py-2.5 flex items-center justify-between gap-2 sm:gap-3">
         {/* Shop Name & Logo */}
         <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
           

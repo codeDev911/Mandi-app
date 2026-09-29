@@ -78,6 +78,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editingTitle, setEditingTitle] = useState('');
   const [editingRate, setEditingRate] = useState<number>(25);
   const [showPin, setShowPin] = useState(false);
+  const [oldPin, setOldPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [showOldPin, setShowOldPin] = useState(false);
+  const [showNewPin, setShowNewPin] = useState(false);
+  const [showConfirmPin, setShowConfirmPin] = useState(false);
+  const [pinChangeError, setPinChangeError] = useState<string | null>(null);
+  const [pinChangeSuccess, setPinChangeSuccess] = useState<string | null>(null);
   const cloudConfig = getStoredCloudConfig();
 
   const totalBidsCount = lots.reduce((acc, l) => acc + l.sales.length, 0);
@@ -743,78 +751,186 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Security PIN Code for Deletions */}
+        {/* Change Security PIN Code (3 Inputs: Old PIN, New PIN, Confirm PIN) */}
         <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-xs space-y-3">
           <div className="flex items-center justify-between border-b border-stone-100 pb-2">
             <h3 className="font-bold text-xs sm:text-sm text-stone-900 font-urdu-sans flex items-center gap-2">
               <Lock className="w-4 h-4 text-rose-600" />
-              <span>{isUrdu ? 'حذف کرنے کا حفاظتی پن کوڈ (Delete Security PIN)' : 'Security PIN for Deletions'}</span>
+              <span>{isUrdu ? 'حفاظتی پن کوڈ تبدیل کریں (Change Security PIN)' : 'Change Security PIN'}</span>
             </h3>
             <span className="text-[11px] font-urdu-sans font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
-              {form.securityPin ? (isUrdu ? `پن فعال: ${showPin ? form.securityPin : '••••'}` : `PIN: ${showPin ? form.securityPin : '••••'}`) : (isUrdu ? 'غیر فعال' : 'Disabled')}
+              {form.securityPin ? (isUrdu ? 'حفاظتی پن: فعال' : 'PIN: Active') : (isUrdu ? 'ڈیفالٹ پن: 1234' : 'Default: 1234')}
             </span>
           </div>
+
           <p className="text-xs text-stone-500 font-urdu-sans leading-relaxed">
             {isUrdu
-              ? 'کسی بھی چیز (لاٹ، بولی سیل، گاہک، زمیندار، خرچہ یا نقد ادائیگی) کو حذف کرتے وقت یہ 4 ہندسوں کا پن کوڈ پوچھا جائے گا۔ درست پن کوڈ درج کرتے ہی فوری حذف ہو جائے گا۔'
-              : 'Set a security PIN code (e.g. 1234). Whenever deleting any lot, bid, customer, vendor, expense or payment, this PIN is verified and deletes immediately upon matching.'}
+              ? 'کسی بھی ریکارڈ (بولی، لاٹ، گاہک، نقد ادائیگی یا زمیندار ادائیگی) کو حذف کرنے کے لیے یہ پن کوڈ مطلوب ہوتا ہے۔ پن کوڈ تبدیل کرنے کے لیے پرانا پن، نیا پن اور تصدیق درج کریں۔'
+              : 'This PIN code is required when deleting records (bids, lots, customer payments, or vendor payments). Enter old PIN, new PIN, and confirm new PIN to update.'}
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          {/* Feedback Alerts */}
+          {pinChangeError && (
+            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700 font-urdu-sans flex items-center gap-1.5 animate-in fade-in">
+              <span>⚠️</span>
+              <span>{pinChangeError}</span>
+            </div>
+          )}
+
+          {pinChangeSuccess && (
+            <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 font-urdu-sans flex items-center gap-1.5 animate-in fade-in">
+              <Check className="w-4 h-4 text-emerald-600" />
+              <span>{pinChangeSuccess}</span>
+            </div>
+          )}
+
+          {/* 3 Inputs Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            {/* 1. Old PIN */}
             <div>
               <label className="block text-xs font-bold text-stone-700 mb-1 font-urdu-sans flex items-center justify-between">
                 <span className="flex items-center gap-1">
-                  <KeyRound className="w-3.5 h-3.5 text-stone-400" />
-                  <span>{isUrdu ? 'حفاظتی پن کوڈ درج کریں:' : 'Security PIN:'}</span>
+                  <KeyRound className="w-3 h-3 text-stone-400" />
+                  <span>{isUrdu ? '1. پرانا پن کوڈ:' : '1. Old PIN:'}</span>
                 </span>
                 <button
                   type="button"
-                  onClick={() => setShowPin(!showPin)}
-                  className="text-[11px] text-stone-500 hover:text-stone-800 flex items-center gap-1 font-urdu-sans"
+                  onClick={() => setShowOldPin(!showOldPin)}
+                  className="text-[10px] text-stone-500 hover:text-stone-800 flex items-center gap-0.5 font-urdu-sans"
                 >
-                  {showPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                  <span>{showPin ? (isUrdu ? 'چھپائیں' : 'Hide') : (isUrdu ? 'دیکھیں' : 'Show')}</span>
+                  {showOldPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  <span>{showOldPin ? (isUrdu ? 'چھپائیں' : 'Hide') : (isUrdu ? 'دیکھیں' : 'Show')}</span>
                 </button>
               </label>
               <input
-                type={showPin ? 'text' : 'password'}
+                type={showOldPin ? 'text' : 'password'}
                 inputMode="numeric"
                 maxLength={8}
-                value={form.securityPin || ''}
-                onChange={(e) => setForm({ ...form, securityPin: e.target.value.trim() })}
-                placeholder={isUrdu ? 'مثلاً: 1234 یا 0000' : 'e.g. 1234'}
+                value={oldPin}
+                onChange={(e) => {
+                  setOldPin(e.target.value.trim());
+                  setPinChangeError(null);
+                }}
+                placeholder={isUrdu ? 'پرانا پن (ڈیفالٹ: 1234)' : 'Old PIN (Default: 1234)'}
                 className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-sm font-numbers tracking-widest font-bold focus:ring-2 focus:ring-emerald-500"
               />
             </div>
-            <div className="flex flex-col justify-end gap-1.5">
-              <span className="text-[11px] text-stone-500 font-urdu-sans">{isUrdu ? 'تیز رفتار انتخاب:' : 'Quick Select:'}</span>
-              <div className="flex gap-2">
+
+            {/* 2. New PIN */}
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1 font-urdu-sans flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Lock className="w-3 h-3 text-emerald-600" />
+                  <span>{isUrdu ? '2. نیا پن کوڈ:' : '2. New PIN:'}</span>
+                </span>
                 <button
                   type="button"
-                  onClick={() => setForm({ ...form, securityPin: '1234' })}
-                  className="flex-1 py-1.5 px-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold font-numbers transition"
+                  onClick={() => setShowNewPin(!showNewPin)}
+                  className="text-[10px] text-stone-500 hover:text-stone-800 flex items-center gap-0.5 font-urdu-sans"
                 >
-                  1234 ({isUrdu ? 'ڈیفالٹ' : 'Default'})
+                  {showNewPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  <span>{showNewPin ? (isUrdu ? 'چھپائیں' : 'Hide') : (isUrdu ? 'دیکھیں' : 'Show')}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, securityPin: '0000' })}
-                  className="flex-1 py-1.5 px-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold font-numbers transition"
-                >
-                  0000
-                </button>
-                {form.securityPin && (
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, securityPin: '' })}
-                    className="py-1.5 px-2.5 text-xs text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl font-urdu-sans font-bold border border-rose-200 transition"
-                    title={isUrdu ? 'پن کوڈ ختم کریں' : 'Remove PIN'}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
+              </label>
+              <input
+                type={showNewPin ? 'text' : 'password'}
+                inputMode="numeric"
+                maxLength={8}
+                value={newPin}
+                onChange={(e) => {
+                  setNewPin(e.target.value.trim());
+                  setPinChangeError(null);
+                }}
+                placeholder={isUrdu ? 'نیا 4 ہندسوں کا پن' : 'New 4-digit PIN'}
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-sm font-numbers tracking-widest font-bold focus:ring-2 focus:ring-emerald-500"
+              />
             </div>
+
+            {/* 3. Confirm New PIN */}
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1 font-urdu-sans flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Check className="w-3 h-3 text-emerald-600" />
+                  <span>{isUrdu ? '3. نئے پن کی تصدیق:' : '3. Confirm PIN:'}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPin(!showConfirmPin)}
+                  className="text-[10px] text-stone-500 hover:text-stone-800 flex items-center gap-0.5 font-urdu-sans"
+                >
+                  {showConfirmPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  <span>{showConfirmPin ? (isUrdu ? 'چھپائیں' : 'Hide') : (isUrdu ? 'دیکھیں' : 'Show')}</span>
+                </button>
+              </label>
+              <input
+                type={showConfirmPin ? 'text' : 'password'}
+                inputMode="numeric"
+                maxLength={8}
+                value={confirmPin}
+                onChange={(e) => {
+                  setConfirmPin(e.target.value.trim());
+                  setPinChangeError(null);
+                }}
+                placeholder={isUrdu ? 'دوبارہ نیا پن درج کریں' : 'Re-enter new PIN'}
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-sm font-numbers tracking-widest font-bold focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+
+          {/* Action Row for PIN Change */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-1 border-t border-stone-100">
+            <span className="text-[11px] text-stone-400 font-urdu-sans">
+              {isUrdu ? 'ڈیفالٹ پن کوڈ "1234" ہے' : 'Default initial PIN is "1234"'}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setPinChangeError(null);
+                setPinChangeSuccess(null);
+                const currentPin = (form.securityPin || '1234').trim();
+
+                if (!oldPin) {
+                  sound.playWarning();
+                  setPinChangeError(isUrdu ? 'براہ کرم پرانا پن کوڈ درج کریں!' : 'Please enter old PIN!');
+                  return;
+                }
+
+                if (oldPin.trim() !== currentPin) {
+                  sound.playWarning();
+                  setPinChangeError(isUrdu ? 'پرانا پن کوڈ درست نہیں ہے! دوبارہ کوشش کریں۔' : 'Old PIN is incorrect! Please try again.');
+                  return;
+                }
+
+                if (!newPin.trim() || newPin.trim().length < 4) {
+                  sound.playWarning();
+                  setPinChangeError(isUrdu ? 'نیا پن کوڈ کم از کم 4 ہندسوں پر مشتمل ہونا چاہیے۔' : 'New PIN must be at least 4 digits.');
+                  return;
+                }
+
+                if (newPin.trim() !== confirmPin.trim()) {
+                  sound.playWarning();
+                  setPinChangeError(isUrdu ? 'نیا پن کوڈ اور تصدیقی پن کوڈ ایک دوسرے سے مماثل نہیں ہیں!' : 'New PIN and Confirm PIN do not match!');
+                  return;
+                }
+
+                const updatedPin = newPin.trim();
+                const updatedForm = { ...form, securityPin: updatedPin };
+                setForm(updatedForm);
+                onUpdateSettings(updatedForm);
+                sound.playCashChime();
+                setOldPin('');
+                setNewPin('');
+                setConfirmPin('');
+                setPinChangeError(null);
+                setPinChangeSuccess(isUrdu ? 'حفاظتی پن کوڈ کامیابی سے تبدیل ہو گیا ہے!' : 'Security PIN successfully updated!');
+                setTimeout(() => setPinChangeSuccess(null), 3500);
+              }}
+              disabled={!oldPin || !newPin || !confirmPin}
+              className="w-full sm:w-auto px-4 py-2 bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white rounded-xl font-bold text-xs font-urdu-sans transition flex items-center justify-center gap-1.5 shadow-xs active:scale-95 cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>{isUrdu ? 'پن کوڈ تبدیل کریں (Update PIN)' : 'Update PIN Code'}</span>
+            </button>
           </div>
         </div>
 

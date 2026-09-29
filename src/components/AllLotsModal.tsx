@@ -4,6 +4,7 @@ import { translations, unitLabels } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { PaginationControls } from './PaginationControls';
+import { PinPromptModal } from './PinPromptModal';
 import {
   Search,
   X,
@@ -50,6 +51,7 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
   const [statusFilter, setStatusFilter] = useState<SaleStatusFilter>('all');
   const [dateFilter, setDateFilter] = useState<DateFilter>('today');
   const [customDate, setCustomDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [pendingDeleteLot, setPendingDeleteLot] = useState<{ lotId: string; description: string } | null>(null);
 
   // Helper date calculations
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -474,23 +476,20 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
                         <span className="hidden sm:inline">{t.tabReceipt}</span>
                       </button>
 
-                      {/* Delete option if no bids are placed on this entry */}
-                      {lot.sales.length === 0 && onDeleteLot && (
+                      {/* Delete option if lot can be deleted */}
+                      {onDeleteLot && (
                         <button
                           type="button"
                           onClick={() => {
-                            if (
-                              confirm(
-                                isUrdu
-                                  ? `کیا آپ واقعی اس لاٹ (${lot.lotNumber} - ${lot.vendorName}) کو حذف کرنا چاہتے ہیں؟`
-                                  : `Delete lot ${lot.lotNumber} (${lot.vendorName})?`
-                              )
-                            ) {
-                              sound.playTick();
-                              onDeleteLot(lot.id);
-                            }
+                            sound.playTick();
+                            setPendingDeleteLot({
+                              lotId: lot.id,
+                              description: isUrdu
+                                ? `لاٹ ریکارڈ حذف کریں: #${lot.lotNumber} - ${lot.vendorName} (${lot.productUrdu})`
+                                : `Delete lot: #${lot.lotNumber} - ${lot.vendorName}`,
+                            });
                           }}
-                          title={isUrdu ? 'لاٹ حذف کریں (کوئی بولی نہیں)' : 'Delete lot (no bids)'}
+                          title={isUrdu ? 'لاٹ حذف کریں' : 'Delete lot'}
                           className="py-1.5 px-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition flex items-center gap-1 font-urdu-sans border border-rose-200 active:scale-95 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5 text-rose-600" />
@@ -535,6 +534,23 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* PinPromptModal for Lot Deletion */}
+      <PinPromptModal
+        isOpen={!!pendingDeleteLot}
+        onClose={() => setPendingDeleteLot(null)}
+        onSuccess={() => {
+          if (pendingDeleteLot && onDeleteLot) {
+            sound.playTrash();
+            onDeleteLot(pendingDeleteLot.lotId);
+            setPendingDeleteLot(null);
+          }
+        }}
+        correctPin={settings.securityPin || '1234'}
+        isUrdu={isUrdu}
+        title={isUrdu ? 'لاٹ ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Lot Deletion'}
+        itemDescription={pendingDeleteLot?.description}
+      />
     </div>
   );
 };

@@ -181,8 +181,8 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
 
   const isFullyPaid = (totalPaid >= totalNetPayable && totalNetPayable > 0) || (allLotsPaid && lots.length > 0);
 
-  // Landscape half-A4 sizing: 7-8 rows fit comfortably in 148.5mm height
-  const minRows = 7;
+  // Portrait half-A4 sizing: width 148.5mm and height 210mm
+  const minRows = 11;
   const emptyRowsCount = Math.max(0, minRows - allItems.length);
 
   // Settings values directly from settings (no hardcoded static strings)
@@ -198,20 +198,31 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
       dir="rtl"
       className={`relative mx-auto bg-white text-slate-900 shadow-xl select-none print:shadow-none print:m-0 ${className}`}
       style={{
-        width: '100%',
-        maxWidth: '210mm',
-        minHeight: '148.5mm',
-        maxHeight: '148.5mm',
-        height: '148.5mm',
-        aspectRatio: '210 / 148.5',
+        width: '148.8mm',
+        minWidth: '148.8mm',
+        maxWidth: '148.8mm',
+        minHeight: '210mm',
+        maxHeight: '210mm',
+        height: '210mm',
+        aspectRatio: '148.8 / 210',
         boxSizing: 'border-box',
         overflow: 'hidden',
         backgroundColor: '#ffffff',
         fontFamily: "'Noto Sans Arabic', 'Plus Jakarta Sans', system-ui, sans-serif",
       }}
     >
-      {/* Outer Produce Borders Frame in Half-A4 Landscape (210mm x 148.5mm) */}
-      <div className="flex w-full h-full min-h-[148.5mm] max-h-[148.5mm] border border-slate-300 print:border-none box-border overflow-hidden">
+      {/* Outer Produce Borders Frame in Half-A4 Portrait (148.8mm x 210mm) */}
+      <div
+        className="flex border border-slate-300 print:border-none box-border overflow-hidden"
+        style={{
+          width: '148.8mm',
+          minWidth: '148.8mm',
+          maxWidth: '148.8mm',
+          height: '210mm',
+          minHeight: '210mm',
+          maxHeight: '210mm',
+        }}
+      >
         {/* Right Vertical Produce Border */}
         <div
           className="w-7 sm:w-8 flex-shrink-0 bg-repeat-y bg-cover bg-center border-l border-slate-200"

@@ -977,6 +977,8 @@ export default function App() {
             onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onOpenReceipt={handleOpenReceipt}
             onOpenExpenseSlip={handleOpenExpenseSlip}
+            onDeleteSale={handleDeleteSale}
+            onDeleteLot={handleDeleteLot}
             settings={settings}
           />
         )}
