@@ -72,7 +72,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-[10px] sm:text-xs font-normal opacity-80 font-sans hidden md:inline">
                 {isUrdu ? `(${settings.shopNameEn})` : `(${settings.shopNameUrdu})`}
               </span>
-  
+            </h1>
           </div>
         </div>
 
