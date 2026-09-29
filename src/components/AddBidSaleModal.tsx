@@ -4,7 +4,7 @@ import { translations, unitLabels } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { parseUrduVoiceBid, VoiceBolliListener } from '../utils/voiceCommandParser';
-import { Gavel, Check, X, Plus, Minus, CreditCard, Banknote, User, Phone, BookmarkCheck, Mic, MicOff, Sparkles, Radio } from 'lucide-react';
+import { Gavel, Check, X, Plus, Minus, CreditCard, Banknote, User, Phone, BookmarkCheck, Mic, MicOff, Sparkles, Radio, Search } from 'lucide-react';
 
 interface AddBidSaleModalProps {
   lot: VendorLot;
@@ -52,6 +52,7 @@ export const AddBidSaleModal: React.FC<AddBidSaleModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
   const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
+  const [isBuyerDropdownOpen, setIsBuyerDropdownOpen] = useState(false);
 
   const voiceListenerRef = useRef<VoiceBolliListener | null>(null);
 
@@ -195,7 +196,7 @@ export const AddBidSaleModal: React.FC<AddBidSaleModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-3 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in slide-in-from-bottom-5 duration-200">
+      <div className="bg-white w-full max-w-lg lg:max-w-4xl xl:max-w-5xl rounded-t-3xl sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in slide-in-from-bottom-5 duration-200">
         {/* Mobile Drag Indicator */}
         <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto mt-2.5 mb-1 sm:hidden"></div>
 
@@ -221,14 +222,17 @@ export const AddBidSaleModal: React.FC<AddBidSaleModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 overflow-y-auto space-y-3.5 sm:space-y-4 flex-1">
+        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 overflow-y-auto space-y-3.5 flex-1">
           {error && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-urdu-sans">
               {error}
             </div>
           )}
 
-          {/* Buyer Name & Frequent Chips */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            {/* Column 1: Buyer Information & Payment Status */}
+            <div className="space-y-3.5">
+              {/* Buyer Name & Frequent Chips */}
           <div className="bg-slate-50 p-3 sm:p-3.5 rounded-2xl border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-700 font-urdu-sans">
@@ -273,15 +277,102 @@ export const AddBidSaleModal: React.FC<AddBidSaleModalProps> = ({
               <input
                 type="text"
                 value={buyerName}
+                onFocus={() => setIsBuyerDropdownOpen(true)}
                 onChange={(e) => {
                   setBuyerName(e.target.value);
+                  setIsBuyerDropdownOpen(true);
                   setError(null);
                 }}
-                placeholder={isUrdu ? 'عام گاہک (Walk-in) یا نام درج کریں...' : 'Walk-in Customer or enter name...'}
-                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-emerald-500 font-urdu-sans transition"
+                placeholder={isUrdu ? 'خریدار کا نام تلاش کریں یا نیا لکھیں...' : 'Search or enter buyer name...'}
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-emerald-500 font-urdu-sans transition pr-9 rtl:pl-9 rtl:pr-3.5"
                 autoFocus
               />
-              <User className="w-4 h-4 text-slate-400 absolute right-3 rtl:left-3 rtl:right-auto top-3" />
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 rtl:left-3 rtl:right-auto top-3 pointer-events-none" />
+
+              {/* Dynamic Name Search Dropdown for Buyers */}
+              {isBuyerDropdownOpen && (() => {
+                const term = buyerName.trim().toLowerCase();
+                // Compile unique buyers from customers and recentBuyers
+                const map = new Map<string, { name: string; phone?: string; shopName?: string; balance?: number }>();
+                customers.forEach((c) => {
+                  if (c.name && c.name !== defaultWalkIn) {
+                    map.set(c.name.trim().toLowerCase(), {
+                      name: c.name.trim(),
+                      phone: c.phone,
+                      shopName: c.shopName,
+                      balance: c.balance,
+                    });
+                  }
+                });
+                recentBuyers.forEach((rb) => {
+                  const t = rb.trim();
+                  if (t && t !== defaultWalkIn && !map.has(t.toLowerCase())) {
+                    map.set(t.toLowerCase(), { name: t });
+                  }
+                });
+
+                const allBuyers = Array.from(map.values());
+                const matches = allBuyers.filter((b) => {
+                  if (!term || buyerName === defaultWalkIn) return true;
+                  return (
+                    b.name.toLowerCase().includes(term) ||
+                    (b.shopName && b.shopName.toLowerCase().includes(term)) ||
+                    (b.phone && b.phone.includes(term))
+                  );
+                }).slice(0, 8);
+
+                if (matches.length === 0) return null;
+
+                return (
+                  <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden divide-y divide-slate-100 max-h-52 overflow-y-auto">
+                    <div className="p-1.5 bg-slate-50 text-[10px] text-slate-500 font-urdu-sans flex items-center justify-between">
+                      <span>{isUrdu ? 'خریدار تلاش کے نتائج (کلک کریں):' : 'Buyer search results:'}</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsBuyerDropdownOpen(false)}
+                        className="text-slate-400 hover:text-slate-600 px-1 text-xs"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {matches.map((b) => (
+                      <button
+                        type="button"
+                        key={b.name}
+                        onClick={() => {
+                          sound.playTick();
+                          setBuyerName(b.name);
+                          if (b.phone) setBuyerPhone(b.phone);
+                          setIsBuyerDropdownOpen(false);
+                          setError(null);
+                        }}
+                        className="w-full text-start p-2.5 hover:bg-emerald-50 flex items-center justify-between transition font-urdu-sans group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
+                            🛒
+                          </div>
+                          <div>
+                            <div className="font-bold text-xs text-slate-900 group-hover:text-emerald-900">
+                              {b.name}
+                            </div>
+                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
+                              {b.shopName && <span>🏢 {b.shopName}</span>}
+                              {b.phone && <span className="font-numbers">📞 {b.phone}</span>}
+                              {b.balance !== undefined && b.balance > 0 && (
+                                <span className="text-amber-800 font-bold font-numbers">بقایا: Rs. {b.balance}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-emerald-700 font-bold opacity-0 group-hover:opacity-100 transition">
+                          {isUrdu ? 'منتخب کریں' : 'Select'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Optional Phone Number if named buyer */}
@@ -310,48 +401,6 @@ export const AddBidSaleModal: React.FC<AddBidSaleModalProps> = ({
                 </label>
               </div>
             )}
-
-            {/* Quick Buyer Chips */}
-            <div>
-              <span className="text-[10px] text-slate-500 font-urdu-sans block mb-1">
-                {isUrdu ? 'مستقل گاہک منتخب کریں:' : 'Quick Select Buyer:'}
-              </span>
-              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBuyerName(defaultWalkIn);
-                    setBuyerPhone('');
-                    setError(null);
-                  }}
-                  className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-[11px] transition font-urdu-sans border flex-shrink-0 ${
-                    buyerName === defaultWalkIn || !buyerName
-                      ? 'bg-slate-900 text-white font-bold border-slate-900 shadow-xs'
-                      : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                  }`}
-                >
-                  🛒 {isUrdu ? 'عام گاہک (نقد)' : 'Walk-in'}
-                </button>
-                {frequentBuyers.map((name) => {
-                  const matchingCust = customers.find((c) => c.name === name);
-                  const isSelected = buyerName === name;
-                  return (
-                    <button
-                      type="button"
-                      key={name}
-                      onClick={() => handleSelectCustomer(matchingCust || { name })}
-                      className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-[11px] transition font-urdu-sans border flex-shrink-0 ${
-                        isSelected
-                          ? 'bg-emerald-600 text-white font-bold border-emerald-600 shadow-xs'
-                          : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
-                      }`}
-                    >
-                      +{name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           </div>
 
           {/* Quantity Selector with Steppers & Quick Max */}

@@ -15,6 +15,7 @@ import {
   Hash,
   BookmarkCheck,
   PackageCheck,
+  Search,
 } from 'lucide-react';
 
 const cleanUrduTitle = (title: string): string => {
@@ -54,7 +55,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const [customProductUrdu, setCustomProductUrdu] = useState('');
   const [customEmoji, setCustomEmoji] = useState('🥬');
   const [unitType, setUnitType] = useState<UnitType>(commonMandiProducts[0].defaultUnit);
-  const [totalQuantity, setTotalQuantity] = useState<number>(30);
+  const [totalQuantity, setTotalQuantity] = useState<number | ''>(30);
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [commissionRate, setCommissionRate] = useState<number>(settings.defaultCommissionPercent);
   const [mazdooriRate, setMazdooriRate] = useState<number>(() =>
@@ -66,6 +67,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const [kirayaAmount, setKirayaAmount] = useState<number>(0);
   const [advanceAmount, setAdvanceAmount] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [isVendorDropdownOpen, setIsVendorDropdownOpen] = useState(false);
 
   // Sync / match mazdoori rate and title whenever unitType or settings change
   useEffect(() => {
@@ -139,7 +141,8 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       return;
     }
 
-    if (totalQuantity <= 0) {
+    const numTotalQty = typeof totalQuantity === 'number' ? totalQuantity : parseInt(String(totalQuantity), 10);
+    if (!numTotalQty || numTotalQty <= 0) {
       setError(isUrdu ? 'براہ کرم صحیح تعداد درج کریں' : 'Please enter valid quantity');
       return;
     }
@@ -171,7 +174,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       productUrdu: prodUrdu,
       productEmoji: prodEmoji || '📦',
       unitType,
-      totalQuantity,
+      totalQuantity: numTotalQty,
       vehicleNumber: vehicleNumber.trim() || undefined,
       arrivalDate: new Date().toISOString().slice(0, 10),
       status: 'active',
@@ -191,7 +194,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
         },
         mazdoori: {
           ratePerUnit: mazdooriRate,
-          amount: mazdooriRate * totalQuantity,
+          amount: mazdooriRate * numTotalQty,
           enabled: mazdooriRate > 0,
           title: selectedMazdooriTitle || undefined,
         },
@@ -206,14 +209,14 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
         },
         marketFee: {
           ratePerUnit: settings.defaultMarketFeePerUnit,
-          amount: settings.defaultMarketFeePerUnit * totalQuantity,
+          amount: settings.defaultMarketFeePerUnit * numTotalQty,
           enabled: settings.defaultMarketFeePerUnit > 0,
         },
         customExpenses: [],
       },
       summary: {
         totalSoldQuantity: 0,
-        remainingQuantity: totalQuantity,
+        remainingQuantity: numTotalQty,
         grossSales: 0,
         totalExpenses: 0,
         netPayableToVendor: 0,
@@ -270,7 +273,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-3 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="bg-white w-full max-w-xl rounded-t-3xl sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in slide-in-from-bottom-5 duration-200">
+      <div className="bg-white w-full max-w-xl lg:max-w-5xl xl:max-w-6xl rounded-t-3xl sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in slide-in-from-bottom-5 duration-200">
         {/* Mobile Drag Indicator */}
         <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto mt-2.5 mb-1 sm:hidden"></div>
 
@@ -296,14 +299,17 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 overflow-y-auto space-y-3.5 sm:space-y-4 flex-1">
+        <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 overflow-y-auto space-y-3.5 flex-1">
           {error && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-urdu-sans">
               {error}
             </div>
           )}
 
-          {/* Vendor Details */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            {/* Column 1: Vendor Details & Deductions */}
+            <div className="space-y-3.5">
+              {/* Vendor Details */}
           <div className="bg-slate-50 p-3 sm:p-3.5 rounded-2xl border border-slate-200 space-y-2.5 sm:space-y-3">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5 font-urdu-sans">
@@ -312,49 +318,90 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               </h4>
             </div>
 
-            {/* Quick Pick Regular Saved Vendors */}
-            {savedVendors.length > 0 && (
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1 font-urdu-sans flex items-center gap-1">
-                  <BookmarkCheck className="w-3 h-3 text-emerald-600" />
-                  <span>{t.selectSavedVendor}</span>
-                </label>
-                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                  {savedVendors.map((v) => (
-                    <button
-                      type="button"
-                      key={v.id || v.name}
-                      onClick={() => handleSelectSavedVendor(v)}
-                      className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-xs font-urdu-sans border transition flex-shrink-0 flex items-center gap-1 ${
-                        vendorName === v.name
-                          ? 'bg-emerald-600 text-white font-bold border-emerald-600 shadow-xs'
-                          : 'bg-white border-slate-300 text-slate-700 hover:bg-emerald-50'
-                      }`}
-                    >
-                      <span>👤</span>
-                      <span>{v.name}</span>
-                      {v.city && <span className="text-[10px] opacity-75">({v.city})</span>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 font-urdu-sans">
-                {t.vendorName} <span className="text-rose-500">*</span>
+            {/* Dynamic Search & Input for Vendor Name */}
+            <div className="relative">
+              <label className="block text-xs font-bold text-slate-700 mb-1 font-urdu-sans flex items-center justify-between">
+                <span>{t.vendorName} <span className="text-rose-500">*</span></span>
+                {savedVendors.length > 0 && (
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    {isUrdu ? `(${savedVendors.length} محفوظ شدہ زمیندار)` : `(${savedVendors.length} saved)`}
+                  </span>
+                )}
               </label>
-              <input
-                type="text"
-                value={vendorName}
-                onChange={(e) => {
-                  setVendorName(e.target.value);
-                  setError(null);
-                }}
-                placeholder={isUrdu ? 'مثلاً: حاجی محمد اسلم زمیندار' : 'e.g. Haji Aslam Farmer'}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 font-urdu-sans"
-                required
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={vendorName}
+                  onFocus={() => setIsVendorDropdownOpen(true)}
+                  onChange={(e) => {
+                    setVendorName(e.target.value);
+                    setIsVendorDropdownOpen(true);
+                    setError(null);
+                  }}
+                  placeholder={isUrdu ? 'زمیندار کا نام تلاش کریں یا نیا درج کریں...' : 'Search or enter vendor name...'}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 font-urdu-sans pr-8 rtl:pl-8 rtl:pr-3"
+                  required
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute right-2.5 rtl:left-2.5 rtl:right-auto top-2.5 pointer-events-none" />
+              </div>
+
+              {/* Dynamic Name Search Results Dropdown */}
+              {isVendorDropdownOpen && savedVendors.length > 0 && (() => {
+                const term = vendorName.trim().toLowerCase();
+                const matches = savedVendors.filter(
+                  (v) =>
+                    !term ||
+                    v.name.toLowerCase().includes(term) ||
+                    (v.city && v.city.toLowerCase().includes(term)) ||
+                    (v.phone && v.phone.includes(term))
+                ).slice(0, 8);
+
+                if (matches.length === 0) return null;
+
+                return (
+                  <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden divide-y divide-slate-100 max-h-52 overflow-y-auto">
+                    <div className="p-1.5 bg-slate-50 text-[10px] text-slate-500 font-urdu-sans flex items-center justify-between">
+                      <span>{isUrdu ? 'محفوظ شدہ زمیندار (تلاش کے نتائج):' : 'Saved Vendors (search results):'}</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsVendorDropdownOpen(false)}
+                        className="text-slate-400 hover:text-slate-600 px-1 text-xs"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {matches.map((v) => (
+                      <button
+                        type="button"
+                        key={v.id || v.name}
+                        onClick={() => {
+                          handleSelectSavedVendor(v);
+                          setIsVendorDropdownOpen(false);
+                        }}
+                        className="w-full text-start p-2.5 hover:bg-emerald-50 flex items-center justify-between transition font-urdu-sans group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
+                            👤
+                          </div>
+                          <div>
+                            <div className="font-bold text-xs text-slate-900 group-hover:text-emerald-900">
+                              {v.name}
+                            </div>
+                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
+                              {v.city && <span>📍 {v.city}</span>}
+                              {v.phone && <span className="font-numbers">📞 {v.phone}</span>}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-emerald-700 font-bold opacity-0 group-hover:opacity-100 transition">
+                          {isUrdu ? 'منتخب کریں' : 'Select'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -446,6 +493,80 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
             </div>
           </div>
 
+          {/* Initial Deductions Presets (Editable later anytime) */}
+          <div className="bg-slate-50 p-3 sm:p-3.5 rounded-2xl border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-slate-700 font-urdu-sans">
+                {t.expensesSection} (ابتدائی کٹوتیاں - بعد میں تبدیل ہو سکتے ہیں)
+              </h4>
+              <div className="text-[11px] text-emerald-800 font-urdu-sans font-bold bg-emerald-100/70 px-2 py-0.5 rounded-md">
+                <span>
+                  {t.mazdoori}: {totalQuantity || 0} {unitLabels[unitType][settings.language]} × ₨{mazdooriRate} ={' '}
+                  <span className="font-numbers font-extrabold text-emerald-950">
+                    ₨{(((Number(totalQuantity) || 0) * mazdooriRate)).toLocaleString('en-US')}
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div>
+                <label className="text-[11px] text-slate-500 block font-urdu-sans">{t.commission} (%)</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.5"
+                  value={commissionRate}
+                  onChange={(e) => setCommissionRate(parseNumber(e.target.value))}
+                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-500 block font-urdu-sans">{t.mazdoori} (فی یونٹ)</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={mazdooriRate}
+                  onChange={(e) => setMazdooriRate(parseNumber(e.target.value))}
+                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
+                />
+                {selectedMazdooriTitle && (
+                  <span className="block text-[10px] text-emerald-700 font-urdu-sans truncate mt-0.5 font-medium text-center">
+                    {selectedMazdooriTitle}
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-500 block font-urdu-sans">{t.kiraya} (روپے)</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={kirayaAmount}
+                  onChange={(e) => setKirayaAmount(parseNumber(e.target.value))}
+                  placeholder="0"
+                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-500 block font-urdu-sans">{t.naqdAdvance} (روپے)</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={advanceAmount}
+                  onChange={(e) => setAdvanceAmount(parseNumber(e.target.value))}
+                  placeholder="0"
+                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Column 2: Product & Packaging & Quantity */}
+        <div className="space-y-3.5">
           {/* Product & Packing Selection */}
           <div className="bg-slate-50 p-3 sm:p-3.5 rounded-2xl border border-slate-200 space-y-2.5 sm:space-y-3">
             <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5 font-urdu-sans">
@@ -628,7 +749,16 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
                     inputMode="numeric"
                     min="1"
                     value={totalQuantity}
-                    onChange={(e) => setTotalQuantity(Math.max(1, parseNumber(e.target.value)))}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setTotalQuantity('');
+                      } else {
+                        const n = parseInt(val, 10);
+                        setTotalQuantity(isNaN(n) ? '' : n);
+                      }
+                    }}
+                    placeholder={isUrdu ? 'تعداد' : 'Qty'}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-bold text-lg text-slate-900 font-numbers focus:ring-2 focus:ring-emerald-500 text-center"
                     required
                   />
@@ -662,78 +792,9 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               </div>
             </div>
           </div>
-
-          {/* Initial Deductions Presets (Editable later anytime) */}
-          <div className="bg-slate-50 p-3 sm:p-3.5 rounded-2xl border border-slate-200 space-y-2">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-slate-700 font-urdu-sans">
-                {t.expensesSection} (ابتدائی کٹوتیاں - بعد میں تبدیل ہو سکتے ہیں)
-              </h4>
-              <div className="text-[11px] text-emerald-800 font-urdu-sans font-bold bg-emerald-100/70 px-2 py-0.5 rounded-md">
-                <span>
-                  {t.mazdoori}: {totalQuantity} {unitLabels[unitType][settings.language]} × ₨{mazdooriRate} ={' '}
-                  <span className="font-numbers font-extrabold text-emerald-950">
-                    ₨{(totalQuantity * mazdooriRate).toLocaleString('en-US')}
-                  </span>
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              <div>
-                <label className="text-[11px] text-slate-500 block font-urdu-sans">{t.commission} (%)</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.5"
-                  value={commissionRate}
-                  onChange={(e) => setCommissionRate(parseNumber(e.target.value))}
-                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] text-slate-500 block font-urdu-sans">{t.mazdoori} (فی یونٹ)</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={mazdooriRate}
-                  onChange={(e) => setMazdooriRate(parseNumber(e.target.value))}
-                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
-                />
-                {selectedMazdooriTitle && (
-                  <span className="block text-[10px] text-emerald-700 font-urdu-sans truncate mt-0.5 font-medium text-center">
-                    {selectedMazdooriTitle}
-                  </span>
-                )}
-              </div>
-
-              <div>
-                <label className="text-[11px] text-slate-500 block font-urdu-sans">{t.kiraya} (روپے)</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={kirayaAmount}
-                  onChange={(e) => setKirayaAmount(parseNumber(e.target.value))}
-                  placeholder="0"
-                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] text-slate-500 block font-urdu-sans">{t.naqdAdvance} (روپے)</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={advanceAmount}
-                  onChange={(e) => setAdvanceAmount(parseNumber(e.target.value))}
-                  placeholder="0"
-                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-numbers text-center font-bold"
-                />
-              </div>
-            </div>
-          </div>
-        </form>
+        </div>
+      </div>
+    </form>
 
         {/* Footer Actions */}
         <div className="p-3 sm:p-3.5 bg-slate-50 border-t border-slate-200 flex gap-2 sm:gap-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

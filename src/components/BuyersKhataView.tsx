@@ -55,6 +55,7 @@ interface BuyersKhataViewProps {
   onSaveCustomer: (customer: CustomerBuyer) => void;
   onDeleteCustomer: (customerId: string) => void;
   onRecordCustomerPayment: (customerId: string, payment: BuyerPaymentRecord) => void;
+  onDeleteCustomerPayment?: (customerIdOrName: string, paymentId: string) => void;
   onToggleSalePaymentStatus: (lotId: string, saleId: string) => void;
   onSaveVendor?: (vendor: SavedVendor) => void;
   onDeleteVendor?: (vendorId: string) => void;
@@ -69,6 +70,7 @@ interface BuyersKhataViewProps {
       status?: VendorPaymentStatus;
     }
   ) => void;
+  onDeleteVendorPayment?: (vendorName: string, paymentId: string, lotId?: string, amount?: number) => void;
   onToggleVendorPaymentStatus?: (lotId: string, customStatus?: 'pending' | 'paid') => void;
   onOpenReceipt?: (lotId: string) => void;
   onOpenExpenseSlip?: (lotId: string) => void;
@@ -82,10 +84,12 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   onSaveCustomer,
   onDeleteCustomer,
   onRecordCustomerPayment,
+  onDeleteCustomerPayment,
   onToggleSalePaymentStatus,
   onSaveVendor,
   onDeleteVendor,
   onRecordVendorPayment,
+  onDeleteVendorPayment,
   onToggleVendorPaymentStatus,
   onOpenReceipt,
   onOpenExpenseSlip,
@@ -1076,21 +1080,28 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                               <MessageCircle className="w-4 h-4" />
                             </button>
 
-                            {/* Record Payment Button */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                sound.playTick();
-                                setSelectedCustomerIdForPayment(
-                                  selectedCustomerIdForPayment === cust.name ? null : cust.name
-                                );
-                                setCustPaymentAmount(cust.balance > 0 ? cust.balance : 0);
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans transition flex items-center gap-1 shadow-xs active:scale-95"
-                            >
-                              <ArrowDownLeft className="w-3.5 h-3.5" />
-                              <span>{isUrdu ? 'وصولی' : 'Payment'}</span>
-                            </button>
+                            {/* Record Payment Button - STRICTLY ONLY IF PENDING BALANCE > 0 */}
+                            {cust.balance > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  sound.playTick();
+                                  setSelectedCustomerIdForPayment(
+                                    selectedCustomerIdForPayment === cust.name ? null : cust.name
+                                  );
+                                  setCustPaymentAmount(cust.balance);
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans transition flex items-center gap-1 shadow-xs active:scale-95"
+                              >
+                                <ArrowDownLeft className="w-3.5 h-3.5" />
+                                <span>{isUrdu ? 'وصولی' : 'Payment'}</span>
+                              </button>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-[11px] font-bold font-urdu-sans flex items-center gap-1">
+                                <Check className="w-3 h-3 stroke-[3]" />
+                                <span>{isUrdu ? 'مکمل بے باق' : 'Cleared'}</span>
+                              </span>
+                            )}
 
                             <button
                               type="button"
@@ -1116,8 +1127,8 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Inline Record Payment Form */}
-                      {selectedCustomerIdForPayment === cust.name && (
+                      {/* Inline Record Payment Form - STRICTLY ONLY IF PENDING BALANCE > 0 */}
+                      {selectedCustomerIdForPayment === cust.name && cust.balance > 0 && (
                         <div className="bg-emerald-50/80 p-3.5 border-t border-emerald-200 flex flex-col sm:flex-row items-center gap-2 animate-in fade-in duration-150">
                           <div className="text-xs font-bold text-emerald-950 font-urdu-sans flex items-center gap-1.5 flex-shrink-0">
                             <ArrowDownLeft className="w-4 h-4 text-emerald-700" />
@@ -1331,6 +1342,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                       <th className="py-1.5 px-2.5 text-start">{t.date}</th>
                                       <th className="py-1.5 px-2.5 text-end">رقم وصول</th>
                                       <th className="py-1.5 px-2.5 text-start">تفصیل</th>
+                                      <th className="py-1.5 px-2 text-center">حذف</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
@@ -1341,6 +1353,22 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                           +{formatPKR(pay.amount, settings.currencySymbol, settings.language)}
                                         </td>
                                         <td className="py-1.5 px-2.5 text-slate-600">{pay.notes || 'نقد وصولی'}</td>
+                                        <td className="py-1.5 px-2 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (window.confirm(isUrdu ? 'کیا آپ واقعی یہ ادائیگی حذف کرنا چاہتے ہیں؟' : 'Delete this payment record?')) {
+                                                if (onDeleteCustomerPayment) {
+                                                  onDeleteCustomerPayment(cust.name, pay.id);
+                                                }
+                                              }
+                                            }}
+                                            className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition"
+                                            title={isUrdu ? 'ادائیگی حذف کریں' : 'Delete payment'}
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -1677,23 +1705,30 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                             </button>
                           )}
 
-                          {/* Dedicated Record Payment / Pay to Vendor Button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              sound.playTick();
-                              setSelectedVendorForPayment(
-                                isPaymentFormOpen ? null : vendor.name
-                              );
-                              setVendorPaymentAmount(vendor.remainingDue > 0 ? vendor.remainingDue : vendor.netPayable);
-                              setVendorPaymentLotTarget('all');
-                              setVendorPaymentNote('');
-                            }}
-                            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black transition flex items-center gap-1 shadow-xs active:scale-95"
-                          >
-                            <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.5]" />
-                            <span>{isUrdu ? 'ادائیگی کا اندراج' : 'Pay to Vendor'}</span>
-                          </button>
+                          {/* Dedicated Record Payment / Pay to Vendor Button - STRICTLY ONLY IF REMAINING DUE > 0 */}
+                          {vendor.remainingDue > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                sound.playTick();
+                                setSelectedVendorForPayment(
+                                  isPaymentFormOpen ? null : vendor.name
+                                );
+                                setVendorPaymentAmount(vendor.remainingDue);
+                                setVendorPaymentLotTarget('all');
+                                setVendorPaymentNote('');
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black transition flex items-center gap-1 shadow-xs active:scale-95"
+                            >
+                              <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>{isUrdu ? 'ادائیگی کا اندراج' : 'Pay to Vendor'}</span>
+                            </button>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-[11px] font-bold font-urdu-sans flex items-center gap-1">
+                              <Check className="w-3 h-3 stroke-[3]" />
+                              <span>{isUrdu ? 'مکمل ادا شدہ' : 'Fully Paid'}</span>
+                            </span>
+                          )}
 
                           {/* Toggle Details */}
                           <button
@@ -1713,9 +1748,9 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                     </div>
 
                     {/* ========================================================= */}
-                    {/* DEDICATED INLINE VENDOR PAYMENT RECEIVE / PAY INTERFACE DIV */}
+                    {/* DEDICATED INLINE VENDOR PAYMENT RECEIVE / PAY INTERFACE DIV - STRICTLY ONLY IF REMAINING DUE > 0 */}
                     {/* ========================================================= */}
-                    {isPaymentFormOpen && (
+                    {isPaymentFormOpen && vendor.remainingDue > 0 && (
                       <div className="bg-amber-50/90 p-4 border-t border-b border-amber-200 animate-in fade-in duration-150 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="text-xs font-black text-amber-950 flex items-center gap-1.5">
@@ -2064,6 +2099,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                     <th className="py-1.5 px-2.5 text-end">ادا شدہ رقم</th>
                                     <th className="py-1.5 px-2.5 text-center">طریقہ کار</th>
                                     <th className="py-1.5 px-2.5 text-start">تفصیل / لاٹ نمبر</th>
+                                    <th className="py-1.5 px-2 text-center">حذف</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -2080,6 +2116,22 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                       </td>
                                       <td className="py-1.5 px-2.5 text-slate-600">
                                         {pay.notes || (pay.lotNumber ? `لاٹ #${pay.lotNumber}` : 'نقد ادائیگی')}
+                                      </td>
+                                      <td className="py-1.5 px-2 text-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (window.confirm(isUrdu ? 'کیا آپ واقعی زمیندار کی یہ ادائیگی حذف کرنا چاہتے ہیں؟' : 'Delete this payment record?')) {
+                                              if (onDeleteVendorPayment) {
+                                                onDeleteVendorPayment(vendor.name, pay.id, pay.lotId, pay.amount);
+                                              }
+                                            }
+                                          }}
+                                          className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition"
+                                          title={isUrdu ? 'ادائیگی حذف کریں' : 'Delete payment'}
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
                                       </td>
                                     </tr>
                                   ))}

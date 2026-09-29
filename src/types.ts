@@ -149,6 +149,7 @@ export interface AppSettings {
   arhtiNameEn: string;
   soundEnabled: boolean;
   viewMode: 'mobile' | 'desktop';
+  securityPin?: string;
 }
 
 export interface SavedVendor {

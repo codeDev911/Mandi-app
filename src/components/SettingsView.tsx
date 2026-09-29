@@ -28,11 +28,15 @@ import {
   PackageCheck,
   Calculator,
   Save,
+  Lock,
+  KeyRound,
   Share2,
   Plus,
   Trash2,
   Edit2,
   Tag,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -73,6 +77,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editingMazdooriId, setEditingMazdooriId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [editingRate, setEditingRate] = useState<number>(25);
+  const [showPin, setShowPin] = useState(false);
   const cloudConfig = getStoredCloudConfig();
 
   const totalBidsCount = lots.reduce((acc, l) => acc + l.sales.length, 0);
@@ -706,6 +711,81 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <Volume2 className="w-4 h-4" />
                 <span>{form.soundEnabled ? (isUrdu ? 'آواز آن ہے' : 'Sound ON') : (isUrdu ? 'آواز بند ہے' : 'Sound OFF')}</span>
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Security PIN Code for Deletions */}
+        <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-xs space-y-3">
+          <div className="flex items-center justify-between border-b border-stone-100 pb-2">
+            <h3 className="font-bold text-xs sm:text-sm text-stone-900 font-urdu-sans flex items-center gap-2">
+              <Lock className="w-4 h-4 text-rose-600" />
+              <span>{isUrdu ? 'حذف کرنے کا حفاظتی پن کوڈ (Delete Security PIN)' : 'Security PIN for Deletions'}</span>
+            </h3>
+            <span className="text-[11px] font-urdu-sans font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
+              {form.securityPin ? (isUrdu ? `پن فعال: ${showPin ? form.securityPin : '••••'}` : `PIN: ${showPin ? form.securityPin : '••••'}`) : (isUrdu ? 'غیر فعال' : 'Disabled')}
+            </span>
+          </div>
+          <p className="text-xs text-stone-500 font-urdu-sans leading-relaxed">
+            {isUrdu
+              ? 'کسی بھی چیز (لاٹ، بولی سیل، گاہک، زمیندار، خرچہ یا نقد ادائیگی) کو حذف کرتے وقت یہ 4 ہندسوں کا پن کوڈ پوچھا جائے گا۔ درست پن کوڈ درج کرتے ہی فوری حذف ہو جائے گا۔'
+              : 'Set a security PIN code (e.g. 1234). Whenever deleting any lot, bid, customer, vendor, expense or payment, this PIN is verified and deletes immediately upon matching.'}
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1 font-urdu-sans flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <KeyRound className="w-3.5 h-3.5 text-stone-400" />
+                  <span>{isUrdu ? 'حفاظتی پن کوڈ درج کریں:' : 'Security PIN:'}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowPin(!showPin)}
+                  className="text-[11px] text-stone-500 hover:text-stone-800 flex items-center gap-1 font-urdu-sans"
+                >
+                  {showPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  <span>{showPin ? (isUrdu ? 'چھپائیں' : 'Hide') : (isUrdu ? 'دیکھیں' : 'Show')}</span>
+                </button>
+              </label>
+              <input
+                type={showPin ? 'text' : 'password'}
+                inputMode="numeric"
+                maxLength={8}
+                value={form.securityPin || ''}
+                onChange={(e) => setForm({ ...form, securityPin: e.target.value.trim() })}
+                placeholder={isUrdu ? 'مثلاً: 1234 یا 0000' : 'e.g. 1234'}
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-sm font-numbers tracking-widest font-bold focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div className="flex flex-col justify-end gap-1.5">
+              <span className="text-[11px] text-stone-500 font-urdu-sans">{isUrdu ? 'تیز رفتار انتخاب:' : 'Quick Select:'}</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, securityPin: '1234' })}
+                  className="flex-1 py-1.5 px-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold font-numbers transition"
+                >
+                  1234 ({isUrdu ? 'ڈیفالٹ' : 'Default'})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, securityPin: '0000' })}
+                  className="flex-1 py-1.5 px-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold font-numbers transition"
+                >
+                  0000
+                </button>
+                {form.securityPin && (
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, securityPin: '' })}
+                    className="py-1.5 px-2.5 text-xs text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl font-urdu-sans font-bold border border-rose-200 transition"
+                    title={isUrdu ? 'پن کوڈ ختم کریں' : 'Remove PIN'}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

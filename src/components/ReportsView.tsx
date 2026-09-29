@@ -1625,21 +1625,26 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
                       {/* Action Buttons */}
                       <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
-                        {/* Dedicated Payment Button */}
-                        <button
-                          onClick={() => handleOpenVendorPayment(v.vendorName, v.pendingBalance > 0 ? v.pendingBalance : v.netPayable)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-2xs active:scale-95 ${
-                            selectedVendorForPayment === v.vendorName
-                              ? 'bg-slate-800 text-white'
-                              : v.pendingBalance > 0
-                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                              : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300'
-                          }`}
-                          title="زمیندار کو رقم ادائیگی کا اندراج کریں"
-                        >
-                          <Banknote className="w-3.5 h-3.5" />
-                          <span>{selectedVendorForPayment === v.vendorName ? (isUrdu ? 'بند کریں' : 'Close') : (isUrdu ? 'ادائیگی درج کریں' : 'Pay Vendor')}</span>
-                        </button>
+                        {/* Dedicated Payment Button - STRICTLY ONLY IF PENDING BALANCE > 0 */}
+                        {v.pendingBalance > 0 ? (
+                          <button
+                            onClick={() => handleOpenVendorPayment(v.vendorName, v.pendingBalance)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-2xs active:scale-95 ${
+                              selectedVendorForPayment === v.vendorName
+                                ? 'bg-slate-800 text-white'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            }`}
+                            title="زمیندار کو رقم ادائیگی کا اندراج کریں"
+                          >
+                            <Banknote className="w-3.5 h-3.5" />
+                            <span>{selectedVendorForPayment === v.vendorName ? (isUrdu ? 'بند کریں' : 'Close') : (isUrdu ? 'ادائیگی درج کریں' : 'Pay Vendor')}</span>
+                          </button>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-[11px] font-bold font-urdu-sans flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>{isUrdu ? 'مکمل ادا شدہ' : 'Fully Paid'}</span>
+                          </span>
+                        )}
 
                         <button
                           onClick={() => {
@@ -1657,8 +1662,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* DEDICATED PAYMENT RECEIVE / PAYOUT FORM FOR VENDOR */}
-                  {selectedVendorForPayment === v.vendorName && (
+                  {/* DEDICATED PAYMENT RECEIVE / PAYOUT FORM FOR VENDOR - STRICTLY ONLY IF PENDING BALANCE > 0 */}
+                  {selectedVendorForPayment === v.vendorName && v.pendingBalance > 0 && (
                     <div className="bg-emerald-50/90 p-3.5 sm:p-4 rounded-2xl border-2 border-emerald-300 space-y-3 animate-in fade-in duration-150 shadow-xs">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200 pb-2">
                         <div className="flex items-center gap-2 text-xs font-bold text-emerald-950 font-urdu-sans">

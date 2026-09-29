@@ -8,6 +8,7 @@ import {
   CustomerBuyer,
   BuyerPaymentRecord,
   SavedVendor,
+  VendorPaymentRecord,
   ShopExpense,
   DrawerAdjustment,
 } from './types';
@@ -337,6 +338,25 @@ export default function App() {
     });
   };
 
+  const handleDeleteCustomerPayment = (customerIdOrName: string, paymentId: string) => {
+    sound.playPop();
+    setCustomers((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id === customerIdOrName || c.name.trim().toLowerCase() === customerIdOrName.trim().toLowerCase()) {
+          const newPayments = (c.payments || []).filter((p) => p.id !== paymentId);
+          return {
+            ...c,
+            payments: newPayments,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return c;
+      });
+      saveCustomersToIndexedDB(updated).catch(console.error);
+      return updated;
+    });
+  };
+
   const handleApplyCloudData = (data: {
     settings?: AppSettings;
     lots: VendorLot[];
@@ -645,6 +665,87 @@ export default function App() {
     });
   };
 
+  const handleDeleteVendorPayment = (
+    vendorName: string,
+    paymentId: string,
+    lotId?: string,
+    amount?: number
+  ) => {
+    sound.playPop();
+    // 1. Remove payment from vendor in vendors state
+    setVendors((prevVendors) => {
+      const updated = prevVendors.map((v) => {
+        if (v.name.trim().toLowerCase() === vendorName.trim().toLowerCase()) {
+          return {
+            ...v,
+            payments: (v.payments || []).filter((p) => p.id !== paymentId),
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return v;
+      });
+      saveVendorsToIndexedDB(updated).catch(console.error);
+      return updated;
+    });
+
+    // 2. Adjust lot payment amounts if applicable
+    if (lotId) {
+      setLots((prevLots) => {
+        const updated = prevLots.map((lot) => {
+          if (lot.id !== lotId) return lot;
+          const currentPaid =
+            lot.vendorPaymentAmount !== undefined
+              ? lot.vendorPaymentAmount
+              : lot.vendorPaymentStatus === 'paid'
+              ? lot.summary.netPayableToVendor
+              : 0;
+          const deduct = amount || 0;
+          const newPaid = Math.max(0, currentPaid - deduct);
+          const newStatus: VendorPaymentStatus =
+            newPaid <= 0 ? 'pending' : newPaid < lot.summary.netPayableToVendor ? 'partial' : 'paid';
+          return {
+            ...lot,
+            vendorPaymentAmount: newPaid,
+            vendorPaymentStatus: newStatus,
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        saveLotsToIndexedDB(updated).catch(console.error);
+        return updated;
+      });
+    } else if (amount && amount > 0) {
+      // Revert distributed payment from lots of this vendor
+      setLots((prevLots) => {
+        let remainingToDeduct = amount;
+        const updated = prevLots.map((lot) => {
+          if (lot.vendorName.trim().toLowerCase() !== vendorName.trim().toLowerCase() || remainingToDeduct <= 0) {
+            return lot;
+          }
+          const currentPaid =
+            lot.vendorPaymentAmount !== undefined
+              ? lot.vendorPaymentAmount
+              : lot.vendorPaymentStatus === 'paid'
+              ? lot.summary.netPayableToVendor
+              : 0;
+          if (currentPaid <= 0) return lot;
+          const deduct = Math.min(currentPaid, remainingToDeduct);
+          remainingToDeduct -= deduct;
+          const newPaid = Math.max(0, currentPaid - deduct);
+          const newStatus: VendorPaymentStatus =
+            newPaid <= 0 ? 'pending' : newPaid < lot.summary.netPayableToVendor ? 'partial' : 'paid';
+          return {
+            ...lot,
+            vendorPaymentAmount: newPaid,
+            vendorPaymentStatus: newStatus,
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        saveLotsToIndexedDB(updated).catch(console.error);
+        return updated;
+      });
+    }
+  };
+
   const handleOpenExpenseSlip = (lotId: string) => {
     setSelectedLotId(lotId);
     setActiveTab('slip_expenses');
@@ -849,10 +950,12 @@ export default function App() {
             onSaveCustomer={handleSaveCustomer}
             onDeleteCustomer={handleDeleteCustomer}
             onRecordCustomerPayment={handleRecordCustomerPayment}
+            onDeleteCustomerPayment={handleDeleteCustomerPayment}
             onToggleSalePaymentStatus={handleToggleSalePaymentStatus}
             onSaveVendor={handleSaveVendor}
             onDeleteVendor={handleDeleteVendor}
             onRecordVendorPayment={handleRecordVendorPayment}
+            onDeleteVendorPayment={handleDeleteVendorPayment}
             onToggleVendorPaymentStatus={handleToggleVendorPaymentStatus}
             onOpenReceipt={handleOpenReceipt}
             onOpenExpenseSlip={handleOpenExpenseSlip}

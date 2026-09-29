@@ -29,6 +29,7 @@ export const defaultSettings: AppSettings = {
   arhtiNameEn: 'Haji Muhammad Rafeeq (Arhti)',
   soundEnabled: true,
   viewMode: 'mobile',
+  securityPin: '1234',
 };
 
 export const sampleVendors: SavedVendor[] = [];
