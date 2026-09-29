@@ -336,12 +336,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-stone-700 mb-1 font-urdu-sans">
-                رابطہ فون نمبر (WhatsApp)
+                تار کا پتہ (اختیاری)
+              </label>
+              <input
+                type="text"
+                value={form.tarKaPataUrdu || ''}
+                onChange={(e) => setForm({ ...form, tarKaPataUrdu: e.target.value })}
+                placeholder="مثال: حاجی ولی جان"
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs font-urdu-sans"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1 font-urdu-sans">
+                رابطہ فون نمبر 1 (WhatsApp)
               </label>
               <input
                 type="text"
                 value={form.shopPhone}
                 onChange={(e) => setForm({ ...form, shopPhone: e.target.value })}
+                className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs font-numbers"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1 font-urdu-sans">
+                اضافی فون نمبر 2 (اختیاری)
+              </label>
+              <input
+                type="text"
+                value={form.shopPhone2 || ''}
+                onChange={(e) => setForm({ ...form, shopPhone2: e.target.value })}
+                placeholder="مثال: 0301-8322877"
                 className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs font-numbers"
               />
             </div>

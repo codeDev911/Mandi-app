@@ -200,6 +200,35 @@ class SoundEngine {
       // ignore
     }
   }
+
+  /**
+   * Warning sound for invalid PIN or validation failure
+   */
+  public playWarning() {
+    if (!this.isEnabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+      osc.frequency.setValueAtTime(120, this.ctx.currentTime + 0.08);
+
+      gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.22);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export const sound = new SoundEngine();

@@ -145,8 +145,10 @@ export interface AppSettings {
   shopAddressUrdu: string;
   shopAddressEn: string;
   shopPhone: string;
+  shopPhone2?: string;
   arhtiNameUrdu: string;
   arhtiNameEn: string;
+  tarKaPataUrdu?: string;
   soundEnabled: boolean;
   viewMode: 'mobile' | 'desktop';
   securityPin?: string;

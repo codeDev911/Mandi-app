@@ -376,8 +376,8 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         grossSales: 0,
         totalExpenses: 0,
         netPayable: v.openingBalance || 0,
-        totalPaid: v.payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
-        remainingDue: (v.openingBalance || 0) - (v.payments?.reduce((sum, p) => sum + p.amount, 0) || 0),
+        totalPaid: 0,
+        remainingDue: v.openingBalance || 0,
         isAllPaid: false,
         isPartial: false,
         lots: [],
@@ -414,14 +414,6 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
       entry.totalExpenses += lot.summary.totalExpenses;
       entry.netPayable += lot.summary.netPayableToVendor;
 
-      const lotPaid =
-        lot.vendorPaymentAmount !== undefined
-          ? lot.vendorPaymentAmount
-          : lot.vendorPaymentStatus === 'paid'
-          ? lot.summary.netPayableToVendor
-          : 0;
-
-      entry.totalPaid += lotPaid;
       if (!entry.phone && lot.vendorPhone) entry.phone = lot.vendorPhone;
       if (!entry.city && lot.vendorCity) entry.city = lot.vendorCity;
       entry.lots.push(lot);
@@ -430,13 +422,31 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
     return Array.from(vendorMap.values()).map((v) => {
       // Build unified payment history for this vendor
       const historyMap = new Map<string, VendorPaymentRecord>();
+      const seenSignatures = new Set<string>();
 
-      // 1. From saved vendor payments
+      // 1. From saved vendor payments (deduplicate identical duplicate records)
       (v.payments || []).forEach((p) => {
-        historyMap.set(p.id, { ...p });
+        const timeKey = p.timestamp ? p.timestamp.slice(0, 16) : (p.date || p.paymentDate || '');
+        const signature = `${p.amount}_${p.paymentDate || p.date || ''}_${timeKey}_${p.lotId || 'all'}`;
+        if (!seenSignatures.has(signature) && !historyMap.has(p.id)) {
+          seenSignatures.add(signature);
+          historyMap.set(p.id, { ...p });
+        }
       });
 
-      // 2. From lot-specific payments
+      // Track explicitly linked lots from saved payments
+      const linkedLotIds = new Set<string>();
+      historyMap.forEach((p) => {
+        if (p.lotId) linkedLotIds.add(p.lotId);
+      });
+
+      // Pool of unassigned/general vendor payments (payments made from Khata to vendor without specific lotId)
+      let unassignedSavedPool = Array.from(historyMap.values())
+        .filter((p) => !p.lotId)
+        .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      // 2. From lot-specific payments:
+      // Only synthesize a lot-pay record if this lot's payment is NOT already covered by v.payments!
       v.lots.forEach((lot) => {
         const lotPaid =
           lot.vendorPaymentAmount !== undefined
@@ -446,21 +456,49 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
             : 0;
 
         if (lotPaid > 0) {
-          const lotPayKey = `lot-pay-${lot.id}`;
-          const alreadyLinked = Array.from(historyMap.values()).some((p) => p.lotId === lot.id);
-          if (!alreadyLinked) {
-            historyMap.set(lotPayKey, {
-              id: lotPayKey,
-              vendorName: lot.vendorName,
-              lotId: lot.id,
-              lotNumber: lot.lotNumber,
-              amount: lotPaid,
-              date: lot.vendorPaymentDate || lot.updatedAt?.slice(0, 10) || lot.arrivalDate,
-              paymentDate: lot.vendorPaymentDate || lot.updatedAt?.slice(0, 10) || lot.arrivalDate,
-              paymentMethod: lot.vendorPaymentMethod || 'cash',
-              notes: lot.vendorPaymentNotes || `لاٹ #${lot.lotNumber} (${lot.productUrdu}) کی ادائیگی`,
-            });
+          // If this lot was already explicitly linked in a saved payment, skip
+          if (linkedLotIds.has(lot.id)) {
+            return;
           }
+
+          // If covered by general/unassigned vendor payments (like payments made from Khata):
+          if (unassignedSavedPool >= lotPaid) {
+            unassignedSavedPool -= lotPaid;
+            // The payment for this lot is ALREADY recorded in v.payments! Do NOT add duplicate!
+            return;
+          } else if (unassignedSavedPool > 0) {
+            const excess = lotPaid - unassignedSavedPool;
+            unassignedSavedPool = 0;
+            if (excess > 0) {
+              const lotPayKey = `lot-pay-${lot.id}`;
+              historyMap.set(lotPayKey, {
+                id: lotPayKey,
+                vendorName: lot.vendorName,
+                lotId: lot.id,
+                lotNumber: lot.lotNumber,
+                amount: excess,
+                date: lot.vendorPaymentDate || lot.updatedAt?.slice(0, 10) || lot.arrivalDate,
+                paymentDate: lot.vendorPaymentDate || lot.updatedAt?.slice(0, 10) || lot.arrivalDate,
+                paymentMethod: lot.vendorPaymentMethod || 'cash',
+                notes: lot.vendorPaymentNotes || `لاٹ #${lot.lotNumber} (${lot.productUrdu}) کی ادائیگی`,
+              });
+            }
+            return;
+          }
+
+          // Lot was paid independently (e.g. marked paid in Bolli room directly without a payment record)
+          const lotPayKey = `lot-pay-${lot.id}`;
+          historyMap.set(lotPayKey, {
+            id: lotPayKey,
+            vendorName: lot.vendorName,
+            lotId: lot.id,
+            lotNumber: lot.lotNumber,
+            amount: lotPaid,
+            date: lot.vendorPaymentDate || lot.updatedAt?.slice(0, 10) || lot.arrivalDate,
+            paymentDate: lot.vendorPaymentDate || lot.updatedAt?.slice(0, 10) || lot.arrivalDate,
+            paymentMethod: lot.vendorPaymentMethod || 'cash',
+            notes: lot.vendorPaymentNotes || `لاٹ #${lot.lotNumber} (${lot.productUrdu}) کی ادائیگی`,
+          });
         }
       });
 
@@ -470,15 +508,15 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         return dateB.localeCompare(dateA);
       });
 
-      const totalRecordedPaid = paymentHistory.reduce((sum, p) => sum + (p.amount || 0), 0);
-      const effectivePaid = Math.max(v.totalPaid, totalRecordedPaid);
-      const remaining = Math.max(0, v.netPayable - effectivePaid);
+      // Total paid is accurately computed from all unique, non-overlapping payments
+      const totalPaid = paymentHistory.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const remaining = Math.max(0, v.netPayable - totalPaid);
       const isAllPaid = remaining === 0 && v.netPayable > 0;
-      const isPartial = effectivePaid > 0 && remaining > 0;
+      const isPartial = totalPaid > 0 && remaining > 0;
 
       return {
         ...v,
-        totalPaid: effectivePaid,
+        totalPaid,
         remainingDue: remaining,
         isAllPaid,
         isPartial,
@@ -642,7 +680,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
 
   // Vendor Payment Submission
   const handleRecordVendorPaymentSubmit = (vendor: typeof vendorList[0]) => {
-    if (vendorPaymentAmount <= 0 && vendorPaymentLotTarget === 'all') return;
+    if (vendorPaymentAmount <= 0) return;
 
     sound.playCashChime();
     if (onRecordVendorPayment) {
@@ -661,6 +699,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   };
 
   const handleQuickMarkVendorFullyPaid = (vendor: typeof vendorList[0]) => {
+    if (vendor.remainingDue <= 0) return;
     sound.playCashChime();
     if (onRecordVendorPayment) {
       onRecordVendorPayment(vendor.name, {
@@ -671,6 +710,9 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         status: 'paid',
       });
     }
+    setSelectedVendorForPayment(null);
+    setVendorPaymentAmount(0);
+    setVendorPaymentNote('');
   };
 
   const handleOpenAddVendor = () => {

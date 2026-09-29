@@ -487,3 +487,49 @@ export const commonMandiProducts: ProductPreset[] = [
   { nameEn: 'ادرک', nameUrdu: 'ادرک', emoji: '🫚', defaultUnit: 'bori', defaultAvgRate: 8000 },
   { nameEn: 'لیموں', nameUrdu: 'لیموں', emoji: '🍋', defaultUnit: 'shopper', defaultAvgRate: 2400 },
 ];
+
+/**
+ * Resolves any date string (ISO, relative phrases, Urdu relative, etc.) to a full real calendar date (e.g. "29-09-2026").
+ * Ensures words like "Today", "آج کی تاریخ" or day of week are NEVER written in the bill date line.
+ */
+export function formatFullRealDate(dateInput?: string, fallbackArrivalDate?: string): string {
+  if (dateInput) {
+    const trimmed = dateInput.trim();
+    // Check if ISO format YYYY-MM-DD
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      const [, y, m, d] = isoMatch;
+      return `${d}-${m}-${y}`;
+    }
+    // Check if already DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (dmyMatch) {
+      const [, d, m, y] = dmyMatch;
+      return `${d.padStart(2, '0')}-${m.padStart(2, '0')}-${y}`;
+    }
+    // Check if relative words like 'yesterday', 'گزشتہ', 'کل'
+    if (trimmed.toLowerCase().includes('yesterday') || trimmed.includes('گزشتہ') || trimmed.includes('کل')) {
+      const yest = new Date(Date.now() - 86400000);
+      const y = yest.getFullYear();
+      const m = String(yest.getMonth() + 1).padStart(2, '0');
+      const d = String(yest.getDate()).padStart(2, '0');
+      return `${d}-${m}-${y}`;
+    }
+  }
+
+  // Check fallback arrival date
+  if (fallbackArrivalDate) {
+    const isoMatch = fallbackArrivalDate.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      const [, y, m, d] = isoMatch;
+      return `${d}-${m}-${y}`;
+    }
+  }
+
+  // Fallback to today's real calendar date
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${day}-${month}-${year}`;
+}

@@ -1,5 +1,5 @@
 import { VendorLot, AppSettings } from '../types';
-import { unitLabels } from './localization';
+import { unitLabels, formatFullRealDate } from './localization';
 import { formatPKR } from './currency';
 import { PDFPreviewData } from './pdfReportGenerator';
 
@@ -116,30 +116,28 @@ function openPrintWindowFallback(htmlContent: string, title: string) {
 }
 
 /**
- * Prints a clean, 100% authentic Urdu Vendor Bill Slip (A4 / Standard Paper format)
+ * Generates the authentic Insaf Mandi Commission Shop printed bill HTML matching the physical pad
  */
-export function printVendorBillSlipA4(
+export function generateInsafMandiBillHtmlSingle(
   vendorName: string,
   vendorPhone: string | undefined,
   vendorCity: string | undefined,
   lots: VendorLot[],
   settings: AppSettings,
   dateLabel?: string,
-  isAveraged: boolean = false
-): void {
+  isAveraged: boolean = false,
+  billNumber?: string
+): string {
   const isUrdu = settings.language === 'ur';
-  const displayDate = dateLabel || lots[0]?.arrivalDate || new Date().toISOString().slice(0, 10);
-
-  // Items list: either detailed per sale or averaged by product (اجناس وار اوسط بل)
-  const allItems: Array<{
-    lotNumber: string;
-    productUrdu: string;
-    quantity: number;
-    unitLabel: string;
-    ratePerUnit: number;
-    totalAmount: number;
-    buyerName?: string;
-  }> = [];
+  const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
+  const displayBillNo = billNumber || lots[0]?.lotNumber || '101';
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const shopName = settings.shopNameUrdu || settings.shopNameEn || 'کمیشن شاپ';
+  const shopAddress = settings.shopAddressUrdu || settings.shopAddressEn || '';
+  const arhtiName = settings.arhtiNameUrdu || settings.arhtiNameEn || '';
+  const phone1 = settings.shopPhone?.trim() || '';
+  const phone2 = settings.shopPhone2?.trim() || '';
+  const tarKaPata = settings.tarKaPataUrdu?.trim() || '';
 
   const aggregatedExpenses = {
     commission: 0,
@@ -151,34 +149,61 @@ export function printVendorBillSlipA4(
     customTotal: 0,
   };
 
-  const totals = lots.reduce(
-    (acc, lot) => {
-      acc.grossSales += lot.summary.grossSales;
-      acc.totalExpenses += lot.summary.totalExpenses;
-      acc.netPayable += lot.summary.netPayableToVendor;
-      const lotPaid =
-        lot.vendorPaymentAmount !== undefined
-          ? lot.vendorPaymentAmount
-          : lot.vendorPaymentStatus === 'paid'
-          ? lot.summary.netPayableToVendor
-          : 0;
-      acc.totalPaid += lotPaid;
-      acc.totalUnits += lot.totalQuantity;
+  let totalGross = 0;
+  let totalExpenses = 0;
+  let totalNetPayable = 0;
+  let totalUnits = 0;
+  let totalPaid = 0;
+  let allLotsPaid = true;
 
-      if (lot.expenses.commission.enabled) aggregatedExpenses.commission += Number(lot.expenses.commission.amount) || 0;
-      if (lot.expenses.kiraya.enabled) aggregatedExpenses.kiraya += Number(lot.expenses.kiraya.amount) || 0;
-      if (lot.expenses.mazdoori.enabled) aggregatedExpenses.mazdoori += Number(lot.expenses.mazdoori.amount) || 0;
-      if (lot.expenses.munshiana.enabled) aggregatedExpenses.munshiana += Math.round(Number(lot.expenses.munshiana.amount) || 0);
-      if (lot.expenses.naqdAdvance.enabled) aggregatedExpenses.naqdAdvance += Number(lot.expenses.naqdAdvance.amount) || 0;
-      if (lot.expenses.marketFee.enabled) aggregatedExpenses.marketFee += Number(lot.expenses.marketFee.amount) || 0;
-      lot.expenses.customExpenses?.forEach((ce) => {
-        aggregatedExpenses.customTotal += Number(ce.amount) || 0;
-      });
+  lots.forEach((lot) => {
+    totalGross += lot.summary.grossSales;
+    totalExpenses += lot.summary.totalExpenses;
+    totalNetPayable += lot.summary.netPayableToVendor;
+    totalUnits += lot.totalQuantity;
 
-      return acc;
-    },
-    { grossSales: 0, totalExpenses: 0, netPayable: 0, totalPaid: 0, totalUnits: 0 }
-  );
+    if (lot.vendorPaymentStatus !== 'paid') {
+      allLotsPaid = false;
+    }
+
+    const lotPaid =
+      lot.vendorPaymentAmount !== undefined
+        ? lot.vendorPaymentAmount
+        : lot.vendorPaymentStatus === 'paid'
+        ? lot.summary.netPayableToVendor
+        : 0;
+    totalPaid += lotPaid;
+
+    if (lot.expenses.commission.enabled) aggregatedExpenses.commission += Number(lot.expenses.commission.amount) || 0;
+    if (lot.expenses.kiraya.enabled) aggregatedExpenses.kiraya += Number(lot.expenses.kiraya.amount) || 0;
+    if (lot.expenses.mazdoori.enabled) aggregatedExpenses.mazdoori += Number(lot.expenses.mazdoori.amount) || 0;
+    if (lot.expenses.munshiana.enabled) aggregatedExpenses.munshiana += Math.round(Number(lot.expenses.munshiana.amount) || 0);
+    if (lot.expenses.naqdAdvance.enabled) aggregatedExpenses.naqdAdvance += Number(lot.expenses.naqdAdvance.amount) || 0;
+    if (lot.expenses.marketFee.enabled) aggregatedExpenses.marketFee += Number(lot.expenses.marketFee.amount) || 0;
+    lot.expenses.customExpenses?.forEach((ce) => {
+      aggregatedExpenses.customTotal += Number(ce.amount) || 0;
+    });
+  });
+
+  const meezanExpenses =
+    aggregatedExpenses.commission +
+    aggregatedExpenses.kiraya +
+    aggregatedExpenses.mazdoori +
+    aggregatedExpenses.munshiana +
+    aggregatedExpenses.naqdAdvance +
+    aggregatedExpenses.marketFee +
+    aggregatedExpenses.customTotal;
+
+  // Build items list
+  const allItems: Array<{
+    lotNumber: string;
+    productUrdu: string;
+    quantity: number;
+    unitLabel: string;
+    ratePerUnit: number;
+    totalAmount: number;
+    buyerName?: string;
+  }> = [];
 
   if (!isAveraged) {
     lots.forEach((lot) => {
@@ -207,7 +232,7 @@ export function printVendorBillSlipA4(
       }
     });
   } else {
-    // Averaged: Group by Agnaas / Product
+    // Averaged: Group by Product
     const productGroups = new Map<
       string,
       {
@@ -261,45 +286,310 @@ export function printVendorBillSlipA4(
     });
   }
 
-  const allLotsPaid = totals.totalPaid >= totals.netPayable && totals.netPayable > 0;
-  const isPartialPaid = totals.totalPaid > 0 && !allLotsPaid;
+  const isFullyPaid = (totalPaid >= totalNetPayable && totalNetPayable > 0) || (allLotsPaid && lots.length > 0);
+  const minRows = 6;
+  const emptyRowsCount = Math.max(0, minRows - allItems.length);
 
-  const tableRowsHtml = allItems
+  const saleRowsHtml = allItems
     .map(
-      (item, idx) => `
-    <tr style="border-bottom: 1px solid #cbd5e1; ${idx % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
-      <td style="text-align: center; padding: 9px 6px; font-size: 13.5px; color: #64748b; font-weight: bold;">${idx + 1}</td>
-      <td style="text-align: right; padding: 9px 10px; font-weight: bold; font-size: 15.5px; color: #0f172a; font-family: 'Noto Nastaliq Urdu', serif;">${item.productUrdu}</td>
-      <td style="text-align: center; padding: 9px 8px; font-weight: bold; font-size: 14.5px; color: #1e293b;">${item.quantity} ${item.unitLabel}</td>
-      <td style="text-align: right; padding: 9px 8px; font-size: 14.5px; font-weight: 600; color: #334155;">روپے ${Math.round(item.ratePerUnit).toLocaleString()}</td>
-      <td style="text-align: right; padding: 9px 10px; font-weight: bold; font-size: 15.5px; color: #0f172a;">روپے ${Math.round(item.totalAmount).toLocaleString()}</td>
-    </tr>
-  `
-    )
-    .join('');
-
-  const expItems = [
-    { label: 'کمیشن', val: Math.round(aggregatedExpenses.commission) },
-    { label: 'کرایہ گاڑی', val: Math.round(aggregatedExpenses.kiraya) },
-    { label: 'مزدوری (اترائی و چنائی)', val: Math.round(aggregatedExpenses.mazdoori) },
-    { label: 'منشیانہ', val: Math.round(aggregatedExpenses.munshiana) },
-    { label: 'نقد پیشگی', val: Math.round(aggregatedExpenses.naqdAdvance) },
-    { label: 'مارکیٹ فیس', val: Math.round(aggregatedExpenses.marketFee) },
-    { label: 'دیگر کٹوتیاں', val: Math.round(aggregatedExpenses.customTotal) },
-  ].filter((it) => it.val > 0);
-
-  const expRowsHtml = expItems
-    .map(
-      (it) => `
-    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed #cbd5e1; font-size: 14px;">
-      <span style="color: #475569; font-weight: 600;">${it.label}:</span>
-      <span style="font-weight: bold; color: #0f172a;">- روپے ${Math.round(it.val).toLocaleString()}</span>
+      (item) => `
+    <div style="height: 21px; display: flex; align-items: center; border-bottom: 1px solid rgba(185, 28, 28, 0.6); font-size: 11px; font-weight: 600; color: #0f172a;">
+      <div style="width: 82px; height: 100%; border-left: 1.5px solid rgba(185, 28, 28, 0.6); display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: monospace, sans-serif;">
+        ${Math.round(item.totalAmount).toLocaleString()}
+      </div>
+      <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0 6px; text-align: right;">
+        <span style="font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif; font-weight: bold;">
+          ${item.productUrdu} ${item.quantity} ${item.unitLabel} @ ${Math.round(item.ratePerUnit).toLocaleString()}
+        </span>
+        ${item.buyerName ? `<span style="font-size: 9px; color: #64748b;">(${item.buyerName})</span>` : ''}
+      </div>
     </div>
   `
     )
     .join('');
 
-  const html = `
+  const emptyRowsHtml = Array.from({ length: emptyRowsCount })
+    .map(
+      () => `
+    <div style="height: 21px; display: flex; align-items: center; border-bottom: 1px solid rgba(185, 28, 28, 0.6);">
+      <div style="width: 82px; height: 100%; border-left: 1.5px solid rgba(185, 28, 28, 0.6);"></div>
+      <div style="flex: 1; height: 100%;"></div>
+    </div>
+  `
+    )
+    .join('');
+
+  return `
+    <div dir="rtl" class="insaf-mandi-bill-wrapper" style="width: 210mm; height: 148.5mm; max-height: 148.5mm; margin: 0 auto; background: #ffffff; color: #0f172a; box-sizing: border-box; font-family: 'Noto Sans Arabic', 'Plus Jakarta Sans', system-ui, sans-serif; display: flex; border: 1.5px solid #cbd5e1; overflow: hidden;">
+      <!-- Right Produce Border -->
+      <div style="width: 7mm; background-image: url('${origin}/bill_produce_border.jpg'); background-size: 100% auto; background-repeat: repeat-y; flex-shrink: 0; border-left: 1px solid #e2e8f0;"></div>
+
+      <!-- Main Center Content -->
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; padding: 1.5mm 3mm; background: #ffffff; box-sizing: border-box; overflow: hidden; height: 100%;">
+        <!-- Top Header (Clean White Background, Red Outline - NO MOUNTAIN IMAGE) -->
+        <div style="position: relative; width: 100%; border: 2px solid #b91c1c; border-radius: 6px 6px 0 0; background: #ffffff; padding: 1.5mm 2.5mm; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;">
+          <div style="text-align: center;">
+            <h1 style="margin: 0; font-size: 20px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #dc2626; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 2px 4px rgba(0,0,0,0.25); line-height: 1.2;">
+              ${shopName}
+            </h1>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 1px;">
+            <!-- Yellow Phone Badge from Settings -->
+            ${
+              phone1
+                ? `<div style="background: #fef08a; border: 1px solid #000; border-radius: 4px; padding: 1px 6px; font-weight: 900; font-size: 9.5px; font-family: monospace; color: #020617; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                    <div>📱 ${phone1}</div>
+                    ${phone2 ? `<div style="border-top: 1px solid #94a3b8; margin-top: 1px;">${phone2}</div>` : ''}
+                   </div>`
+                : '<div style="width: 1px;"></div>'
+            }
+
+            <!-- Mandi Address from Settings -->
+            ${
+              shopAddress
+                ? `<div style="flex: 1; text-align: center; padding-right: 6px;">
+                    <span style="font-size: 12px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #0f172a;">
+                      ${shopAddress}
+                    </span>
+                   </div>`
+                : ''
+            }
+          </div>
+
+          <!-- Proprietor Info & Tar Ka Pata from Settings -->
+          ${
+            arhtiName || tarKaPata
+              ? `<div style="text-align: center; border-top: 1px solid #e2e8f0; padding-top: 1px; margin-top: 2px;">
+                  <span style="font-size: 10px; font-weight: bold; font-family: 'Noto Nastaliq Urdu', serif; color: #334155;">
+                    ${arhtiName ? `پروپرائیٹر: ${arhtiName}` : ''}${tarKaPata ? `${arhtiName ? ' • ' : ''}تار کا پتہ: ${tarKaPata}` : ''}
+                  </span>
+                 </div>`
+              : ''
+          }
+        </div>
+
+        <!-- Subheader Metadata Row -->
+        <div style="margin: 2px 0; border-top: 2px solid #b91c1c; border-bottom: 2px solid #b91c1c; padding: 2px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: bold; background: #ffffff;">
+          <div>
+            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif;">نمبر:</span>
+            <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px;">${displayBillNo}</span>
+          </div>
+          <div style="flex: 1; text-align: center; padding: 0 6px;">
+            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif;">بل بنام:</span>
+            <span style="text-decoration: underline; font-size: 12.5px; font-family: 'Noto Nastaliq Urdu', serif; padding: 0 4px;">${vendorName} ${vendorCity ? `(${vendorCity})` : ''}</span>
+          </div>
+          <div>
+            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif;">السلام علیکم تاریخ:</span>
+            <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px;">${displayDate}</span>
+          </div>
+        </div>
+
+        <!-- Red Ruled Table Grid (Half-A4 Landscape Sizing) -->
+        <div style="flex: 1; display: flex; border: 2px solid #b91c1c; background: #ffffff; min-height: 0; overflow: hidden;">
+          <!-- Left Column: اخراجات (7 Badges + ICS Badge) -->
+          <div style="width: 28%; border-left: 2px solid #b91c1c; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff;">
+            <div>
+              <div style="height: 22px; border-bottom: 2px solid #b91c1c; background: #fef2f2; display: flex; align-items: center; justify-content: center;">
+                <h3 style="margin: 0; font-size: 11px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #991b1b;">اخراجات</h3>
+              </div>
+
+              <!-- 7 Badges Stack -->
+              <div style="padding: 3px; display: flex; flex-direction: column; gap: 3px;">
+                <!-- 1. کمیشن -->
+                <div style="display: flex; align-items: center; gap: 3px;">
+                  <div style="flex: 1; height: 20px; border: 1px solid #b91c1c; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; font-family: monospace;">
+                    ${aggregatedExpenses.commission > 0 ? Math.round(aggregatedExpenses.commission).toLocaleString() : ''}
+                  </div>
+                  <div style="width: 48px; height: 20px; border-radius: 9999px; background: linear-gradient(135deg, #4f46e5, #4338ca); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: bold; font-family: 'Noto Sans Arabic', sans-serif;">
+                    کمیشن
+                  </div>
+                </div>
+
+                <!-- 2. کرایہ -->
+                <div style="display: flex; align-items: center; gap: 3px;">
+                  <div style="flex: 1; height: 20px; border: 1px solid #b91c1c; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; font-family: monospace;">
+                    ${aggregatedExpenses.kiraya > 0 ? Math.round(aggregatedExpenses.kiraya).toLocaleString() : ''}
+                  </div>
+                  <div style="width: 48px; height: 20px; border-radius: 9999px; background: linear-gradient(135deg, #16a34a, #15803d); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: bold; font-family: 'Noto Sans Arabic', sans-serif;">
+                    کرایہ
+                  </div>
+                </div>
+
+                <!-- 3. مزدوری -->
+                <div style="display: flex; align-items: center; gap: 3px;">
+                  <div style="flex: 1; height: 20px; border: 1px solid #b91c1c; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; font-family: monospace;">
+                    ${aggregatedExpenses.mazdoori > 0 ? Math.round(aggregatedExpenses.mazdoori).toLocaleString() : ''}
+                  </div>
+                  <div style="width: 48px; height: 20px; border-radius: 9999px; background: linear-gradient(135deg, #db2777, #be185d); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: bold; font-family: 'Noto Sans Arabic', sans-serif;">
+                    مزدوری
+                  </div>
+                </div>
+
+                <!-- 4. منشیانہ -->
+                <div style="display: flex; align-items: center; gap: 3px;">
+                  <div style="flex: 1; height: 20px; border: 1px solid #b91c1c; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; font-family: monospace;">
+                    ${aggregatedExpenses.munshiana > 0 ? Math.round(aggregatedExpenses.munshiana).toLocaleString() : ''}
+                  </div>
+                  <div style="width: 48px; height: 20px; border-radius: 9999px; background: linear-gradient(135deg, #0284c7, #0369a1); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: bold; font-family: 'Noto Sans Arabic', sans-serif;">
+                    منشیانہ
+                  </div>
+                </div>
+
+                <!-- 5. نقد -->
+                <div style="display: flex; align-items: center; gap: 3px;">
+                  <div style="flex: 1; height: 20px; border: 1px solid #b91c1c; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; font-family: monospace;">
+                    ${aggregatedExpenses.naqdAdvance > 0 ? Math.round(aggregatedExpenses.naqdAdvance).toLocaleString() : ''}
+                  </div>
+                  <div style="width: 48px; height: 20px; border-radius: 9999px; background: linear-gradient(135deg, #ef4444, #b91c1c); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: bold; font-family: 'Noto Sans Arabic', sans-serif;">
+                    نقد
+                  </div>
+                </div>
+
+                <!-- 6. مارکیٹ فیس -->
+                <div style="display: flex; align-items: center; gap: 3px;">
+                  <div style="flex: 1; height: 20px; border: 1px solid #b91c1c; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; font-family: monospace;">
+                    ${aggregatedExpenses.marketFee > 0 ? Math.round(aggregatedExpenses.marketFee).toLocaleString() : ''}
+                  </div>
+                  <div style="width: 48px; height: 20px; border-radius: 9999px; background: linear-gradient(135deg, #f97316, #ea580c); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: bold; font-family: 'Noto Sans Arabic', sans-serif;">
+                    مارکیٹ فیس
+                  </div>
+                </div>
+
+                <!-- 7. میزان -->
+                <div style="display: flex; align-items: center; gap: 3px;">
+                  <div style="flex: 1; height: 22px; border: 1.5px solid #6b21a8; background: #faf5ff; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; font-family: monospace; color: #581c87;">
+                    ${meezanExpenses > 0 ? Math.round(meezanExpenses).toLocaleString() : '0'}
+                  </div>
+                  <div style="width: 48px; height: 22px; border-radius: 9999px; background: linear-gradient(135deg, #9333ea, #7e22ce); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900; font-family: 'Noto Sans Arabic', sans-serif;">
+                    میزان
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ICS Logo Badge at Bottom Left -->
+            <div style="padding: 3px; border-top: 1px solid rgba(185, 28, 28, 0.4); background: #fef2f2; margin-top: auto;">
+              <div style="background: linear-gradient(to bottom, #9f1239, #4c0519); border: 1.5px solid #facc15; border-radius: 6px; padding: 2px 2px; text-align: center;">
+                <div style="font-size: 8px; font-weight: bold; font-family: 'Noto Nastaliq Urdu', serif; color: #fef08a; line-height: 1;">
+                  آپ کے اعتماد کا نام
+                </div>
+                <div style="font-size: 16px; font-weight: 900; font-family: monospace; color: #facc15; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, 0 1px 2px rgba(0,0,0,0.8); line-height: 1.1;">
+                  ICS
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: تفصیل مال بکری & ٹوٹل -->
+          <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; min-height: 0; overflow: hidden;">
+            <div style="overflow: hidden;">
+              <div style="height: 22px; border-bottom: 2px solid #b91c1c; background: #fef2f2; display: flex; align-items: center;">
+                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #991b1b;">
+                  ٹوٹل
+                </div>
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #991b1b;">
+                  تفصیل مال بکری
+                </div>
+              </div>
+
+              <!-- Item Rows -->
+              <div>
+                ${saleRowsHtml}
+                ${emptyRowsHtml}
+              </div>
+            </div>
+
+            <!-- Bottom 3 Summary Rows -->
+            <div style="border-top: 2px solid #b91c1c; margin-top: auto;">
+              <!-- خام بکری (Mauve) -->
+              <div style="height: 22px; display: flex; align-items: center; background: #831843; color: #ffffff; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.3);">
+                <div style="width: 82px; height: 100%; border-left: 2px solid rgba(255,255,255,0.4); display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11px; font-weight: 900; color: #fef08a;">
+                  ${Math.round(totalGross).toLocaleString()}
+                </div>
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11px;">
+                  خام بکری
+                </div>
+              </div>
+
+              <!-- جملہ اخراجات (Navy Blue) -->
+              <div style="height: 22px; display: flex; align-items: center; background: #1e3a8a; color: #ffffff; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.3);">
+                <div style="width: 82px; height: 100%; border-left: 2px solid rgba(255,255,255,0.4); display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11px; font-weight: 900; color: #fecdd3;">
+                  ${Math.round(meezanExpenses).toLocaleString()}
+                </div>
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11px;">
+                  جملہ اخراجات
+                </div>
+              </div>
+
+              <!-- پختہ بکری (Bright Green) -->
+              <div style="height: 24px; display: flex; align-items: center; background: #15803d; color: #ffffff; font-weight: 900;">
+                <div style="width: 82px; height: 100%; border-left: 2px solid rgba(255,255,255,0.4); display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 13px; font-weight: 900; color: #fef08a;">
+                  ${Math.round(totalNetPayable).toLocaleString()}
+                </div>
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 12.5px;">
+                  پختہ بکری
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer Row -->
+        <div style="margin-top: 2px; padding-top: 2px; border-top: 2px solid #b91c1c; display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; color: #1e293b;">
+          <div style="display: flex; align-items: center; gap: 3px;">
+            <span style="font-family: 'Noto Nastaliq Urdu', serif; font-size: 11px;">دستخط:</span>
+            <span style="display: inline-block; width: 70px; border-bottom: 1.5px dotted #475569;"></span>
+          </div>
+
+          <div style="font-family: 'Noto Nastaliq Urdu', serif; font-size: 11px; font-weight: bold; color: #1e293b;">
+            بھول چوک لین دین
+          </div>
+
+          <div>
+            ${
+              isFullyPaid
+                ? `<div style="border: 1.5px solid #dc2626; color: #dc2626; border-radius: 4px; padding: 1px 6px; font-weight: 900; font-size: 12px; font-family: monospace; transform: rotate(-5deg); display: inline-block;">PAID</div>`
+                : `<div style="border: 1.5px solid #d97706; color: #b45309; border-radius: 4px; padding: 1px 6px; font-weight: bold; font-size: 10px; font-family: 'Noto Sans Arabic', sans-serif; display: inline-block;">باقی / نابلد</div>`
+            }
+          </div>
+
+          <div style="text-align: left; font-family: sans-serif; line-height: 1;">
+            <div style="font-size: 10.5px; font-weight: 900; color: #1e3a8a; letter-spacing: 0.5px;">${settings.shopNameEn ? settings.shopNameEn.slice(0, 16) : 'COMMISSION'}</div>
+            <div style="font-size: 8.5px; font-weight: bold; color: #166534;">Commission Shop</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Left Produce Border (Mirrored) -->
+      <div style="width: 7mm; background-image: url('${origin}/bill_produce_border.jpg'); background-size: 100% auto; background-repeat: repeat-y; flex-shrink: 0; border-right: 1px solid #e2e8f0; transform: scaleX(-1);"></div>
+    </div>
+  `;
+}
+
+/**
+ * Prints a single Vendor Bill Slip in the authentic Insaf Mandi Commission Shop design
+ */
+export function printVendorBillSlipA4(
+  vendorName: string,
+  vendorPhone: string | undefined,
+  vendorCity: string | undefined,
+  lots: VendorLot[],
+  settings: AppSettings,
+  dateLabel?: string,
+  isAveraged: boolean = false
+): void {
+  const billHtml = generateInsafMandiBillHtmlSingle(
+    vendorName,
+    vendorPhone,
+    vendorCity,
+    lots,
+    settings,
+    dateLabel,
+    isAveraged
+  );
+
+  const fullHtml = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ur">
     <head>
@@ -307,20 +597,32 @@ export function printVendorBillSlipA4(
       <title>بل رسید - ${vendorName}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-      <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;600;700&family=Noto+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+      <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;600;700;900&family=Noto+Sans+Arabic:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
       <style>
         @page {
-          size: 148.5mm 210mm;
-          margin: 6mm 8mm;
+          size: 210mm 148.5mm;
+          margin: 0;
         }
         @media print {
+          @page {
+            size: 210mm 148.5mm;
+            margin: 0;
+          }
           html, body {
-            width: 100% !important;
-            max-width: 148.5mm !important;
-            margin: 0 auto !important;
+            width: 210mm !important;
+            height: 148.5mm !important;
+            margin: 0 !important;
             padding: 0 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .insaf-mandi-bill-wrapper {
+            width: 210mm !important;
+            height: 148.5mm !important;
+            max-height: 148.5mm !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            margin: 0 !important;
           }
           .no-print { display: none !important; }
         }
@@ -330,254 +632,118 @@ export function printVendorBillSlipA4(
           padding: 0;
         }
         body {
-          font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', Tahoma, sans-serif;
-          color: #0f172a;
           background: #ffffff;
-          direction: rtl;
-          text-align: right;
-          padding: 8px 12px;
-          line-height: 1.5;
-        }
-        .bill-container {
-          width: 100%;
-          max-width: 142mm;
-          margin: 0 auto;
-          border: 2px solid #0f172a;
-          border-radius: 12px;
-          padding: 20px 22px;
-          background: #ffffff;
-        }
-        .header {
-          text-align: center;
-          border-bottom: 2px solid #0f172a;
-          padding-bottom: 14px;
-          margin-bottom: 16px;
-        }
-        .shop-name {
-          font-size: 30px;
-          font-weight: 800;
-          color: #020617;
-          margin-bottom: 4px;
-          font-family: 'Noto Nastaliq Urdu', serif;
-        }
-        .arhti-info {
-          font-size: 15.5px;
-          font-weight: bold;
-          color: #1e293b;
-        }
-        .contact-info {
-          font-size: 13.5px;
-          color: #475569;
-          margin-top: 4px;
-        }
-        .badge {
-          display: inline-block;
-          background: ${isAveraged ? '#fef3c7' : '#f1f5f9'};
-          border: 1.5px solid ${isAveraged ? '#d97706' : '#0f172a'};
-          padding: 5px 20px;
-          border-radius: 8px;
-          font-size: 14.5px;
-          font-weight: bold;
-          margin-top: 10px;
-          color: ${isAveraged ? '#92400e' : '#0f172a'};
-        }
-        .meta-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          background: #f8fafc;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          padding: 12px 18px;
-          margin-bottom: 16px;
-          font-size: 14px;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 16px;
-          border: 1.5px solid #0f172a;
-          border-radius: 8px;
-          overflow: hidden;
-        }
-        th {
-          background: #0f172a;
-          color: #ffffff;
-          font-weight: bold;
-          font-size: 14.5px;
-          padding: 10px 8px;
-        }
-        .gross-row {
-          background: #f1f5f9;
-          border-top: 2px solid #0f172a;
-          font-weight: bold;
-          font-size: 16px;
-        }
-        .deductions-box {
-          background: #f8fafc;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          padding: 14px 18px;
-          margin-bottom: 16px;
-        }
-        .deductions-title {
-          font-weight: bold;
-          font-size: 15px;
-          color: #0f172a;
-          margin-bottom: 8px;
-          border-bottom: 1px solid #cbd5e1;
-          padding-bottom: 5px;
-        }
-        .net-meezan-box {
-          background: #0f172a;
-          color: #ffffff;
-          border-radius: 10px;
-          padding: 16px 22px;
+          padding: 0;
+          margin: 0;
           display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 14px;
-        }
-        .net-meezan-title {
-          font-size: 18px;
-          font-weight: bold;
-        }
-        .net-meezan-amount {
-          font-size: 28px;
-          font-weight: 900;
-          font-family: monospace, sans-serif;
-          color: #facc15;
-        }
-        .status-box {
-          border-radius: 8px;
-          padding: 10px 16px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-weight: bold;
-          font-size: 14px;
-          margin-bottom: 18px;
-          border: 1.5px solid ${allLotsPaid ? '#059669' : isPartialPaid ? '#d97706' : '#dc2626'};
-          background: ${allLotsPaid ? '#ecfdf5' : isPartialPaid ? '#fefce8' : '#fef2f2'};
-        }
-        .signatures {
-          display: flex;
-          justify-content: space-between;
-          margin-top: 32px;
-          padding-top: 10px;
-        }
-        .sig-col {
-          text-align: center;
-          width: 190px;
-          border-top: 1.5px dashed #94a3b8;
-          padding-top: 6px;
-          font-size: 13.5px;
-          font-weight: bold;
-          color: #334155;
-        }
-        .footer-note {
-          text-align: center;
-          font-size: 11.5px;
-          color: #64748b;
-          margin-top: 18px;
+          justify-content: center;
         }
       </style>
     </head>
     <body>
-      <div class="bill-container">
-        <!-- Header (Clean without Kalma/Bismillah at top as requested) -->
-        <div class="header">
-          <div class="shop-name">${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}</div>
-          <div class="arhti-info">پروپرائٹر: ${isUrdu ? settings.arhtiNameUrdu : settings.arhtiNameEn}</div>
-          <div class="contact-info">📍 ${isUrdu ? settings.shopAddressUrdu : settings.shopAddressEn}  •  📞 فون: ${settings.shopPhone}</div>
-          <div class="badge">
-            ${isAveraged ? 'پکی پرچی بل برائے زمیندار (خلاصہ اجناس وار بل بمعہ اوسط ریٹ)' : 'پکی پرچی بل برائے زمیندار (تفصیلی بل تمام لاٹس)'}
-          </div>
-        </div>
-
-        <!-- Vendor & Date Info -->
-        <div class="meta-grid">
-          <div>
-            <span style="color: #64748b; font-size: 12px; display: block;">زمیندار / کاشتکار:</span>
-            <strong style="font-size: 16.5px; color: #020617;">${vendorName} ${vendorCity ? `(${vendorCity})` : ''}</strong>
-          </div>
-          <div>
-            <span style="color: #64748b; font-size: 12px; display: block;">تاریخ حساب:</span>
-            <strong style="font-size: 15px; color: #0f172a;">${displayDate}</strong>
-          </div>
-          <div>
-            <span style="color: #64748b; font-size: 12px; display: block;">کل اجناس و تعداد:</span>
-            <strong>${lots.length} لاٹ • ${totals.totalUnits} کل تعداد</strong>
-          </div>
-          <div>
-            <span style="color: #64748b; font-size: 12px; display: block;">رابطہ فون:</span>
-            <strong>${vendorPhone || settings.shopPhone}</strong>
-          </div>
-        </div>
-
-        <!-- Products Table -->
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 44px; text-align: center;">#</th>
-              <th style="text-align: right;">${isAveraged ? 'تفصیلِ جنس (سبزی / پھل)' : 'تفصیلِ جنس'}</th>
-              <th style="text-align: center; width: 140px;">${isAveraged ? 'کل فروخت تعداد' : 'تعداد بمعہ پیکنگ'}</th>
-              <th style="text-align: right; width: 130px;">${isAveraged ? 'اوسط ریٹ' : 'ریٹ فی عدد'}</th>
-              <th style="text-align: right; width: 150px;">کل رقم</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRowsHtml}
-          </tbody>
-          <tfoot>
-            <tr class="gross-row">
-              <td colspan="4" style="text-align: right; padding: 12px 14px; color: #0f172a;">مجموعی کل فروخت (Gross Total):</td>
-              <td style="text-align: right; padding: 12px 14px; color: #0f172a; font-size: 17px; font-weight: 800;">روپے ${totals.grossSales.toLocaleString()}</td>
-            </tr>
-          </tfoot>
-        </table>
-
-        <!-- Deductions & Katote -->
-        <div class="deductions-box">
-          <div class="deductions-title">منہا کٹوتیاں و اخراجات:</div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px;">
-            ${expRowsHtml}
-          </div>
-          <div style="display: flex; justify-content: space-between; margin-top: 10px; padding-top: 6px; border-top: 1.5px solid #cbd5e1; font-weight: bold; font-size: 15px; color: #dc2626;">
-            <span>کل منہا کٹوتیاں:</span>
-            <span>- روپے ${totals.totalExpenses.toLocaleString()}</span>
-          </div>
-        </div>
-
-        <!-- Net Payable -->
-        <div class="net-meezan-box">
-          <div class="net-meezan-title">صافی رقم برائے ادائیگی (میزان):</div>
-          <div class="net-meezan-amount">روپے ${totals.netPayable.toLocaleString()}</div>
-        </div>
-
-        <!-- Payment Status (Credit or Cash Status) -->
-        <div class="status-box">
-          <span style="color: ${allLotsPaid ? '#065f46' : isPartialPaid ? '#854d0e' : '#991b1b'};">
-            ${allLotsPaid ? '✅ حیثیت ادائیگی: نقد ادا شدہ (All Paid in Full)' : isPartialPaid ? '⚠️ حیثیت ادائیگی: جزوی نقد ادائیگی (Partial Cash)' : '⏳ حیثیت ادائیگی: ادھار / ادائیگی بقایا ہے (Payment Pending)'}
-          </span>
-          <span style="font-size: 13px; color: #475569;">
-            ادا شدہ نقد: <b style="color: #065f46;">روپے ${totals.totalPaid.toLocaleString()}</b> | بقایا ادھار: <b style="color: #dc2626;">روپے ${Math.max(0, totals.netPayable - totals.totalPaid).toLocaleString()}</b>
-          </span>
-        </div>
-
-        <!-- Signatures -->
-        <div class="signatures">
-          <div class="sig-col">دستخط منشی / کیشیئر</div>
-          <div class="sig-col">دستخط و مہر آڑھتی</div>
-        </div>
-
-        <div class="footer-note">کمپیوٹرائزڈ رسید برائے زمیندار | ڈیجیٹل منڈی سسٹم | شکریہ</div>
-      </div>
+      ${billHtml}
     </body>
     </html>
   `;
 
-  printHtmlViaIframe(html, `Vendor_Bill_${vendorName}`);
+  printHtmlViaIframe(fullHtml, `Vendor_Bill_${vendorName}`);
+}
+
+/**
+ * Batch Prints multiple selected Vendor Bills in one unified print operation with clean page breaks
+ */
+export function printBatchVendorBillsA4(
+  vendorDataList: Array<{
+    vendorName: string;
+    vendorPhone?: string;
+    vendorCity?: string;
+    lots: VendorLot[];
+    billNumber?: string;
+  }>,
+  settings: AppSettings,
+  dateLabel?: string,
+  isAveraged: boolean = false
+): void {
+  if (vendorDataList.length === 0) return;
+
+  const billsPagesHtml = vendorDataList
+    .map(
+      (v) => `
+    <div class="bill-page" style="page-break-after: always; break-after: page; width: 210mm; height: 148.5mm; max-height: 148.5mm; overflow: hidden; display: flex; justify-content: center; box-sizing: border-box; margin: 0 auto;">
+      ${generateInsafMandiBillHtmlSingle(
+        v.vendorName,
+        v.vendorPhone,
+        v.vendorCity,
+        v.lots,
+        settings,
+        dateLabel,
+        isAveraged,
+        v.billNumber
+      )}
+    </div>
+  `
+    )
+    .join('');
+
+  const fullHtml = `
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ur">
+    <head>
+      <meta charset="utf-8" />
+      <title>زمیندار بل بک - مجموعی پرنٹ (${vendorDataList.length} بل)</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;600;700;900&family=Noto+Sans+Arabic:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+      <style>
+        @page {
+          size: 210mm 148.5mm;
+          margin: 0;
+        }
+        @media print {
+          @page {
+            size: 210mm 148.5mm;
+            margin: 0;
+          }
+          html, body {
+            width: 210mm !important;
+            height: 148.5mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .bill-page, .insaf-mandi-bill-wrapper {
+            page-break-after: always !important;
+            break-after: page !important;
+            width: 210mm !important;
+            height: 148.5mm !important;
+            max-height: 148.5mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+          }
+          .no-print { display: none !important; }
+        }
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
+        body {
+          background: #ffffff;
+          padding: 0;
+          margin: 0;
+        }
+      </style>
+    </head>
+    <body>
+      ${billsPagesHtml}
+    </body>
+    </html>
+  `;
+
+  printHtmlViaIframe(fullHtml, `Batch_Vendor_Bills_${vendorDataList.length}`);
 }
 
 /**

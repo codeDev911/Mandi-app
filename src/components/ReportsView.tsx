@@ -15,6 +15,7 @@ import { formatPKR, parseNumber } from '../utils/currency';
 import { calculateCashDrawerSummary, calculateLotSummary, distributeMunshianaToLots } from '../utils/calculations';
 import { sound } from '../utils/sound';
 import { VendorConsolidatedBillModal } from './VendorConsolidatedBillModal';
+import { AllVendorBillsModal } from './AllVendorBillsModal';
 import { CashDrawerModal } from './CashDrawerModal';
 import { ReportPDFPreviewModal } from './ReportPDFPreviewModal';
 import { PaginationControls } from './PaginationControls';
@@ -189,6 +190,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     lots: VendorLot[];
     dateLabel: string;
   } | null>(null);
+
+  // State for All Vendors Batch Bills Modal (تمام زمینداروں کے بل بک)
+  const [isAllVendorBillsOpen, setIsAllVendorBillsOpen] = useState(false);
 
   // Sub-pagination states for individual vendor lots and customer transactions inside report cards
   const [vendorLotsSubPages, setVendorLotsSubPages] = useState<Record<string, number>>({});
@@ -1545,6 +1549,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <Eye className="w-3.5 h-3.5" />
                 <span>{isUrdu ? `زمیندار رپورٹ پی ڈی ایف (${getDateRangeDetails().label})` : `Vendor PDF (${getDateRangeDetails().label})`}</span>
               </button>
+
+              {/* All Vendor Bills Modal Trigger */}
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playTick();
+                  setIsAllVendorBillsOpen(true);
+                }}
+                className="px-3 py-1 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-xs active:scale-95"
+                title="تمام زمینداروں کے پکے بل دیکھیں یا ایک ساتھ پرنٹ کریں"
+              >
+                <Printer className="w-3.5 h-3.5 stroke-[2.2]" />
+                <span>{isUrdu ? 'سب زمینداروں کے بل (بل بک پرنٹ)' : 'All Vendor Bills (Batch Print)'}</span>
+              </button>
             </div>
           </div>
 
@@ -2739,6 +2757,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           dateLabel={consolidatedBillVendor.dateLabel}
           settings={settings}
           onClose={() => setConsolidatedBillVendor(null)}
+        />
+      )}
+
+      {/* ALL VENDOR BILLS BATCH MODAL (تمام زمینداروں کے پکے بل - بل بک مشترکہ پرنٹ) */}
+      {isAllVendorBillsOpen && (
+        <AllVendorBillsModal
+          isOpen={isAllVendorBillsOpen}
+          onClose={() => setIsAllVendorBillsOpen(false)}
+          lots={filteredLotsByDate.length > 0 ? filteredLotsByDate : lots}
+          settings={settings}
+          dateLabel={getDateRangeDetails().label}
         />
       )}
 

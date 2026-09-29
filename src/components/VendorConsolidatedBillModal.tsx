@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import { VendorLot, AppSettings } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { translations, unitLabels, formatFullRealDate } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt, generateVendorConsolidatedInvoiceCanvas } from '../utils/receiptGenerator';
 import { printVendorBillSlipA4 } from '../utils/printHelper';
 import { saveBlobFile, downloadBlobFile } from '../utils/fileDownloader';
 import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
+import { InsafMandiBillView } from './InsafMandiBillView';
 import {
   Printer,
   Copy,
@@ -59,7 +60,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   const [shareModalItem, setShareModalItem] = useState<UniversalShareItem | null>(null);
   const [isAveraged, setIsAveraged] = useState<boolean>(false);
 
-  const displayDate = dateLabel || lots[0]?.arrivalDate || new Date().toISOString().slice(0, 10);
+  const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
 
   // Close on Escape key
   useEffect(() => {
@@ -324,14 +325,14 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       isAveraged
     );
 
-    // Half of Landscape A4: 148.5mm x 210mm
+    // Half of A4 in Landscape: 210mm wide x 148.5mm high
     const pdf = new jsPDF({
-      orientation: 'portrait',
+      orientation: 'landscape',
       unit: 'mm',
       format: [148.5, 210],
     });
-    const pdfPageWidth = 148.5;
-    const pdfPageHeight = 210;
+    const pdfPageWidth = pdf.internal.pageSize.getWidth(); // 210mm
+    const pdfPageHeight = pdf.internal.pageSize.getHeight(); // 148.5mm
     const pxPageHeight = Math.floor((canvas.width * pdfPageHeight) / pdfPageWidth);
     const totalCanvasHeight = canvas.height;
     let renderedHeight = 0;
@@ -354,7 +355,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       }
       const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.95);
       if (pageIndex > 0) {
-        pdf.addPage([148.5, 210], 'p');
+        pdf.addPage([148.5, 210], 'landscape');
       }
       const renderedSliceMmHeight = (sliceHeight * pdfPageWidth) / canvas.width;
       pdf.addImage(pageImgData, 'JPEG', 0, 0, pdfPageWidth, renderedSliceMmHeight, undefined, 'FAST');
@@ -752,7 +753,7 @@ ${itemsText}
         </div>
       )}
 
-      {/* PDF Canvas Preview Canvas Container */}
+      {/* Authentic Mandi Bill Interactive Preview Container */}
       <div 
         onClick={(e) => {
           // If clicked directly on the backdrop container (not the document itself)
@@ -761,40 +762,30 @@ ${itemsText}
             onClose();
           }
         }}
-        className="flex-1 overflow-y-auto overflow-x-auto p-3 sm:p-8 flex justify-center items-start bg-slate-950/60 cursor-pointer"
+        className="flex-1 overflow-y-auto overflow-x-auto p-2 sm:p-6 flex justify-center items-start bg-slate-950/70 cursor-pointer"
         title="باہر کلک کر کے بند کریں"
       >
-        {isRenderingCanvas ? (
-          <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3 cursor-default">
-            <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
-            <p className="text-sm font-urdu-sans font-bold text-slate-300">
-              {isUrdu ? 'بل پرچی پی ڈی ایف تیار ہو رہی ہے...' : 'Rendering Bill PDF Preview...'}
-            </p>
-          </div>
-        ) : previewImageUrl ? (
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="transition-all duration-150 ease-out flex justify-center max-w-full cursor-default"
-            style={{
-              width: `${zoomLevel}%`,
-              maxWidth: '940px',
-              minWidth: '320px',
-            }}
-          >
-            <div className="bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-300/80 ring-1 ring-black/10">
-              <img
-                src={previewImageUrl}
-                alt={`Vendor Bill - ${vendorName}`}
-                className="w-full h-auto block select-none"
-                style={{ imageRendering: 'high-quality' }}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="text-center py-20 text-slate-400 cursor-default">
-            <p className="text-sm font-urdu-sans">{isUrdu ? 'پیش نظارہ تیار نہیں ہو سکا' : 'Failed to load preview'}</p>
-          </div>
-        )}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="transition-all duration-150 ease-out flex justify-center max-w-full cursor-default my-2"
+          style={{
+            width: `${zoomLevel}%`,
+            maxWidth: '820px',
+            minWidth: '320px',
+          }}
+        >
+          <InsafMandiBillView
+            vendorName={vendorName}
+            vendorPhone={vendorPhone}
+            vendorCity={vendorCity}
+            lots={lots}
+            settings={settings}
+            dateLabel={displayDate}
+            isAveraged={isAveraged}
+            billNumber="101"
+            className="rounded-xl overflow-hidden shadow-2xl"
+          />
+        </div>
       </div>
 
       {/* Mobile Floating Action Bar for Quick Printing/PDF */}

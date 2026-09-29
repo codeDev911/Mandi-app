@@ -570,11 +570,22 @@ export default function App() {
     setVendors((prevVendors) => {
       const existing = prevVendors.find((v) => v.name.trim().toLowerCase() === vendorName.trim().toLowerCase());
       if (existing) {
-        return prevVendors.map((v) =>
+        // Prevent duplicate record from rapid clicking (same amount, date, within 4 seconds)
+        const isDuplicate = (existing.payments || []).some(
+          (p) =>
+            p.amount === payment.amount &&
+            (p.paymentDate || p.date) === paymentDate &&
+            Math.abs(new Date(p.timestamp || '').getTime() - Date.now()) < 4000
+        );
+        if (isDuplicate) return prevVendors;
+
+        const updated = prevVendors.map((v) =>
           v.id === existing.id
             ? { ...v, payments: [newVendorPaymentRecord, ...(v.payments || [])], updatedAt: new Date().toISOString() }
             : v
         );
+        saveVendorsToIndexedDB(updated).catch(console.error);
+        return updated;
       } else {
         const newV: SavedVendor = {
           id: `vend-${Date.now()}`,
@@ -583,14 +594,16 @@ export default function App() {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        return [newV, ...prevVendors];
+        const updated = [newV, ...prevVendors];
+        saveVendorsToIndexedDB(updated).catch(console.error);
+        return updated;
       }
     });
 
     setLots((prev) => {
       // 2. If a specific lot is targeted:
       if (payment.lotId) {
-        return prev.map((lot) => {
+        const updated = prev.map((lot) => {
           if (lot.id !== payment.lotId) return lot;
           const totalNet = lot.summary.netPayableToVendor;
           const currentAlreadyPaid =
@@ -614,6 +627,8 @@ export default function App() {
             updatedAt: new Date().toISOString(),
           };
         });
+        saveLotsToIndexedDB(updated).catch(console.error);
+        return updated;
       }
 
       // 3. If recorded for the vendor across all lots incrementally:
@@ -621,10 +636,10 @@ export default function App() {
 
       // Sort vendor lots by date ascending (oldest first) or unpaid lots first
       const vendorLotIds = prev
-        .filter((l) => l.vendorName === vendorName)
+        .filter((l) => l.vendorName.trim().toLowerCase() === vendorName.trim().toLowerCase())
         .map((l) => l.id);
 
-      return prev.map((lot) => {
+      const updated = prev.map((lot) => {
         if (!vendorLotIds.includes(lot.id)) return lot;
 
         const totalNet = lot.summary.netPayableToVendor;
@@ -662,6 +677,8 @@ export default function App() {
           updatedAt: new Date().toISOString(),
         };
       });
+      saveLotsToIndexedDB(updated).catch(console.error);
+      return updated;
     });
   };
 
@@ -689,10 +706,11 @@ export default function App() {
     });
 
     // 2. Adjust lot payment amounts if applicable
-    if (lotId) {
+    const resolvedLotId = lotId || (paymentId.startsWith('lot-pay-') ? paymentId.replace('lot-pay-', '') : undefined);
+    if (resolvedLotId) {
       setLots((prevLots) => {
         const updated = prevLots.map((lot) => {
-          if (lot.id !== lotId) return lot;
+          if (lot.id !== resolvedLotId) return lot;
           const currentPaid =
             lot.vendorPaymentAmount !== undefined
               ? lot.vendorPaymentAmount

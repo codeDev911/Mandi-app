@@ -1,5 +1,5 @@
 import { VendorLot, AppSettings } from '../types';
-import { unitLabels } from './localization';
+import { unitLabels, formatFullRealDate } from './localization';
 import { formatPKR } from './currency';
 import { printHtmlViaIframe } from './printHelper';
 
@@ -406,8 +406,8 @@ export function generateVendorConsolidatedInvoiceCanvas(
   dateLabel: string,
   isAveraged: boolean = false
 ): HTMLCanvasElement {
-  // Width: 920px matches half of Landscape A4 paper at high resolution (148.5mm x 210mm)
-  const width = 920;
+  // Width: 1050px matches half of Landscape A4 paper (210mm x 148.5mm, Ratio 1.4142)
+  const width = 1050;
 
   // Build items list: either detailed per sale or averaged by product (اجناس وار اوسط بل)
   const allItems: Array<{
@@ -465,6 +465,15 @@ export function generateVendorConsolidatedInvoiceCanvas(
       aggregatedExpenses.customTotal += ce.amount;
     });
   });
+
+  const meezanExpenses =
+    aggregatedExpenses.commission +
+    aggregatedExpenses.kiraya +
+    aggregatedExpenses.mazdoori +
+    aggregatedExpenses.munshiana +
+    aggregatedExpenses.naqdAdvance +
+    aggregatedExpenses.marketFee +
+    aggregatedExpenses.customTotal;
 
   if (!isAveraged) {
     // Detailed list: each sale or lot in separate rows
@@ -551,16 +560,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   const isFullyPaid = (totalPaid >= totalNetPayable && totalNetPayable > 0) || (allLotsPaid && lots.length > 0);
   const isPartialPaid = totalPaid > 0 && !isFullyPaid;
 
-  const headerHeight = 165; // Clean header without kamla
-  const metaHeight = 72;
-  const tableHeaderHeight = 40;
-  const rowsHeight = allItems.length * 42 + 46; // +46 for gross total row
-  const deductionsHeight = 155;
-  const meezanHeight = 120;
-  const paymentStatusHeight = 56;
-  const footerHeight = 85;
-  const totalHeight = headerHeight + metaHeight + tableHeaderHeight + rowsHeight + deductionsHeight + meezanHeight + paymentStatusHeight + footerHeight;
-
+  const totalHeight = 742;
   const canvas = document.createElement('canvas');
   canvas.width = width * 2;
   canvas.height = totalHeight * 2;
@@ -572,276 +572,399 @@ export function generateVendorConsolidatedInvoiceCanvas(
 
   ctx.scale(2, 2);
 
-  // 1. Clean Background
+  // 1. Crisp White Background
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, totalHeight);
 
-  // Outer Crisp Border
-  ctx.strokeStyle = '#0f172a';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(16, 16, width - 32, totalHeight - 32);
+  // 2. Left and Right Vertical Produce Frame Margins
+  const borderMargin = 28;
+  const contentWidth = width - borderMargin * 2;
 
-  // Main Shop Name (NO KAMLA / NO BISMILLAH AT TOP as requested)
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 32px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-  ctx.textAlign = 'center';
-  ctx.fillText(settings.shopNameUrdu || settings.shopNameEn, width / 2, 54);
+  // Draw colorful produce border patterns on left and right margins
+  const drawProduceBorderStrip = (startX: number) => {
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(startX, 0, borderMargin, totalHeight);
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(startX, 0, borderMargin, totalHeight);
 
-  // Proprietor & Contact (Bigger, readable text)
-  ctx.fillStyle = '#1e293b';
-  ctx.font = 'bold 16.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText(`پروپرائٹر: ${settings.arhtiNameUrdu || settings.arhtiNameEn}`, width / 2, 84);
-
-  ctx.fillStyle = '#475569';
-  ctx.font = '14.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText(`📍 ${settings.shopAddressUrdu || settings.shopAddressEn}  •  📞 فون: ${settings.shopPhone}`, width / 2, 110);
-
-  // POS Consolidated Badge
-  ctx.fillStyle = isAveraged ? '#fef3c7' : '#f1f5f9';
-  ctx.fillRect(28, 126, width - 56, 30);
-  ctx.strokeStyle = isAveraged ? '#d97706' : '#cbd5e1';
-  ctx.lineWidth = 1.2;
-  ctx.strokeRect(28, 126, width - 56, 30);
-
-  ctx.fillStyle = isAveraged ? '#92400e' : '#0f172a';
-  ctx.font = 'bold 15px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText(
-    isAveraged
-      ? 'پکی پرچی بل برائے زمیندار (خلاصہ اجناس وار بل بمعہ اوسط ریٹ)'
-      : 'پکی پرچی بل برائے زمیندار (تفصیلی بل تمام لاٹس)',
-    width / 2,
-    146
-  );
-
-  // Dashed Separator
-  const drawDashedLine = (y: number) => {
-    ctx.strokeStyle = '#94a3b8';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(28, y);
-    ctx.lineTo(width - 28, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // Decorative repeating produce icons/dots
+    const produceColors = ['#ef4444', '#16a34a', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4', '#eab308'];
+    for (let py = 10; py < totalHeight - 10; py += 28) {
+      const colIdx = Math.floor((py / 28) % produceColors.length);
+      ctx.fillStyle = produceColors[colIdx];
+      ctx.beginPath();
+      ctx.arc(startX + borderMargin / 2, py + 8, 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
   };
 
-  drawDashedLine(166);
+  drawProduceBorderStrip(0);
+  drawProduceBorderStrip(width - borderMargin);
 
-  // Vendor & Date Metadata (Bigger text)
-  const metaY = 192;
-  ctx.textAlign = 'right';
-
-  ctx.fillStyle = '#64748b';
-  ctx.font = '14px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('زمیندار / کاشتکار:', width - 36, metaY);
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 18px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-  ctx.fillText(`${vendorName} ${vendorCity ? `(${vendorCity})` : ''}`, width - 155, metaY);
-
-  ctx.fillStyle = '#64748b';
-  ctx.font = '14px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('تاریخ حساب:', width / 2 - 10, metaY);
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 15.5px system-ui, sans-serif';
-  ctx.fillText(dateLabel, width / 2 - 95, metaY);
-
-  ctx.fillStyle = '#64748b';
-  ctx.font = '14px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('کل اجناس:', width - 36, metaY + 28);
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 15.5px system-ui, sans-serif';
-  ctx.fillText(`${lots.length} لاٹ • ${totalUnits} کل تعداد`, width - 115, metaY + 28);
-
-  let currentY = metaY + 46;
-  drawDashedLine(currentY);
-  currentY += 14;
-
-  // 2. ONE SINGLE TABLE FOR ALL PRODUCTS (BIGGER TEXT & WIDER COLUMNS)
-  // Table Header
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(28, currentY, width - 56, 38);
+  // 3. TOP BANNER HEADER (Clean White Background, Red Outline - NO MOUNTAIN BACKGROUND)
+  const headerX = borderMargin + 6;
+  const headerW = contentWidth - 12;
+  const headerY = 8;
+  const headerH = 92;
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 15.5px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillRect(headerX, headerY, headerW, headerH);
+  ctx.strokeStyle = '#b91c1c';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(headerX, headerY, headerW, headerH);
+
+  // Red 3D Shop Title Calligraphy
+  const shopName = settings.shopNameUrdu || settings.shopNameEn || 'کمیشن شاپ';
   ctx.textAlign = 'center';
-  ctx.fillText('#', 55, currentY + 25);
+  ctx.font = 'bold 26px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+  const titleY = headerY + 36;
+  // White outline
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 5;
+  ctx.lineJoin = 'round';
+  ctx.strokeText(shopName, headerX + headerW / 2, titleY);
+  // Red vibrant fill
+  ctx.fillStyle = '#dc2626';
+  ctx.fillText(shopName, headerX + headerW / 2, titleY);
 
-  ctx.textAlign = 'right';
-  ctx.fillText(isAveraged ? 'تفصیلِ جنس (سبزی / پھل)' : 'تفصیلِ جنس', width - 60, currentY + 25);
-  ctx.textAlign = 'center';
-  ctx.fillText(isAveraged ? 'کل فروخت تعداد' : 'تعداد بمعہ پیکنگ', width - 360, currentY + 25);
-  ctx.textAlign = 'right';
-  ctx.fillText(isAveraged ? 'اوسط ریٹ فی یونٹ' : 'ریٹ فی عدد', width - 560, currentY + 25);
-  ctx.fillText('کل رقم (روپے)', 110, currentY + 25);
+  // Yellow Contact Badge from Settings
+  const phone1 = settings.shopPhone?.trim() || '';
+  const phone2 = settings.shopPhone2?.trim() || '';
+  const shopAddress = settings.shopAddressUrdu || settings.shopAddressEn || '';
+  const arhtiName = settings.arhtiNameUrdu || settings.arhtiNameEn || '';
+  const tarKaPata = settings.tarKaPataUrdu?.trim() || '';
 
-  currentY += 38;
+  if (phone1) {
+    const phoneBoxW = 120;
+    const phoneBoxH = phone2 ? 30 : 18;
+    const phoneBoxX = headerX + 10;
+    const phoneBoxY = headerY + 44;
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(phoneBoxX, phoneBoxY, phoneBoxW, phoneBoxH);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(phoneBoxX, phoneBoxY, phoneBoxW, phoneBoxH);
 
-  // Table Body Rows (Spacious 42px per row, larger fonts, NO buyer name)
-  allItems.forEach((item, idx) => {
-    ctx.fillStyle = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-    ctx.fillRect(28, currentY, width - 56, 42);
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(28, currentY, width - 56, 42);
-
-    ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 14px system-ui';
+    ctx.fillStyle = '#020617';
+    ctx.font = 'bold 10px system-ui, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`${idx + 1}`, 55, currentY + 26);
-
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 16.5px "Noto Nastaliq Urdu", "Noto Sans Arabic", system-ui';
-    ctx.textAlign = 'right';
-    ctx.fillText(item.productUrdu, width - 60, currentY + 26);
-
-    ctx.font = 'bold 16px system-ui';
-    ctx.textAlign = 'center';
-    ctx.fillText(`${item.quantity} ${item.unitLabel}`, width - 360, currentY + 26);
-
-    ctx.font = 'bold 15.5px system-ui';
-    ctx.textAlign = 'right';
-    ctx.fillText(`₨ ${item.ratePerUnit.toLocaleString()}`, width - 560, currentY + 26);
-
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 16.5px system-ui';
-    ctx.fillText(`₨ ${item.totalAmount.toLocaleString()}`, 110, currentY + 26);
-
-    currentY += 42;
-  });
-
-  // Table Gross Total Footer Row (Bigger font)
-  ctx.fillStyle = '#f1f5f9';
-  ctx.fillRect(28, currentY, width - 56, 42);
-  ctx.strokeStyle = '#0f172a';
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(28, currentY, width - 56, 42);
-
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 16.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText('مجموعی کل فروخت (Gross Total):', width - 40, currentY + 26);
-
-  ctx.font = 'bold 19px system-ui, monospace';
-  ctx.fillText(formatPKR(totalGross, '₨', 'en'), 110, currentY + 26);
-
-  currentY += 50;
-  drawDashedLine(currentY);
-  currentY += 14;
-
-  // 3. Deductions & Katote Box Directly Below Table (Bigger text)
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 16px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-  ctx.textAlign = 'right';
-  ctx.fillText('منہا کٹوتیاں و اخراجات (Deductions):', width - 36, currentY + 4);
-
-  currentY += 24;
-
-  const expItems = [
-    { label: 'کمیشن', val: aggregatedExpenses.commission },
-    { label: 'کرایہ گاڑی', val: aggregatedExpenses.kiraya },
-    { label: 'مزدوری', val: aggregatedExpenses.mazdoori },
-    { label: 'منشیانہ', val: aggregatedExpenses.munshiana },
-    { label: 'نقد پیشگی', val: aggregatedExpenses.naqdAdvance },
-    { label: 'مارکیٹ فیس', val: aggregatedExpenses.marketFee },
-    { label: 'دیگر اخراجات', val: aggregatedExpenses.customTotal },
-  ].filter((item) => item.val > 0);
-
-  let expX = width - 40;
-  let expY = currentY;
-  expItems.forEach((it, i) => {
-    if (i === 3) {
-      expX = width - 40;
-      expY += 28;
+    ctx.fillText(`📱 ${phone1}`, phoneBoxX + phoneBoxW / 2, phoneBoxY + 12);
+    if (phone2) {
+      ctx.fillText(phone2, phoneBoxX + phoneBoxW / 2, phoneBoxY + 24);
     }
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#475569';
-    ctx.font = '14.5px "Noto Sans Arabic", system-ui, sans-serif';
-    ctx.fillText(`${it.label}:`, expX, expY);
+  }
+
+  // Mandi Address from Settings
+  if (shopAddress) {
+    ctx.font = 'bold 15px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif';
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 15px system-ui';
-    ctx.fillText(`- ₨ ${it.val.toLocaleString()}`, expX - 95, expY);
-    expX -= 280;
+    ctx.textAlign = 'center';
+    ctx.fillText(shopAddress, headerX + headerW / 2 + 25, headerY + 60);
+  }
+
+  // Proprietor & Tar Ka Pata from Settings
+  const propText = (arhtiName ? 'پروپرائیٹر: ' + arhtiName : '') + (tarKaPata ? (arhtiName ? ' • ' : '') + 'تار کا پتہ: ' + tarKaPata : '');
+  if (propText) {
+    ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif';
+    ctx.fillStyle = '#334155';
+    ctx.textAlign = 'center';
+    ctx.fillText(propText, headerX + headerW / 2, headerY + 82);
+  }
+
+  // 4. SUBHEADER METADATA ROW
+  const subY = headerY + headerH + 4;
+  const subH = 24;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(headerX, subY, headerW, subH);
+  ctx.strokeStyle = '#b91c1c';
+  ctx.lineWidth = 1.8;
+  ctx.strokeRect(headerX, subY, headerW, subH);
+
+  // Right: Number
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#b91c1c';
+  ctx.font = 'bold 11.5px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('نمبر: ', headerX + headerW - 10, subY + 16);
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 11.5px system-ui, monospace';
+  ctx.fillText(lots[0]?.lotNumber || '101', headerX + headerW - 40, subY + 16);
+
+  // Center: Vendor Name
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#b91c1c';
+  ctx.font = 'bold 11.5px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('بل بنام: ', headerX + headerW / 2 + 60, subY + 16);
+  ctx.fillStyle = '#020617';
+  ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
+  ctx.fillText(`${vendorName} ${vendorCity ? `(${vendorCity})` : ''}`, headerX + headerW / 2 - 15, subY + 16);
+
+  // Left: Real Calendar Date (NEVER today's day phrase)
+  const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#b91c1c';
+  ctx.font = 'bold 11.5px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('السلام علیکم تاریخ: ', headerX + 10, subY + 16);
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 11.5px system-ui, monospace';
+  ctx.fillText(displayDate, headerX + 115, subY + 16);
+
+  // 5. MAIN RED-RULED TABLE
+  const tableY = subY + subH + 4;
+  const tableH = 560;
+  const leftColW = Math.round(headerW * 0.28);
+  const rightColW = headerW - leftColW;
+  const totalSubColW = 85;
+
+  ctx.strokeStyle = '#b91c1c';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(headerX, tableY, headerW, tableH);
+
+  // Vertical divider between Left (Expenses) and Right (Sales)
+  ctx.beginPath();
+  ctx.moveTo(headerX + leftColW, tableY);
+  ctx.lineTo(headerX + leftColW, tableY + tableH);
+  ctx.stroke();
+
+  // Header row height
+  const tHeaderH = 32;
+  ctx.fillStyle = '#fef2f2';
+  ctx.fillRect(headerX, tableY, headerW, tHeaderH);
+  ctx.beginPath();
+  ctx.moveTo(headerX, tableY + tHeaderH);
+  ctx.lineTo(headerX + headerW, tableY + tHeaderH);
+  ctx.stroke();
+
+  // Left Header: اخراجات
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#991b1b';
+  ctx.font = 'bold 14.5px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('اخراجات', headerX + leftColW / 2, tableY + 21);
+
+  // Right Header: تفصیل مال بکری & ٹوٹل
+  // Vertical line separating ٹوٹل and تفصیل
+  ctx.beginPath();
+  ctx.moveTo(headerX + leftColW + totalSubColW, tableY);
+  ctx.lineTo(headerX + leftColW + totalSubColW, tableY + tableH - 96); // stops above summary bars
+  ctx.stroke();
+
+  ctx.fillText('ٹوٹل', headerX + leftColW + totalSubColW / 2, tableY + 21);
+  ctx.fillText('تفصیل مال بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, tableY + 21);
+
+  // 5A. LEFT COLUMN: 7 BADGES & ICS LOGO
+  const badgesData = [
+    { label: 'کمیشن', val: aggregatedExpenses.commission, color: '#4f46e5' },
+    { label: 'کرایہ', val: aggregatedExpenses.kiraya, color: '#16a34a' },
+    { label: 'مزدوری', val: aggregatedExpenses.mazdoori, color: '#db2777' },
+    { label: 'منشیانہ', val: aggregatedExpenses.munshiana, color: '#0284c7' },
+    { label: 'نقد', val: aggregatedExpenses.naqdAdvance, color: '#ef4444' },
+    { label: 'مارکیٹ فیس', val: aggregatedExpenses.marketFee, color: '#f97316' },
+    { label: 'میزان', val: meezanExpenses, color: '#9333ea', isMeezan: true },
+  ];
+
+  let badgeY = tableY + tHeaderH + 10;
+  badgesData.forEach((b) => {
+    const pillW = 58;
+    const pillH = 27;
+    const boxW = leftColW - pillW - 18;
+    const boxH = 27;
+
+    const boxX = headerX + 6;
+    const pillX = headerX + leftColW - pillW - 6;
+
+    // Amount box
+    ctx.fillStyle = b.isMeezan ? '#faf5ff' : '#ffffff';
+    ctx.fillRect(boxX, badgeY, boxW, boxH);
+    ctx.strokeStyle = b.isMeezan ? '#7e22ce' : '#b91c1c';
+    ctx.lineWidth = b.isMeezan ? 2 : 1.2;
+    ctx.strokeRect(boxX, badgeY, boxW, boxH);
+
+    if (b.val > 0) {
+      ctx.fillStyle = b.isMeezan ? '#581c87' : '#0f172a';
+      ctx.font = 'bold 12.5px system-ui, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.round(b.val).toLocaleString(), boxX + boxW / 2, badgeY + 18);
+    }
+
+    // Pill
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.roundRect(pillX, badgeY, pillW, pillH, 14);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11.5px "Noto Sans Arabic", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(b.label, pillX + pillW / 2, badgeY + 18);
+
+    badgeY += 28;
   });
 
-  currentY = expY + 30;
+  // Bottom Left: ICS Trust Badge
+  const icsBoxW = leftColW - 16;
+  const icsBoxH = 50;
+  const icsBoxX = headerX + 8;
+  const icsBoxY = tableY + tableH - icsBoxH - 8;
 
-  ctx.fillStyle = '#b91c1c';
-  ctx.font = 'bold 16.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText('کل منہا کٹوتیاں:', width - 36, currentY + 10);
-  ctx.font = 'bold 17.5px system-ui, sans-serif';
-  ctx.fillText(`- ${formatPKR(totalExpenses, '₨', 'en')}`, 110, currentY + 10);
+  ctx.fillStyle = '#881337';
+  ctx.fillRect(icsBoxX, icsBoxY, icsBoxW, icsBoxH);
+  ctx.strokeStyle = '#facc15';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(icsBoxX, icsBoxY, icsBoxW, icsBoxH);
 
-  currentY += 32;
-  drawDashedLine(currentY);
-  currentY += 16;
+  ctx.fillStyle = '#fef08a';
+  ctx.font = 'bold 9px "Noto Nastaliq Urdu", serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('آپ کے اعتماد کا نام', icsBoxX + icsBoxW / 2, icsBoxY + 15);
 
-  // 4. Final Net Meezan Box (Half Landscape A4 Prominent Net Box)
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(28, currentY, width - 56, 60);
+  ctx.fillStyle = '#facc15';
+  ctx.font = 'bold 22px monospace';
+  ctx.fillText('ICS', icsBoxX + icsBoxW / 2, icsBoxY + 40);
+
+  // 5B. RIGHT COLUMN: SALE ITEMS + EMPTY ROWS + 3 SUMMARY BARS
+  let rowY = tableY + tHeaderH;
+  const rowH = 26;
+  const maxRowsOnPage = 10;
+
+  for (let i = 0; i < maxRowsOnPage; i++) {
+    const item = allItems[i];
+
+    // Bottom horizontal line
+    ctx.strokeStyle = '#b91c1c';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(headerX + leftColW, rowY + rowH);
+    ctx.lineTo(headerX + headerW, rowY + rowH);
+    ctx.stroke();
+
+    if (item) {
+      // Total amount in subcolumn
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 11.5px monospace';
+      ctx.fillText(Math.round(item.totalAmount).toLocaleString(), headerX + leftColW + totalSubColW / 2, rowY + 18);
+
+      // Description in wide column
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 12px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif';
+      ctx.fillText(
+        `${item.productUrdu} ${item.quantity} ${item.unitLabel} @ ${Math.round(item.ratePerUnit).toLocaleString()}`,
+        headerX + headerW - 10,
+        rowY + 18
+      );
+
+      if (item.buyerName) {
+        ctx.textAlign = 'left';
+        ctx.font = '10px "Noto Sans Arabic", sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(`(${item.buyerName})`, headerX + leftColW + totalSubColW + 8, rowY + 18);
+      }
+    }
+
+    rowY += rowH;
+  }
+
+  // Bottom 3 Summary Bars
+  const summaryBarH = 26;
+  const sumY1 = tableY + tableH - summaryBarH * 3;
+  const sumY2 = tableY + tableH - summaryBarH * 2;
+  const sumY3 = tableY + tableH - summaryBarH;
+
+  // 1. خام بکری (Mauve Bar)
+  ctx.fillStyle = '#831843';
+  ctx.fillRect(headerX + leftColW, sumY1, rightColW, summaryBarH);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(headerX + leftColW, sumY1, rightColW, summaryBarH);
+
+  ctx.fillStyle = '#fef08a';
+  ctx.font = 'bold 12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(Math.round(totalGross).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY1 + 17);
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 18.5px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-  ctx.textAlign = 'right';
-  ctx.fillText('صافی رقم برائے ادائیگی (میزان):', width - 46, currentY + 38);
+  ctx.font = 'bold 12px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('خام بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY1 + 17);
 
-  ctx.font = 'bold 30px system-ui, monospace, sans-serif';
-  ctx.fillStyle = '#facc15'; // Gold / Yellow
-  ctx.textAlign = 'left';
-  ctx.fillText(formatPKR(totalNetPayable, '₨', 'en'), 46, currentY + 39);
+  // 2. جملہ اخراجات (Navy Blue Bar)
+  ctx.fillStyle = '#1e3a8a';
+  ctx.fillRect(headerX + leftColW, sumY2, rightColW, summaryBarH);
+  ctx.strokeRect(headerX + leftColW, sumY2, rightColW, summaryBarH);
 
-  currentY += 72;
-
-  // Payment Status Box (Cash or Credit Status with exact numbers)
-  ctx.fillStyle = isFullyPaid ? '#ecfdf5' : isPartialPaid ? '#fefce8' : '#fef2f2';
-  ctx.fillRect(28, currentY, width - 56, 42);
-  ctx.strokeStyle = isFullyPaid ? '#059669' : isPartialPaid ? '#d97706' : '#dc2626';
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(28, currentY, width - 56, 42);
-
-  ctx.fillStyle = isFullyPaid ? '#065f46' : isPartialPaid ? '#854d0e' : '#991b1b';
-  ctx.font = 'bold 15px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText(
-    isFullyPaid
-      ? '✅ حیثیت ادائیگی: نقد ادا شدہ (All Paid in Full)'
-      : isPartialPaid
-      ? '⚠️ حیثیت ادائیگی: جزوی نقد ادائیگی (Partial Paid)'
-      : '⏳ حیثیت ادائیگی: ادھار / ادائیگی بقایا ہے (Payment Pending)',
-    width - 44,
-    currentY + 26
-  );
-
-  ctx.font = 'bold 14px system-ui, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(
-    `ادا شدہ: ₨ ${totalPaid.toLocaleString()} | بقایا: ₨ ${Math.max(0, totalNetPayable - totalPaid).toLocaleString()}`,
-    46,
-    currentY + 26
-  );
-
-  currentY += 54;
-
-  // Signatures
-  ctx.strokeStyle = '#94a3b8';
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(45, currentY + 14);
-  ctx.lineTo(210, currentY + 14);
-  ctx.moveTo(width - 210, currentY + 14);
-  ctx.lineTo(width - 45, currentY + 14);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  ctx.fillStyle = '#475569';
-  ctx.font = 'bold 14px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillStyle = '#fecdd3';
+  ctx.font = 'bold 12px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('دستخط منشی / کیشیئر', 128, currentY + 28);
-  ctx.fillText('دستخط و مہر آڑھتی', width - 128, currentY + 28);
+  ctx.fillText(Math.round(meezanExpenses).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY2 + 17);
 
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '12px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText('کمپیوٹرائزڈ رسید برائے زمیندار | شکریہ', width / 2, totalHeight - 16);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 12px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('جملہ اخراجات', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY2 + 17);
+
+  // 3. پختہ بکری (Vibrant Green Bar)
+  ctx.fillStyle = '#15803d';
+  ctx.fillRect(headerX + leftColW, sumY3, rightColW, summaryBarH);
+  ctx.strokeRect(headerX + leftColW, sumY3, rightColW, summaryBarH);
+
+  ctx.fillStyle = '#fef08a';
+  ctx.font = 'bold 13.5px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(Math.round(totalNetPayable).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY3 + 17);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('پختہ بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY3 + 17);
+
+  // 6. FOOTER ROW
+  const footY = tableY + tableH + 6;
+  ctx.strokeStyle = '#b91c1c';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(headerX, footY);
+  ctx.lineTo(headerX + headerW, footY);
+  ctx.stroke();
+
+  // Signature
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('دستخط: .......................................', headerX + 140, footY + 22);
+
+  // Bhool Chook
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 14px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('بھول چوک لین دین', headerX + headerW / 2 - 20, footY + 22);
+
+  // Rubber Stamp
+  const stampX = headerX + headerW / 2 + 100;
+  const stampY = footY + 8;
+  ctx.save();
+  ctx.translate(stampX, stampY);
+  ctx.rotate(-0.1);
+  if (isFullyPaid) {
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(-35, -5, 70, 26);
+    ctx.fillStyle = '#dc2626';
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText('PAID', 0, 14);
+  } else {
+    ctx.strokeStyle = '#d97706';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-40, -5, 80, 26);
+    ctx.fillStyle = '#b45309';
+    ctx.font = 'bold 12.5px "Noto Sans Arabic", sans-serif';
+    ctx.fillText('باقی / نابلد', 0, 13);
+  }
+  ctx.restore();
+
+  // English Branding (Far Right)
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#1e3a8a';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText(settings.shopNameEn ? settings.shopNameEn.slice(0, 16) : 'COMMISSION', headerX + headerW - 10, footY + 14);
+  ctx.fillStyle = '#166534';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.fillText('Commission Shop', headerX + headerW - 10, footY + 24);
 
   return canvas;
 }

@@ -574,6 +574,8 @@ export const AddBidSaleModal: React.FC<AddBidSaleModalProps> = ({
               {formatPKR(totalAmount, settings.currencySymbol, settings.language)}
             </div>
           </div>
+            </div>
+          </div>
         </form>
 
         {/* Footer Actions */}
