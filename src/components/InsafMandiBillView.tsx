@@ -436,11 +436,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
                         <span className="font-urdu-sans font-bold text-slate-900 truncate">
                           {item.productUrdu} {item.quantity} {item.unitLabel} @ {Math.round(item.ratePerUnit).toLocaleString()}
                         </span>
-                        {item.buyerName && (
-                          <span className="text-[9px] sm:text-[10px] text-slate-500 font-urdu-sans truncate pr-1">
-                            ({item.buyerName})
-                          </span>
-                        )}
+                    
                       </div>
                     </div>
                   ))}
@@ -502,9 +498,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
             </div>
 
             {/* Bhool Chook Lain Dain */}
-            <div className="font-urdu-nastaliq text-[11px] sm:text-xs font-bold text-slate-700">
-              بھول چوک لین دین
-            </div>
+            
 
             {/* Rubber Stamp */}
             <div className="px-1">
@@ -524,9 +518,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
               <div className="text-[10px] sm:text-xs font-black text-blue-900 tracking-wider">
                 {settings.shopNameEn ? settings.shopNameEn.slice(0, 14) : 'INSAF'}
               </div>
-              <div className="text-[8px] sm:text-[9px] font-bold text-emerald-800">
-                Commission Shop
-              </div>
+        
             </div>
           </div>
         </div>
