@@ -174,7 +174,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
         unitLabel: grp.unitLabel,
         ratePerUnit: avgRate,
         totalAmount: Math.round(grp.totalAmount),
-        buyerName: 'متعدد خریدار',
+        buyerName:"",
       });
     });
   }
