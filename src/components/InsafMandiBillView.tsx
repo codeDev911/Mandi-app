@@ -110,7 +110,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
             unitLabel: uLabel,
             ratePerUnit: s.ratePerUnit,
             totalAmount: s.totalAmount,
-            buyerName: s.buyerName,
+            buyerName: '',
           });
         });
       } else {
@@ -378,7 +378,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
                       {aggregatedExpenses.marketFee > 0 ? Math.round(aggregatedExpenses.marketFee).toLocaleString() : ''}
                     </div>
                     <div className="w-12 sm:w-14 h-5 sm:h-6 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 text-white flex items-center justify-center text-[9px] sm:text-[10px] font-bold font-urdu-sans shadow-2xs flex-shrink-0">
-                      مارکیٹ فیس
+                       فیس
                     </div>
                   </div>
 
@@ -445,7 +445,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
                       {/* Detail Column */}
                       <div className="flex-1 h-full flex items-center justify-between px-2 text-right">
                         <span className="font-urdu-sans font-bold text-slate-900 truncate">
-                          {item.productUrdu} {item.quantity} {item.unitLabel} @ {Math.round(item.ratePerUnit).toLocaleString()}
+                          {item.productUrdu} {`  `} {item.quantity}  {`  `} {item.unitLabel} {` - `}{Math.round(item.ratePerUnit).toLocaleString()}
                         </span>
                     
                       </div>
