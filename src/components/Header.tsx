@@ -65,21 +65,14 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
         {/* Shop Name & Logo */}
         <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
-          <div className="w-9 h-9 sm:w-12 sm:h-12 bg-white/20 rounded-xl flex items-center justify-center text-xl sm:text-2xl shadow-inner flex-shrink-0 backdrop-blur-xs">
-            📦
-          </div>
+          
           <div className="min-w-0 flex-1">
             <h1 className="text-sm sm:text-xl font-bold truncate leading-tight tracking-wide font-urdu-nastaliq flex items-center gap-1.5">
               <span>{isUrdu ? settings.shopNameUrdu : settings.shopNameEn}</span>
               <span className="text-[10px] sm:text-xs font-normal opacity-80 font-sans hidden md:inline">
                 {isUrdu ? `(${settings.shopNameEn})` : `(${settings.shopNameUrdu})`}
               </span>
-            </h1>
-            <p className="text-[11px] sm:text-xs text-emerald-100 truncate flex items-center gap-1.5 sm:gap-2 font-urdu-sans mt-0.5">
-              <span className="font-semibold">{isUrdu ? settings.arhtiNameUrdu : settings.arhtiNameEn}</span>
-              <span className="opacity-60">•</span>
-              <span className="opacity-90">{todayFormatted}</span>
-            </p>
+  
           </div>
         </div>
 
