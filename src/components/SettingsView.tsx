@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, UnitType, MazdooriRateItem } from '../types';
 import { translations, unitLabels } from '../utils/localization';
 import { parseNumber } from '../utils/currency';
@@ -8,6 +8,9 @@ import { DEFAULT_UNIT_MAZDOORI_RATES, getMazdooriItems, DEFAULT_MAZDOORI_ITEMS }
 import { downloadJSONBackup, shareJSONBackup } from '../utils/fileDownloader';
 import { ShareBackupModal } from './ShareBackupModal';
 import { ManageMazdooriModal } from './ManageMazdooriModal';
+import { PinPromptModal } from './PinPromptModal';
+import { SystemLogsModal } from './SystemLogsModal';
+import { seedInitialLogsIfEmpty, addSystemLog } from '../utils/systemLogs';
 import {
   Settings,
   Store,
@@ -20,6 +23,7 @@ import {
   MapPin,
   User,
   ShieldAlert,
+  ShieldCheck,
   Cloud,
   CloudUpload,
   HardDrive,
@@ -86,7 +90,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [showConfirmPin, setShowConfirmPin] = useState(false);
   const [pinChangeError, setPinChangeError] = useState<string | null>(null);
   const [pinChangeSuccess, setPinChangeSuccess] = useState<string | null>(null);
+  const [isPinModalOpenForLogs, setIsPinModalOpenForLogs] = useState(false);
+  const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const cloudConfig = getStoredCloudConfig();
+
+  useEffect(() => {
+    seedInitialLogsIfEmpty(lots);
+  }, [lots]);
 
   const totalBidsCount = lots.reduce((acc, l) => acc + l.sales.length, 0);
 
@@ -94,6 +104,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     e.preventDefault();
     sound.playCashChime();
     onUpdateSettings(form);
+    addSystemLog({
+      title: 'ST',
+      status: 'updated',
+      description: `سسٹم و دکان کی ترتیبات محفوظ کی گئیں: ${form.shopNameUrdu || form.shopNameEn || 'کمیشن شاپ'}`,
+      descriptionEn: `Settings updated: ${form.shopNameEn || form.shopNameUrdu}`,
+      meta: { shopName: form.shopNameUrdu || form.shopNameEn },
+    });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
   };
@@ -934,6 +951,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        {/* System Transaction Audit Logs Section (Protected by PIN) */}
+        <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-4 sm:p-5 rounded-2xl border border-slate-800 shadow-md space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 flex items-center justify-center flex-shrink-0 shadow-inner">
+                <ShieldCheck className="w-6 h-6 text-indigo-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm sm:text-base font-urdu-sans text-white">
+                    {isUrdu ? 'سسٹم ٹرانزیکشن آڈٹ لاگز (Audit Logs)' : 'System Audit & Transaction Logs'}
+                  </h3>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 font-bold border border-indigo-400/30 font-urdu-sans">
+                    {isUrdu ? 'حفاظتی پن مطلوب' : 'PIN Protected'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 font-urdu-sans mt-0.5 leading-relaxed">
+                  {isUrdu
+                    ? 'لاٹ کا نیا اندراج، بولی بکری، دکان اخراجات، نقد دراز کیش اور کھاتہ جات کے تمام ریکارڈز کی تبدیلی و حذف کا کمپیوٹر آڈٹ لاگ محفوظ ہے۔'
+                    : 'View immutable system audit trail for all lot entries, sales, expenses, cash drawer, and khata records.'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                sound.playTick();
+                setIsPinModalOpenForLogs(true);
+              }}
+              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-2 transition active:scale-95 shadow-md flex-shrink-0 cursor-pointer"
+            >
+              <KeyRound className="w-4 h-4 text-indigo-200" />
+              <span>{isUrdu ? 'لاگز دکھائیں (Show Logs)' : 'Show Logs'}</span>
+            </button>
+          </div>
+        </div>
+
         {/* Save Button */}
         <button
           type="submit"
@@ -1013,6 +1068,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           }}
         />
       )}
+
+      {/* PIN Prompt Modal for System Audit Logs */}
+      <PinPromptModal
+        isOpen={isPinModalOpenForLogs}
+        onClose={() => setIsPinModalOpenForLogs(false)}
+        onSuccess={() => {
+          setIsPinModalOpenForLogs(false);
+          setIsLogsModalOpen(true);
+        }}
+        correctPin={settings.securityPin || '1234'}
+        isUrdu={isUrdu}
+        title={isUrdu ? 'سسٹم لاگز دیکھنے کے لیے پن کوڈ درج کریں' : 'Enter PIN to View System Logs'}
+        itemDescription={isUrdu ? 'حفاظتی وجوہات کی بنا پر سسٹم آڈٹ لاگز تک رسائی کے لیے پن کوڈ درکار ہے۔' : 'Security PIN required to access audit logs.'}
+      />
+
+      {/* System Audit Logs Modal */}
+      <SystemLogsModal
+        isOpen={isLogsModalOpen}
+        onClose={() => setIsLogsModalOpen(false)}
+        settings={settings}
+      />
     </div>
   );
 };

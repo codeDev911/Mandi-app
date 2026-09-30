@@ -417,7 +417,6 @@ export function generateVendorConsolidatedInvoiceCanvas(
     unitLabel: string;
     ratePerUnit: number;
     totalAmount: number;
-    buyerName?: string;
   }> = [];
 
   let totalGross = 0;
@@ -488,7 +487,6 @@ export function generateVendorConsolidatedInvoiceCanvas(
             unitLabel: uLabel,
             ratePerUnit: s.ratePerUnit,
             totalAmount: s.totalAmount,
-            buyerName: s.buyerName,
           });
         });
       } else {
@@ -552,7 +550,6 @@ export function generateVendorConsolidatedInvoiceCanvas(
         unitLabel: grp.unitLabel,
         ratePerUnit: avgRate,
         totalAmount: Math.round(grp.totalAmount),
-        buyerName: 'متعدد خریدار',
       });
     });
   }
@@ -844,21 +841,15 @@ export function generateVendorConsolidatedInvoiceCanvas(
       ctx.font = 'bold 11.5px monospace';
       ctx.fillText(Math.round(item.totalAmount).toLocaleString(), headerX + leftColW + totalSubColW / 2, rowY + 18);
 
-      // Description in wide column
-      ctx.textAlign = 'right';
-      ctx.font = 'bold 12px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif';
+      // Description in wide column: Rate, Product Name, Unit Type, Qty from left
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif';
+      ctx.fillStyle = '#0f172a';
       ctx.fillText(
-        `${item.productUrdu} ${item.quantity} ${item.unitLabel} @ ${Math.round(item.ratePerUnit).toLocaleString()}`,
-        headerX + headerW - 10,
+        `${Math.round(item.ratePerUnit).toLocaleString()}   •   ${item.productUrdu}   •   ${item.unitLabel}   •   ${item.quantity}`,
+        headerX + leftColW + totalSubColW + 12,
         rowY + 18
       );
-
-      if (item.buyerName) {
-        ctx.textAlign = 'left';
-        ctx.font = '10px "Noto Sans Arabic", sans-serif';
-        ctx.fillStyle = '#64748b';
-        ctx.fillText(`(${item.buyerName})`, headerX + leftColW + totalSubColW + 8, rowY + 18);
-      }
     }
 
     rowY += rowH;
@@ -928,11 +919,6 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
   ctx.fillText('دستخط: .......................................', headerX + 140, footY + 22);
-
-  // Bhool Chook
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 14px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('بھول چوک لین دین', headerX + headerW / 2 - 20, footY + 22);
 
   // Rubber Stamp
   const stampX = headerX + headerW / 2 + 100;

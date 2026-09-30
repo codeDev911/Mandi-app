@@ -41,6 +41,7 @@ import { SettingsView } from './components/SettingsView';
 import { NewLotModal } from './components/NewLotModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
 import { CashDrawerModal } from './components/CashDrawerModal';
+import { addSystemLog, seedInitialLogsIfEmpty } from './utils/systemLogs';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App as CapApp } from '@capacitor/app';
@@ -175,6 +176,7 @@ export default function App() {
         if (data.drawerAdjustments && data.drawerAdjustments.length > 0) {
           setDrawerAdjustments(data.drawerAdjustments);
         }
+        seedInitialLogsIfEmpty(data.lots || [], data.expenses || [], data.drawerAdjustments || []);
         isLoadedFromDbRef.current = true;
         setIsDataLoaded(true);
       }
@@ -234,6 +236,16 @@ export default function App() {
 
   const handleSaveExpense = (expense: ShopExpense) => {
     sound.playCashChime();
+    const isEdit = expenses.some((e) => e.id === expense.id);
+    addSystemLog({
+      title: 'EX',
+      status: isEdit ? 'updated' : 'created',
+      description: `دکان خرچہ ${isEdit ? 'اپ ڈیٹ' : 'نیا اندراج'}: ${expense.title} - مد: ${expense.category} (رقم: Rs.${expense.amount.toLocaleString()})`,
+      descriptionEn: `Shop expense ${isEdit ? 'updated' : 'created'}: ${expense.title} - Rs.${expense.amount}`,
+      entityId: expense.id,
+      meta: { title: expense.title, amount: expense.amount, category: expense.category },
+    });
+
     setExpenses((prev) => {
       const index = prev.findIndex((e) => e.id === expense.id);
       if (index >= 0) {
@@ -247,6 +259,14 @@ export default function App() {
 
   const handleDeleteExpense = (expenseId: string) => {
     sound.playTick();
+    const exp = expenses.find((e) => e.id === expenseId);
+    addSystemLog({
+      title: 'EX',
+      status: 'deleted',
+      description: `دکان خرچہ حذف: ${exp?.title || expenseId} (رقم: Rs.${(exp?.amount || 0).toLocaleString()})`,
+      descriptionEn: `Shop expense deleted: ${exp?.title || expenseId}`,
+      entityId: expenseId,
+    });
     setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
   };
 
@@ -257,16 +277,38 @@ export default function App() {
       id: `adj-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       timestamp: new Date().toISOString(),
     };
+    addSystemLog({
+      title: 'CD',
+      status: 'created',
+      description: `گلہ کیش ایڈجسٹمنٹ درج (${adj.type === 'in' ? '+ کیش جمع' : '- کیش نکالیں'}): رقم Rs.${adj.amount.toLocaleString()} - وجہ: ${adj.reason || 'کوئی تفصیل نہیں'}`,
+      descriptionEn: `Cash drawer adjustment added: ${adj.type} Rs.${adj.amount}`,
+      entityId: newEntry.id,
+      meta: { type: adj.type, amount: adj.amount, reason: adj.reason },
+    });
     setDrawerAdjustments((prev) => [newEntry, ...prev]);
   };
 
   const handleDeleteDrawerAdjustment = (id: string) => {
     sound.playTick();
+    const adj = drawerAdjustments.find((a) => a.id === id);
+    addSystemLog({
+      title: 'CD',
+      status: 'deleted',
+      description: `گلہ کیش ایڈجسٹمنٹ انٹری حذف: رقم Rs.${(adj?.amount || 0).toLocaleString()} (${adj?.type === 'in' ? 'کیش جمع' : 'کیش نکالیں'})`,
+      descriptionEn: `Cash drawer adjustment deleted: Rs.${adj?.amount || 0}`,
+      entityId: id,
+    });
     setDrawerAdjustments((prev) => prev.filter((a) => a.id !== id));
   };
 
   const handleBatchUpdateLots = (updatedLots: VendorLot[]) => {
     sound.playCashChime();
+    addSystemLog({
+      title: 'LT',
+      status: 'updated',
+      description: `بیک وقت ${updatedLots.length} لاٹس اپ ڈیٹ کی گئیں`,
+      descriptionEn: `Batch updated ${updatedLots.length} lots`,
+    });
     const updateMap = new Map(updatedLots.map((l) => [l.id, l]));
     setLots((prev) =>
       prev.map((lot) => {
@@ -277,6 +319,14 @@ export default function App() {
   };
 
   const handleSaveCustomer = (cust: CustomerBuyer) => {
+    const isEdit = customers.some((c) => c.id === cust.id);
+    addSystemLog({
+      title: 'BK',
+      status: isEdit ? 'updated' : 'created',
+      description: `خریدار کھاتہ پروفائل ${isEdit ? 'اپ ڈیٹ' : 'نیا اندراج'}: ${cust.name}${cust.phone ? ` (${cust.phone})` : ''}`,
+      descriptionEn: `Customer ${isEdit ? 'updated' : 'created'}: ${cust.name}`,
+      entityId: cust.id,
+    });
     setCustomers((prev) => {
       const index = prev.findIndex((c) => c.id === cust.id || c.name.toLowerCase() === cust.name.toLowerCase());
       if (index >= 0) {
@@ -290,10 +340,26 @@ export default function App() {
 
   const handleDeleteCustomer = (customerId: string) => {
     sound.playTick();
+    const cust = customers.find((c) => c.id === customerId);
+    addSystemLog({
+      title: 'BK',
+      status: 'deleted',
+      description: `خریدار کھاتہ پروفائل حذف: ${cust?.name || customerId}`,
+      descriptionEn: `Customer deleted: ${cust?.name || customerId}`,
+      entityId: customerId,
+    });
     setCustomers((prev) => prev.filter((c) => c.id !== customerId));
   };
 
   const handleSaveVendor = (vendor: SavedVendor) => {
+    const isEdit = vendors.some((v) => v.id === vendor.id);
+    addSystemLog({
+      title: 'VP',
+      status: isEdit ? 'updated' : 'created',
+      description: `زمیندار پروفائل ${isEdit ? 'اپ ڈیٹ' : 'نیا اندراج'}: نام ${vendor.name}${vendor.city ? ` (${vendor.city})` : ''}`,
+      descriptionEn: `Vendor ${isEdit ? 'updated' : 'created'}: ${vendor.name}`,
+      entityId: vendor.id,
+    });
     setVendors((prev) => {
       const index = prev.findIndex((v) => v.id === vendor.id || v.name.toLowerCase() === vendor.name.toLowerCase());
       if (index >= 0) {
@@ -307,11 +373,27 @@ export default function App() {
 
   const handleDeleteVendor = (vendorId: string) => {
     sound.playTick();
+    const v = vendors.find((vend) => vend.id === vendorId);
+    addSystemLog({
+      title: 'VP',
+      status: 'deleted',
+      description: `زمیندار پروفائل حذف: ${v?.name || vendorId}`,
+      descriptionEn: `Vendor deleted: ${v?.name || vendorId}`,
+      entityId: vendorId,
+    });
     setVendors((prev) => prev.filter((v) => v.id !== vendorId));
   };
 
   const handleRecordCustomerPayment = (customerId: string, payment: BuyerPaymentRecord) => {
     sound.playCashChime();
+    addSystemLog({
+      title: 'BK',
+      status: 'created',
+      description: `خریدار کھاتہ وصولی درج: خریدار ${payment.buyerName || customerId} سے رقم Rs.${payment.amount.toLocaleString()} وصول بذریعہ ${payment.paymentMethod || 'کیش'}${payment.notes ? ` (${payment.notes})` : ''}`,
+      descriptionEn: `Buyer payment recorded: ${payment.buyerName || customerId} - Rs.${payment.amount}`,
+      entityId: payment.id,
+      meta: { buyerName: payment.buyerName || customerId, amount: payment.amount },
+    });
     setCustomers((prev) => {
       const existing = prev.find((c) => c.id === customerId);
       if (existing) {
@@ -340,6 +422,13 @@ export default function App() {
 
   const handleDeleteCustomerPayment = (customerIdOrName: string, paymentId: string) => {
     sound.playPop();
+    addSystemLog({
+      title: 'BK',
+      status: 'deleted',
+      description: `خریدار کھاتہ وصولی انٹری حذف کر دی گئی: خریدار ${customerIdOrName}`,
+      descriptionEn: `Buyer payment entry deleted for ${customerIdOrName}`,
+      entityId: paymentId,
+    });
     setCustomers((prev) => {
       const updated = prev.map((c) => {
         if (c.id === customerIdOrName || c.name.trim().toLowerCase() === customerIdOrName.trim().toLowerCase()) {
@@ -386,6 +475,20 @@ export default function App() {
   };
 
   const handleSaveNewLot = (newLot: VendorLot) => {
+    addSystemLog({
+      title: 'LT',
+      status: 'created',
+      description: `نئی لاٹ #${newLot.lotNumber} کا اندراج: ${newLot.productUrdu || newLot.productName} (${newLot.totalQuantity} تعداد) - زمیندار: ${newLot.vendorName}`,
+      descriptionEn: `New lot #${newLot.lotNumber} created: ${newLot.productName} (${newLot.totalQuantity}) - Vendor: ${newLot.vendorName}`,
+      entityId: newLot.id,
+      meta: {
+        lotNumber: newLot.lotNumber,
+        vendorName: newLot.vendorName,
+        productName: newLot.productUrdu || newLot.productName,
+        quantity: newLot.totalQuantity,
+      },
+    });
+
     setLots((prev) => [newLot, ...prev]);
     setSelectedLotId(newLot.id);
     setActiveTab('bolli');
@@ -402,6 +505,25 @@ export default function App() {
       notes?: string;
     }
   ) => {
+    const targetLot = lots.find((l) => l.id === lotId);
+    const totalAmount = saleData.quantity * saleData.ratePerUnit;
+
+    addSystemLog({
+      title: 'BL',
+      status: 'created',
+      description: `بولی فروخت اندراج: لاٹ #${targetLot?.lotNumber || ''} - ${saleData.quantity} تعداد ${targetLot?.productUrdu || ''} بنام ${saleData.buyerName} @ ریٹ ${saleData.ratePerUnit} (کل: Rs.${totalAmount.toLocaleString()}) [${saleData.paymentStatus === 'cash' ? 'نقد' : 'ادھار'}]`,
+      descriptionEn: `Sale recorded: Lot #${targetLot?.lotNumber} - ${saleData.quantity} to ${saleData.buyerName} @ ${saleData.ratePerUnit} (${saleData.paymentStatus})`,
+      entityId: `sale-${Date.now()}`,
+      meta: {
+        lotNumber: targetLot?.lotNumber,
+        buyerName: saleData.buyerName,
+        quantity: saleData.quantity,
+        rate: saleData.ratePerUnit,
+        totalAmount,
+        paymentStatus: saleData.paymentStatus,
+      },
+    });
+
     setLots((prev) =>
       prev.map((lot) => {
         if (lot.id !== lotId) return lot;
@@ -439,6 +561,17 @@ export default function App() {
 
   const handleDeleteSale = (lotId: string, saleId: string) => {
     sound.playTick();
+    const targetLot = lots.find((l) => l.id === lotId);
+    const targetSale = targetLot?.sales.find((s) => s.id === saleId);
+
+    addSystemLog({
+      title: 'BL',
+      status: 'deleted',
+      description: `بولی بکری فروخت حذف: لاٹ #${targetLot?.lotNumber || ''} سے خریدار ${targetSale?.buyerName || ''} کی فروخت (${targetSale?.quantity || 0} تعداد @ ریٹ ${targetSale?.ratePerUnit || 0}) حذف کر دی گئی`,
+      descriptionEn: `Sale deleted from lot #${targetLot?.lotNumber || lotId}`,
+      entityId: saleId,
+    });
+
     setLots((prev) =>
       prev.map((lot) => {
         if (lot.id !== lotId) return lot;
@@ -459,6 +592,20 @@ export default function App() {
 
   const handleDeleteLot = (lotId: string) => {
     sound.playTick();
+    const lotToDelete = lots.find((l) => l.id === lotId);
+
+    addSystemLog({
+      title: 'LT',
+      status: 'deleted',
+      description: `لاٹ #${lotToDelete?.lotNumber || lotId} حذف کر دی گئی: ${lotToDelete?.productUrdu || lotToDelete?.productName || ''} (زمیندار: ${lotToDelete?.vendorName || ''})`,
+      descriptionEn: `Lot #${lotToDelete?.lotNumber || lotId} deleted`,
+      entityId: lotId,
+      meta: {
+        lotNumber: lotToDelete?.lotNumber,
+        vendorName: lotToDelete?.vendorName,
+      },
+    });
+
     setLots((prev) => {
       const filtered = prev.filter((l) => l.id !== lotId);
       if (selectedLotId === lotId) {
@@ -469,6 +616,15 @@ export default function App() {
   };
 
   const handleUpdateLotExpenses = (lotId: string, updatedExpenses: VendorLot['expenses']) => {
+    const lot = lots.find((l) => l.id === lotId);
+    addSystemLog({
+      title: 'LT',
+      status: 'updated',
+      description: `لاٹ #${lot?.lotNumber || lotId} کے اخراجات / کٹوتیاں اپ ڈیٹ کی گئیں (زمیندار: ${lot?.vendorName || ''})`,
+      descriptionEn: `Lot #${lot?.lotNumber || lotId} expenses updated`,
+      entityId: lotId,
+    });
+
     setLots((prev) =>
       prev.map((lot) => {
         if (lot.id !== lotId) return lot;
@@ -485,13 +641,24 @@ export default function App() {
   };
 
   const handleToggleSalePaymentStatus = (lotId: string, saleId: string) => {
+    const targetLot = lots.find((l) => l.id === lotId);
+    const targetSale = targetLot?.sales.find((s) => s.id === saleId);
+    const nextStatus: PaymentStatus = targetSale?.paymentStatus === 'cash' ? 'credit' : 'cash';
+
+    addSystemLog({
+      title: 'BL',
+      status: 'updated',
+      description: `بولی ادائیگی اسٹیٹس تبدیل: لاٹ #${targetLot?.lotNumber || ''} (خریدار: ${targetSale?.buyerName || ''}) -> ${nextStatus === 'cash' ? 'نقد (Cash)' : 'ادھار (Credit)'}`,
+      descriptionEn: `Sale payment status changed for lot #${targetLot?.lotNumber}`,
+      entityId: saleId,
+    });
+
     setLots((prev) =>
       prev.map((lot) => {
         if (lot.id !== lotId) return lot;
 
         const updatedSales = lot.sales.map((s) => {
           if (s.id !== saleId) return s;
-          const nextStatus: PaymentStatus = s.paymentStatus === 'cash' ? 'credit' : 'cash';
           return {
             ...s,
             paymentStatus: nextStatus,
@@ -510,6 +677,15 @@ export default function App() {
 
   const handleMarkLotCompleted = (lotId: string) => {
     sound.playCashChime();
+    const lot = lots.find((l) => l.id === lotId);
+    addSystemLog({
+      title: 'LT',
+      status: 'updated',
+      description: `لاٹ #${lot?.lotNumber || lotId} مکمل مارک کر دی گئی (زمیندار: ${lot?.vendorName || ''})`,
+      descriptionEn: `Lot #${lot?.lotNumber || lotId} marked completed`,
+      entityId: lotId,
+    });
+
     setLots((prev) =>
       prev.map((l) => (l.id === lotId ? { ...l, status: 'completed', updatedAt: new Date().toISOString() } : l))
     );
@@ -517,6 +693,15 @@ export default function App() {
 
   const handleReopenLot = (lotId: string) => {
     sound.playTick();
+    const lot = lots.find((l) => l.id === lotId);
+    addSystemLog({
+      title: 'LT',
+      status: 'updated',
+      description: `لاٹ #${lot?.lotNumber || lotId} دوبارہ فعال کی گئی (Active)`,
+      descriptionEn: `Lot #${lot?.lotNumber || lotId} reopened`,
+      entityId: lotId,
+    });
+
     setLots((prev) =>
       prev.map((l) => (l.id === lotId ? { ...l, status: 'active', updatedAt: new Date().toISOString() } : l))
     );
@@ -524,11 +709,21 @@ export default function App() {
 
   const handleToggleVendorPaymentStatus = (lotId: string, customStatus?: 'pending' | 'paid') => {
     sound.playCashChime();
+    const targetLot = lots.find((l) => l.id === lotId);
+    const currentStatus = targetLot?.vendorPaymentStatus || 'pending';
+    const nextStatus: 'pending' | 'paid' = customStatus || (currentStatus === 'paid' ? 'pending' : 'paid');
+
+    addSystemLog({
+      title: 'VP',
+      status: 'updated',
+      description: `زمیندار ادائیگی اسٹیٹس تبدیل: لاٹ #${targetLot?.lotNumber || ''} بنام ${targetLot?.vendorName || ''} -> ${nextStatus === 'paid' ? 'ادائیگی مکمل (Paid)' : 'ادائیگی باقی (Pending)'}`,
+      descriptionEn: `Vendor payment status toggled for lot #${targetLot?.lotNumber}`,
+      entityId: lotId,
+    });
+
     setLots((prev) =>
       prev.map((lot) => {
         if (lot.id !== lotId) return lot;
-        const currentStatus = lot.vendorPaymentStatus || 'pending';
-        const nextStatus: 'pending' | 'paid' = customStatus || (currentStatus === 'paid' ? 'pending' : 'paid');
         return {
           ...lot,
           vendorPaymentStatus: nextStatus,
@@ -553,6 +748,14 @@ export default function App() {
   ) => {
     sound.playCashChime();
     const paymentDate = payment.paymentDate || new Date().toISOString().slice(0, 10);
+
+    addSystemLog({
+      title: 'VP',
+      status: 'created',
+      description: `زمیندار ادائیگی درج: زمیندار ${vendorName} کو رقم Rs.${payment.amount.toLocaleString()} ادا کی گئی [${payment.paymentMethod || 'کیش'}]${payment.notes ? ` (${payment.notes})` : ''}`,
+      descriptionEn: `Vendor payment recorded: ${vendorName} - Rs.${payment.amount}`,
+      meta: { vendorName, amount: payment.amount, lotId: payment.lotId },
+    });
 
     // 1. Create a persistent VendorPaymentRecord
     const newVendorPaymentRecord: VendorPaymentRecord = {
@@ -689,6 +892,15 @@ export default function App() {
     amount?: number
   ) => {
     sound.playPop();
+
+    addSystemLog({
+      title: 'VP',
+      status: 'deleted',
+      description: `زمیندار ادائیگی ریکارڈ حذف: زمیندار ${vendorName} کی ادائیگی رقم Rs.${(amount || 0).toLocaleString()} حذف کر دی گئی`,
+      descriptionEn: `Vendor payment record deleted for ${vendorName}`,
+      entityId: paymentId,
+    });
+
     // 1. Remove payment from vendor in vendors state
     setVendors((prevVendors) => {
       const updated = prevVendors.map((v) => {

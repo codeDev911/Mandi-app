@@ -138,7 +138,6 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     unitLabel: string;
     ratePerUnit: number;
     totalAmount: number;
-    buyerName?: string;
   }> = [];
 
   lots.forEach((lot) => {
@@ -177,7 +176,6 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     unitLabel: string;
     ratePerUnit: number;
     totalAmount: number;
-    buyerName?: string;
   }> = [];
 
   const productGroups = new Map<
@@ -463,7 +461,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     const productListText = itemsToShare
       .map(
         (item, idx) =>
-          `${idx + 1}. ${item.productUrdu}: ${item.quantity} ${item.unitLabel} @ ${isAveraged ? 'اوسط ریٹ ' : ''}Rs.${item.ratePerUnit} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`
+          `${idx + 1}. ${item.ratePerUnit}  •  ${item.productUrdu}  •  ${item.unitLabel}  •  ${item.quantity} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`
       )
       .join('\n');
 
@@ -530,7 +528,7 @@ ${productListText}
     const itemsText = itemsToCopy
       .map(
         (item, idx) =>
-          `${idx + 1}. ${item.productUrdu}: ${item.quantity} ${item.unitLabel} @ ${isAveraged ? 'اوسط ریٹ ' : ''}Rs.${item.ratePerUnit} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`
+          `${idx + 1}. ${item.ratePerUnit}  •  ${item.productUrdu}  •  ${item.unitLabel}  •  ${item.quantity} = ${formatPKR(item.totalAmount, settings.currencySymbol, settings.language)}`
       )
       .join('\n');
 

@@ -202,7 +202,6 @@ export function generateInsafMandiBillHtmlSingle(
     unitLabel: string;
     ratePerUnit: number;
     totalAmount: number;
-    buyerName?: string;
   }> = [];
 
   if (!isAveraged) {
@@ -217,7 +216,6 @@ export function generateInsafMandiBillHtmlSingle(
             unitLabel: uLabel,
             ratePerUnit: s.ratePerUnit,
             totalAmount: s.totalAmount,
-            buyerName: s.buyerName,
           });
         });
       } else {
@@ -281,7 +279,6 @@ export function generateInsafMandiBillHtmlSingle(
         unitLabel: grp.unitLabel,
         ratePerUnit: avgRate,
         totalAmount: Math.round(grp.totalAmount),
-        buyerName: 'متعدد خریدار',
       });
     });
   }
@@ -293,15 +290,30 @@ export function generateInsafMandiBillHtmlSingle(
   const saleRowsHtml = allItems
     .map(
       (item) => `
-    <div style="height: 21px; display: flex; align-items: center; border-bottom: 1px solid rgba(185, 28, 28, 0.6); font-size: 11px; font-weight: 600; color: #0f172a;">
+    <div style="height: 22px; display: flex; align-items: center; border-bottom: 1px solid rgba(185, 28, 28, 0.6); font-size: 11px; font-weight: 600; color: #0f172a;">
       <div style="width: 82px; height: 100%; border-left: 1.5px solid rgba(185, 28, 28, 0.6); display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: monospace, sans-serif;">
         ${Math.round(item.totalAmount).toLocaleString()}
       </div>
-      <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0 6px; text-align: right;">
-        <span style="font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif; font-weight: bold;">
-          ${item.productUrdu} ${item.quantity} ${item.unitLabel} @ ${Math.round(item.ratePerUnit).toLocaleString()}
-        </span>
-        ${item.buyerName ? `<span style="font-size: 9px; color: #64748b;">(${item.buyerName})</span>` : ''}
+      <div dir="ltr" style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: flex-start; padding: 0 6px; text-align: left;">
+        <!-- 1. Rate (from left) -->
+        <div style="width: 58px; text-align: left; flex-shrink: 0; font-family: monospace, sans-serif; font-size: 11.5px; font-weight: bold; color: #0f172a;">
+          ${Math.round(item.ratePerUnit).toLocaleString()}
+        </div>
+        <span style="color: #f87171; font-size: 10px; margin: 0 4px; flex-shrink: 0;">•</span>
+        <!-- 2. Product Name -->
+        <div style="flex: 1; text-align: center; font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif; font-size: 12.5px; font-weight: bold; color: #020617; padding: 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;" dir="rtl">
+          ${item.productUrdu}
+        </div>
+        <span style="color: #f87171; font-size: 10px; margin: 0 4px; flex-shrink: 0;">•</span>
+        <!-- 3. Unit Type -->
+        <div style="width: 48px; text-align: center; flex-shrink: 0; font-family: 'Noto Sans Arabic', sans-serif; font-size: 11px; font-weight: 600; color: #334155;" dir="rtl">
+          ${item.unitLabel}
+        </div>
+        <span style="color: #f87171; font-size: 10px; margin: 0 4px; flex-shrink: 0;">•</span>
+        <!-- 4. Qty -->
+        <div style="width: 44px; text-align: center; flex-shrink: 0; font-family: monospace, sans-serif; font-size: 12px; font-weight: 900; color: #0f172a;">
+          ${item.quantity}
+        </div>
       </div>
     </div>
   `
@@ -540,10 +552,6 @@ export function generateInsafMandiBillHtmlSingle(
           <div style="display: flex; align-items: center; gap: 3px;">
             <span style="font-family: 'Noto Nastaliq Urdu', serif; font-size: 11px;">دستخط:</span>
             <span style="display: inline-block; width: 70px; border-bottom: 1.5px dotted #475569;"></span>
-          </div>
-
-          <div style="font-family: 'Noto Nastaliq Urdu', serif; font-size: 11px; font-weight: bold; color: #1e293b;">
-            بھول چوک لین دین
           </div>
 
           <div>

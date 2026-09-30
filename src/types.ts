@@ -258,3 +258,42 @@ export interface CashDrawerSummary {
   totalCashOut: number;
   netCashInDrawer: number;
 }
+
+export type LogActionStatus = 'created' | 'updated' | 'deleted';
+
+export type LogCategory = 'LT' | 'BL' | 'EX' | 'LX' | 'CD' | 'BK' | 'VP' | 'ST';
+
+export interface SystemLog {
+  id: string;
+  timestamp: string; // ISO 8601 string with date and time
+  title: LogCategory; // short title like LT, BL, EX, CD, BK, VP, ST
+  status: LogActionStatus; // 'created' | 'updated' | 'deleted'
+  description: string; // Detailed description in Urdu
+  descriptionEn?: string; // English translation
+  entityId?: string; // ID of the lot, sale, expense, etc.
+  meta?: {
+    lotNumber?: string;
+    vendorName?: string;
+    buyerName?: string;
+    amount?: number;
+    quantity?: number;
+    unit?: string;
+    rate?: number;
+    category?: string;
+    [key: string]: any;
+  };
+}
+
+export const logCategoryMeta: Record<
+  LogCategory,
+  { short: LogCategory; labelUrdu: string; labelEn: string; icon: string; color: string }
+> = {
+  LT: { short: 'LT', labelUrdu: 'لاٹ مال اندراج', labelEn: 'Lot Entry', icon: '📦', color: 'indigo' },
+  BL: { short: 'BL', labelUrdu: 'بولی و فروخت', labelEn: 'Boli / Sale', icon: '🔨', color: 'emerald' },
+  EX: { short: 'EX', labelUrdu: 'دکان خرچہ', labelEn: 'Shop Expense', icon: '💸', color: 'rose' },
+  LX: { short: 'LX', labelUrdu: 'لاٹ کٹوتیاں', labelEn: 'Lot Expenses', icon: '✂️', color: 'amber' },
+  CD: { short: 'CD', labelUrdu: 'گلہ کیش دراز', labelEn: 'Cash Drawer', icon: '💼', color: 'cyan' },
+  BK: { short: 'BK', labelUrdu: 'خریدار کھاتہ', labelEn: 'Buyer Khata', icon: '👥', color: 'purple' },
+  VP: { short: 'VP', labelUrdu: 'زمیندار ادائیگی', labelEn: 'Vendor Payment', icon: '🤝', color: 'teal' },
+  ST: { short: 'ST', labelUrdu: 'سسٹم ترتیبات', labelEn: 'Settings Update', icon: '⚙️', color: 'slate' },
+};

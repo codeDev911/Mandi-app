@@ -114,7 +114,7 @@ export const PinPromptModal: React.FC<PinPromptModalProps> = ({
                 {title || (isUrdu ? 'حفاظتی پن کوڈ کی تصدیق' : 'Security PIN Required')}
               </h3>
               <p className="text-[11px] text-rose-200 font-urdu-sans">
-                {isUrdu ? 'حذف کرنے کیلئے 4 ہندسوں کا پن درج کریں' : 'Enter PIN to confirm deletion'}
+                {title ? (isUrdu ? 'تصدیق کے لیے 4 ہندسوں کا سکیورٹی پن درج کریں' : 'Enter 4-digit security PIN to proceed') : (isUrdu ? 'حذف کرنے کیلئے 4 ہندسوں کا پن درج کریں' : 'Enter PIN to confirm deletion')}
               </p>
             </div>
           </div>

@@ -87,7 +87,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
     aggregatedExpenses.marketFee +
     aggregatedExpenses.customTotal;
 
-  // Build items list
+  // Build items list (without buyer name)
   const allItems: Array<{
     lotNumber: string;
     productUrdu: string;
@@ -95,7 +95,6 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
     unitLabel: string;
     ratePerUnit: number;
     totalAmount: number;
-    buyerName?: string;
   }> = [];
 
   if (!isAveraged) {
@@ -110,7 +109,6 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
             unitLabel: uLabel,
             ratePerUnit: s.ratePerUnit,
             totalAmount: s.totalAmount,
-            buyerName: '',
           });
         });
       } else {
@@ -174,7 +172,6 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
         unitLabel: grp.unitLabel,
         ratePerUnit: avgRate,
         totalAmount: Math.round(grp.totalAmount),
-        buyerName:"",
       });
     });
   }
@@ -378,7 +375,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
                       {aggregatedExpenses.marketFee > 0 ? Math.round(aggregatedExpenses.marketFee).toLocaleString() : ''}
                     </div>
                     <div className="w-12 sm:w-14 h-5 sm:h-6 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 text-white flex items-center justify-center text-[9px] sm:text-[10px] font-bold font-urdu-sans shadow-2xs flex-shrink-0">
-                       فیس
+                      مارکیٹ فیس
                     </div>
                   </div>
 
@@ -442,12 +439,44 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
                         {Math.round(item.totalAmount).toLocaleString()}
                       </div>
 
-                      {/* Detail Column */}
-                      <div className="flex-1 h-full flex items-center justify-between px-2 text-right">
-                        <span className="font-urdu-sans font-bold text-slate-900 truncate">
-                          {item.productUrdu} {`  `} {item.quantity}  {`  `} {item.unitLabel} {` - `}{Math.round(item.ratePerUnit).toLocaleString()}
-                        </span>
-                    
+                      {/* Detail Column: strictly from left: rate, product name, unit type, qty */}
+                      <div
+                        dir="ltr"
+                        className="flex-1 h-full flex items-center justify-start px-2 text-left overflow-hidden select-none"
+                      >
+                        {/* 1. Rate (from left) - rate number only, NO (ریٹ) */}
+                        <div className="w-16 sm:w-20 text-left flex-shrink-0">
+                          <span className="font-numbers font-bold text-slate-900 text-xs sm:text-sm tracking-tight">
+                            {Math.round(item.ratePerUnit).toLocaleString()}
+                          </span>
+                        </div>
+
+                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
+
+                        {/* 2. Product Name */}
+                        <div className="flex-1 min-w-0 text-center px-1">
+                          <span dir="rtl" className="inline-block font-urdu-nastaliq font-bold text-slate-950 text-xs sm:text-sm truncate">
+                            {item.productUrdu}
+                          </span>
+                        </div>
+
+                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
+
+                        {/* 3. Unit Type */}
+                        <div className="w-12 sm:w-16 text-center flex-shrink-0">
+                          <span dir="rtl" className="inline-block font-urdu-sans font-bold text-slate-700 text-[11px] sm:text-xs">
+                            {item.unitLabel}
+                          </span>
+                        </div>
+
+                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
+
+                        {/* 4. Qty */}
+                        <div className="w-12 sm:w-14 text-center flex-shrink-0">
+                          <span className="font-numbers font-black text-slate-950 text-xs sm:text-sm">
+                            {item.quantity}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}
