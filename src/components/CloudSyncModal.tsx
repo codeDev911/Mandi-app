@@ -1,27 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { AppSettings, VendorLot, CustomerBuyer, SavedVendor } from '../types';
+import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment } from '../types';
 import {
   CloudSyncMetadata,
   getStoredCloudConfig,
   saveStoredCloudConfig,
   uploadDataToCloud,
   downloadDataFromCloud,
-  testPostgresConnection,
+  testS3Connection,
+  parseS3CredentialsBlock,
   formatSyncDateTime,
   CloudSyncResult,
 } from '../utils/cloudSyncEngine';
+import { getSystemLogs } from '../utils/systemLogs';
 import { sound } from '../utils/sound';
 import {
-  Cloud,
   CloudUpload,
   CloudDownload,
   CheckCircle2,
   AlertCircle,
   Smartphone,
-  Laptop,
   Wifi,
   WifiOff,
-  Lock,
   Key,
   X,
   RefreshCw,
@@ -29,14 +28,20 @@ import {
   Check,
   ShieldCheck,
   Database,
-  Server,
   ArrowUpRight,
   ArrowDownLeft,
-  Clock,
-  ExternalLink,
   Save,
   CheckCircle,
+  Eye,
+  EyeOff,
   Layers,
+  Sparkles,
+  Server,
+  FolderArchive,
+  Receipt,
+  Users,
+  Boxes,
+  Lock,
 } from 'lucide-react';
 
 interface CloudSyncModalProps {
@@ -45,11 +50,16 @@ interface CloudSyncModalProps {
   lots: VendorLot[];
   customers: CustomerBuyer[];
   vendors: SavedVendor[];
+  expenses?: ShopExpense[];
+  drawerAdjustments?: DrawerAdjustment[];
   onApplyCloudData: (data: {
     settings?: AppSettings;
     lots: VendorLot[];
     customers: CustomerBuyer[];
     vendors: SavedVendor[];
+    expenses?: ShopExpense[];
+    drawerAdjustments?: DrawerAdjustment[];
+    systemLogs?: any[];
   }) => void;
   onClose: () => void;
 }
@@ -60,32 +70,44 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   lots,
   customers,
   vendors,
+  expenses = [],
+  drawerAdjustments = [],
   onApplyCloudData,
   onClose,
 }) => {
   const isUrdu = settings.language === 'ur';
 
-  const [activeTab, setActiveTab] = useState<'upload' | 'download' | 'postgres'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'download' | 's3_config'>('upload');
   const [config, setConfig] = useState<CloudSyncMetadata>(getStoredCloudConfig());
   const [downloadShopId, setDownloadShopId] = useState(config.shopCloudId);
   const [downloadPin, setDownloadPin] = useState(config.shopPin);
-  const [postgresUrlInput, setPostgresUrlInput] = useState(config.postgresUrl || '');
+
+  // S3 Specific Form Fields
+  const [endpointUrl, setEndpointUrl] = useState(config.endpointUrl || '');
+  const [accessKeyId, setAccessKeyId] = useState(config.accessKeyId || '');
+  const [secretAccessKey, setSecretAccessKey] = useState(config.secretAccessKey || '');
+  const [region, setRegion] = useState(config.region || 'us-east-2');
+  const [bucketName, setBucketName] = useState(config.bucketName || 'mandi-data');
+  const [credentialsBlock, setCredentialsBlock] = useState('');
+  const [showSecretKey, setShowSecretKey] = useState(false);
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<CloudSyncResult | null>(null);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [copiedId, setCopiedId] = useState(false);
 
-  // PostgreSQL Connection Test State
-  const [isTestingDb, setIsTestingDb] = useState(false);
-  const [dbTestResult, setDbTestResult] = useState<{
+  // S3 Connection Test State
+  const [isTestingS3, setIsTestingS3] = useState(false);
+  const [s3TestResult, setS3TestResult] = useState<{
     success: boolean;
     message: string;
-    serverTime?: string;
-    version?: string;
+    endpoint?: string;
+    bucketName?: string;
+    availableBuckets?: string[];
+    storageEngine?: string;
   } | null>(null);
 
-  // Keyboard Escape listener and Body Lock
+  // Keyboard Escape listener
   useEffect(() => {
     if (!isOpen) return;
 
@@ -112,20 +134,35 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     };
   }, []);
 
-  // Update local config state whenever modal opens
+  // Update local state whenever modal opens
   useEffect(() => {
     if (isOpen) {
       const stored = getStoredCloudConfig();
       setConfig(stored);
       setDownloadShopId(stored.shopCloudId);
       setDownloadPin(stored.shopPin);
-      setPostgresUrlInput(stored.postgresUrl || '');
+      setEndpointUrl(stored.endpointUrl || '');
+      setAccessKeyId(stored.accessKeyId || '');
+      setSecretAccessKey(stored.secretAccessKey || '');
+      setRegion(stored.region || 'us-east-2');
+      setBucketName(stored.bucketName || 'mandi-data');
       setSyncResult(null);
-      setDbTestResult(null);
+      setS3TestResult(null);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const currentS3Config: CloudSyncMetadata = {
+    ...config,
+    endpointUrl: endpointUrl.trim(),
+    accessKeyId: accessKeyId.trim(),
+    secretAccessKey: secretAccessKey.trim(),
+    region: region.trim() || 'us-east-2',
+    bucketName: bucketName.trim() || 'mandi-data',
+  };
+
+  const hasConfiguredS3 = Boolean(endpointUrl.trim() && accessKeyId.trim() && secretAccessKey.trim());
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,18 +170,17 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     setSyncResult(null);
     sound.playPop();
 
-    const result = await uploadDataToCloud(
-      {
-        ...config,
-        postgresUrl: postgresUrlInput.trim(),
-      },
-      {
-        settings,
-        lots,
-        customers,
-        vendors,
-      }
-    );
+    const systemLogs = getSystemLogs();
+
+    const result = await uploadDataToCloud(currentS3Config, {
+      settings,
+      lots,
+      customers,
+      vendors,
+      expenses,
+      drawerAdjustments,
+      systemLogs,
+    });
 
     setIsSyncing(false);
     setSyncResult(result);
@@ -161,8 +197,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     if (
       !confirm(
         isUrdu
-          ? 'کیا آپ کلاؤڈ / PostgreSQL سے ڈیٹا ڈاؤن لوڈ کر کے اس ڈیوائس پر لانا چاہتے ہیں؟'
-          : 'Download & sync PostgreSQL cloud data to this device?'
+          ? 'کیا آپ S3 کلاؤڈ اسٹوریج سے تمام ڈیٹا ڈاؤن لوڈ کر کے اس ڈیوائس کے ریکارڈ سے ملا کر بحال کرنا چاہتے ہیں؟'
+          : 'Download & sync all S3 cloud storage data to this device?'
       )
     ) {
       return;
@@ -172,11 +208,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     setSyncResult(null);
     sound.playPop();
 
-    const result = await downloadDataFromCloud(
-      downloadShopId,
-      downloadPin,
-      postgresUrlInput.trim()
-    );
+    const result = await downloadDataFromCloud(downloadShopId, downloadPin, currentS3Config);
 
     setIsSyncing(false);
     setSyncResult(result);
@@ -189,36 +221,49 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     }
   };
 
-  const handleTestPostgres = async () => {
-    setIsTestingDb(true);
-    setDbTestResult(null);
+  const handleParseCredentialsBlock = () => {
+    if (!credentialsBlock.trim()) {
+      alert(isUrdu ? 'براہ کرم کریڈنشلز بلاک پیسٹ کریں' : 'Please paste the S3 credentials block first');
+      return;
+    }
+
+    const parsed = parseS3CredentialsBlock(credentialsBlock);
+    if (parsed.endpointUrl) setEndpointUrl(parsed.endpointUrl);
+    if (parsed.accessKeyId) setAccessKeyId(parsed.accessKeyId);
+    if (parsed.secretAccessKey) setSecretAccessKey(parsed.secretAccessKey);
+    if (parsed.region) setRegion(parsed.region);
+    if (parsed.bucketName) setBucketName(parsed.bucketName);
+
+    sound.playCashChime();
+    alert(
+      isUrdu
+        ? 'S3 کریڈنشلز کامیابی سے نکال لیے گئے اور فارم میں درج ہو گئے ہیں!'
+        : 'S3 Credentials extracted and filled into the form successfully!'
+    );
+  };
+
+  const handleTestS3 = async () => {
+    setIsTestingS3(true);
+    setS3TestResult(null);
     sound.playPop();
 
-    const res = await testPostgresConnection(postgresUrlInput.trim());
-    setIsTestingDb(false);
-    setDbTestResult(res);
+    const res = await testS3Connection(currentS3Config);
+    setIsTestingS3(false);
+    setS3TestResult(res);
 
     if (res.success) {
       sound.playCashChime();
-      const updated = {
-        ...config,
-        postgresUrl: postgresUrlInput.trim(),
-      };
-      saveStoredCloudConfig(updated);
-      setConfig(updated);
+      saveStoredCloudConfig(currentS3Config);
+      setConfig(currentS3Config);
     }
   };
 
-  const handleSavePostgresUrl = (e: React.FormEvent) => {
+  const handleSaveS3Config = (e: React.FormEvent) => {
     e.preventDefault();
     sound.playTick();
-    const updated = {
-      ...config,
-      postgresUrl: postgresUrlInput.trim(),
-    };
-    saveStoredCloudConfig(updated);
-    setConfig(updated);
-    alert(isUrdu ? 'PostgreSQL کنکشن محفوظ ہو گیا!' : 'PostgreSQL configuration saved!');
+    saveStoredCloudConfig(currentS3Config);
+    setConfig(currentS3Config);
+    alert(isUrdu ? 'S3 آبجیکٹ اسٹوریج کی تفصیلات محفوظ ہو گئیں!' : 'S3 Object Storage settings saved!');
   };
 
   const handleCopyShopId = () => {
@@ -248,7 +293,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-base sm:text-lg font-urdu-nastaliq text-white">
-                  {isUrdu ? 'کلاؤڈ ڈیٹا بیس و ملٹی ڈیوائس ہم آہنگی' : 'PostgreSQL Cloud Database & Multi-Device Sync'}
+                  {isUrdu ? 'S3 کلاؤڈ آبجیکٹ اسٹوریج و ہم آہنگی' : 'S3 Object Storage Cloud Sync'}
                 </h3>
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 font-urdu-sans ${
@@ -260,11 +305,16 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   {isOnline ? <Wifi className="w-3 h-3 text-emerald-400" /> : <WifiOff className="w-3 h-3 text-red-400" />}
                   <span>{isOnline ? 'آن لائن' : 'آف لائن'}</span>
                 </span>
+                {hasConfiguredS3 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
+                    Neon S3
+                  </span>
+                )}
               </div>
               <p className="text-xs text-emerald-200/80 font-urdu-sans mt-0.5">
                 {isUrdu
-                  ? 'پوسٹگریس کیول (PostgreSQL) کلاؤڈ ڈیٹا بیس سنک برائے موبائل و لیپ ٹاپ'
-                  : 'Enterprise PostgreSQL sync for mobile devices and office computers'}
+                  ? 'نیون (Neon) اور AWS S3 ہم آہنگ آبجیکٹ اسٹوریج برائے موبائل، ٹیبلٹ و کمپیوٹر'
+                  : 'S3-compatible object storage (Neon / AWS) for seamless cross-device data backup'}
               </p>
             </div>
           </div>
@@ -314,7 +364,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               setActiveTab('upload');
               setSyncResult(null);
             }}
-            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold font-urdu-sans transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold font-urdu-sans transition flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'upload'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-50'
@@ -330,7 +380,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               setActiveTab('download');
               setSyncResult(null);
             }}
-            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold font-urdu-sans transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold font-urdu-sans transition flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'download'
                 ? 'bg-blue-700 text-white shadow-xs'
                 : 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-50'
@@ -343,17 +393,17 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           <button
             type="button"
             onClick={() => {
-              setActiveTab('postgres');
+              setActiveTab('s3_config');
               setSyncResult(null);
             }}
-            className={`flex-1 min-w-[140px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold font-urdu-sans transition flex items-center justify-center gap-1.5 ${
-              activeTab === 'postgres'
-                ? 'bg-purple-800 text-white shadow-xs'
+            className={`flex-1 min-w-[140px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold font-urdu-sans transition flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeTab === 's3_config'
+                ? 'bg-amber-800 text-white shadow-xs'
                 : 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-50'
             }`}
           >
-            <Database className="w-4 h-4" />
-            <span>{isUrdu ? '3. PostgreSQL سیٹنگ' : '3. PostgreSQL Setup'}</span>
+            <Key className="w-4 h-4" />
+            <span>{isUrdu ? '3. S3 سیٹنگز' : '3. S3 Storage Setup'}</span>
           </button>
         </div>
 
@@ -380,12 +430,18 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                     <span>📦 <strong>{syncResult.lotsCount}</strong> لاٹس</span>
                     <span>👥 <strong>{syncResult.customersCount}</strong> گاہک کھاتے</span>
                     <span>🚜 <strong>{syncResult.vendorsCount}</strong> زمیندار</span>
-                    {syncResult.dbEngine && (
+                    <span>💸 <strong>{syncResult.expensesCount}</strong> اخراجات</span>
+                    {syncResult.storageEngine && (
                       <span className="px-2 py-0.5 bg-emerald-200 text-emerald-900 rounded font-mono text-[10px]">
-                        {syncResult.dbEngine}
+                        {syncResult.storageEngine}
                       </span>
                     )}
                   </div>
+                )}
+                {syncResult.objectKey && (
+                  <p className="text-[11px] font-mono text-stone-600 mt-1 truncate">
+                    Path: {syncResult.objectKey}
+                  </p>
                 )}
               </div>
             </div>
@@ -398,10 +454,16 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs sm:text-sm font-bold text-stone-900 font-urdu-sans flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-emerald-700" />
-                    <span>{isUrdu ? 'دکان کی شناختی معلومات (Shop Cloud Credentials)' : 'Shop Cloud Credentials'}</span>
+                    <span>{isUrdu ? 'دکان کی کلاؤڈ شناختی معلومات (Shop Cloud Credentials)' : 'Shop Cloud Credentials'}</span>
                   </h4>
-                  <span className="text-[11px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-lg font-urdu-sans">
-                    PostgreSQL Active
+                  <span
+                    className={`text-[11px] font-bold px-2 py-0.5 rounded-lg font-urdu-sans ${
+                      hasConfiguredS3
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {hasConfiguredS3 ? 'S3 Storage Active' : 'Default / Local Storage'}
                   </span>
                 </div>
 
@@ -422,7 +484,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                       <button
                         type="button"
                         onClick={handleCopyShopId}
-                        className="px-3 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded-xl text-xs flex items-center justify-center transition"
+                        className="px-3 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded-xl text-xs flex items-center justify-center transition cursor-pointer"
                         title="کوڈ کاپی کریں"
                       >
                         {copiedId ? <Check className="w-4 h-4 text-emerald-700" /> : <Copy className="w-4 h-4" />}
@@ -453,7 +515,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
               </div>
 
               {/* Data Summary Grid */}
-              <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                 <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200">
                   <span className="text-[11px] text-emerald-800 font-urdu-sans block">
                     {isUrdu ? 'موجودہ لاٹس' : 'Active Lots'}
@@ -472,7 +534,30 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   </span>
                   <strong className="text-base font-bold text-emerald-950 font-numbers">{vendors.length}</strong>
                 </div>
+                <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200">
+                  <span className="text-[11px] text-emerald-800 font-urdu-sans block">
+                    {isUrdu ? 'دکان اخراجات' : 'Shop Expenses'}
+                  </span>
+                  <strong className="text-base font-bold text-emerald-950 font-numbers">{expenses.length}</strong>
+                </div>
               </div>
+
+              {!hasConfiguredS3 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 flex items-center justify-between gap-2 text-xs font-urdu-sans">
+                  <span className="text-amber-900">
+                    {isUrdu
+                      ? 'نوٹ: Neon S3 کی ترتیبات Tab 3 میں درج کر کے کلاؤڈ ڈیٹا محفوظ کریں۔'
+                      : 'Tip: Add your Neon S3 credentials in Tab 3 to sync to object storage.'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('s3_config')}
+                    className="text-amber-800 font-bold underline whitespace-nowrap cursor-pointer"
+                  >
+                    {isUrdu ? 'S3 سیٹنگز کھولیں' : 'Open Setup'}
+                  </button>
+                </div>
+              )}
 
               {/* Upload Action Button */}
               <button
@@ -483,12 +568,12 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 {isSyncing ? (
                   <>
                     <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span>{isUrdu ? 'PostgreSQL پر محفوظ ہو رہا ہے...' : 'Syncing to PostgreSQL...'}</span>
+                    <span>{isUrdu ? 'S3 اسٹوریج پر محفوظ ہو رہا ہے...' : 'Syncing to S3 Object Storage...'}</span>
                   </>
                 ) : (
                   <>
                     <CloudUpload className="w-5 h-5" />
-                    <span>{isUrdu ? 'PostgreSQL کلاؤڈ پر ڈیٹا اپ لوڈ کریں' : 'Upload Data to PostgreSQL'}</span>
+                    <span>{isUrdu ? 'S3 کلاؤڈ پر تمام ڈیٹا اپ لوڈ کریں' : 'Upload All Data to S3 Storage'}</span>
                   </>
                 )}
               </button>
@@ -505,7 +590,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 </p>
                 <p>
                   {isUrdu
-                    ? 'ماسٹر موبائل پر اپ لوڈ کرنے کے بعد، اس ڈیوائس پر وہی Shop Cloud ID اور PIN درج کر کے ڈاؤن لوڈ بٹن دبائیں۔'
+                    ? 'ماسٹر موبائل یا کمپیوٹر پر اپ لوڈ کرنے کے بعد، اس ڈیوائس پر وہی Shop Cloud ID اور PIN درج کر کے ڈاؤن لوڈ بٹن دبائیں۔'
                     : 'Enter the Shop Cloud ID and PIN from your primary device to download all records.'}
                 </p>
               </div>
@@ -549,7 +634,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 {isSyncing ? (
                   <>
                     <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span>{isUrdu ? 'PostgreSQL سے ڈیٹا ڈاؤن لوڈ ہو رہا ہے...' : 'Downloading from PostgreSQL...'}</span>
+                    <span>{isUrdu ? 'S3 سے ڈیٹا ڈاؤن لوڈ ہو رہا ہے...' : 'Downloading from S3 Storage...'}</span>
                   </>
                 ) : (
                   <>
@@ -561,83 +646,170 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
             </form>
           )}
 
-          {/* TAB 3: POSTGRESQL CONFIGURATION & URL FORMAT */}
-          {activeTab === 'postgres' && (
+          {/* TAB 3: S3 OBJECT STORAGE CONFIGURATION & CREDENTIALS */}
+          {activeTab === 's3_config' && (
             <div className="space-y-4">
-              <div className="bg-purple-50 p-4 rounded-2xl border border-purple-200 space-y-2">
-                <div className="flex items-center gap-2 text-purple-950">
-                  <Server className="w-5 h-5 text-purple-700" />
+              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 space-y-2">
+                <div className="flex items-center gap-2 text-amber-950">
+                  <Server className="w-5 h-5 text-amber-700" />
                   <h4 className="font-bold text-sm font-urdu-sans">
-                    {isUrdu ? 'پوسٹگریس کیول (PostgreSQL) کنکشن کی تفصیلات' : 'PostgreSQL Database Connection'}
+                    {isUrdu ? 'نیون (Neon) اور S3 آبجیکٹ اسٹوریج کنکشن' : 'Neon / S3 Object Storage Credentials'}
                   </h4>
                 </div>
-                <p className="text-xs text-purple-900 font-urdu-sans leading-relaxed">
+                <p className="text-xs text-amber-900 font-urdu-sans leading-relaxed">
                   {isUrdu
-                    ? 'ہم مکمل طور پر PostgreSQL کنکشن یو آر ایل سپورٹ کرتے ہیں (جیسے Supabase, Neon.tech, AWS RDS, Cloud SQL یا لوکل PostgreSQL)۔ نیچے اپنا کنکشن اسٹرنگ درج کریں اور ٹیسٹ کریں۔'
-                    : 'We natively support PostgreSQL. You can use hosted PostgreSQL providers like Supabase, Neon.tech, AWS RDS, Cloud SQL, Railway, or local PostgreSQL.'}
+                    ? 'نیون آبجیکٹ اسٹوریج (Neon Object Storage) یا کسی بھی S3 ہم آہنگ سروس کے کریڈنشلز نیچے درج کریں۔ آپ مکمل بلاک بھی براہ راست پیسٹ کر سکتے ہیں۔'
+                    : 'Enter your S3-compatible credentials (such as Neon Object Storage, MinIO, or AWS S3). You can paste the credentials block directly.'}
                 </p>
               </div>
 
-              {/* Recommended Connection URL Format */}
+              {/* Quick Paste Block Box */}
               <div className="bg-stone-900 text-stone-200 p-4 rounded-2xl border border-stone-800 space-y-2.5">
-                <span className="text-xs font-bold text-amber-400 font-urdu-sans block">
-                  {isUrdu ? 'کنکشن یو آر ایل کا فارمیٹ (PostgreSQL URL Format):' : 'Supported PostgreSQL Connection URL Format:'}
-                </span>
-
-                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 font-mono text-xs text-emerald-400 overflow-x-auto break-all select-all">
-                  postgresql://username:password@host:5432/database?sslmode=require
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-amber-400 font-urdu-sans flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isUrdu ? 'نیون S3 کریڈنشلز بلاک براہ راست پیسٹ کریں:' : 'Quick Paste Credentials Block:'}</span>
+                  </span>
+                  <span className="text-[10px] text-stone-400 font-mono">Neon.tech S3 Format</span>
                 </div>
 
-                <div className="text-[11px] text-stone-400 space-y-1 font-urdu-sans">
-                  <p>• <strong>Supabase:</strong> postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres</p>
-                  <p>• <strong>Neon.tech:</strong> postgresql://[USER]:[PASSWORD]@[ENDPOINT].us-east-2.aws.neon.tech/neondb?sslmode=require</p>
-                  <p>• <strong>Local / Docker:</strong> postgresql://postgres:password@localhost:5432/mandi_db</p>
+                <textarea
+                  rows={4}
+                  dir="ltr"
+                  value={credentialsBlock}
+                  onChange={(e) => setCredentialsBlock(e.target.value)}
+                  placeholder={`AWS_ENDPOINT_URL_S3="https://...storage...aws.neon.tech"\nAWS_ACCESS_KEY_ID="nak_live_..."\nAWS_SECRET_ACCESS_KEY="nsk_live_..."\nAWS_REGION="us-east-2"`}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl font-mono text-[11px] text-emerald-400 placeholder:text-stone-600 focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                />
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleParseCredentialsBlock}
+                    className="py-1.5 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isUrdu ? 'فارم میں خودکار بھریں (Auto-Fill Form)' : 'Extract & Fill Form'}</span>
+                  </button>
                 </div>
               </div>
 
-              {/* PostgreSQL Connection URL Input Form */}
-              <form onSubmit={handleSavePostgresUrl} className="bg-stone-50 p-4 rounded-2xl border border-stone-200 space-y-3">
+              {/* S3 Credentials Form */}
+              <form onSubmit={handleSaveS3Config} className="bg-stone-50 p-4 rounded-2xl border border-stone-200 space-y-3">
+                {/* 1. Endpoint URL */}
                 <div>
-                  <label className="block text-xs font-bold text-stone-800 mb-1 font-urdu-sans">
-                    {isUrdu ? 'آپ کا PostgreSQL کنکشن یو آر ایل (PostgreSQL Connection URL):' : 'Your PostgreSQL Connection URL:'}
+                  <label className="block text-xs font-bold text-stone-800 mb-1 font-urdu-sans flex items-center justify-between">
+                    <span>{isUrdu ? 'اینڈ پوائنٹ URL (AWS_ENDPOINT_URL_S3):' : 'S3 Endpoint URL (AWS_ENDPOINT_URL_S3):'}</span>
+                    <span className="text-[10px] font-mono text-stone-400">Required</span>
                   </label>
-                  <textarea
-                    rows={2}
-                    value={postgresUrlInput}
-                    onChange={(e) => setPostgresUrlInput(e.target.value)}
-                    placeholder="postgresql://username:password@host:5432/dbname?sslmode=require"
-                    className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-mono text-stone-900 focus:ring-2 focus:ring-purple-600 focus:outline-none"
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={endpointUrl}
+                    onChange={(e) => setEndpointUrl(e.target.value)}
+                    placeholder="https://br-solitary-dream-aysdl8uh.storage.c-5.us-east-2.aws.neon.tech"
+                    className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-mono text-stone-900 focus:ring-2 focus:ring-amber-600 focus:outline-none"
+                    required
                   />
-                  <span className="text-[11px] text-stone-500 font-urdu-sans block mt-1">
-                    {isUrdu
-                      ? 'اگر آپ نے سرور کی .env فائل میں DATABASE_URL سیٹ کیا ہے تو اسے خالی چھوڑا جا سکتا ہے۔'
-                      : 'Leave blank to use the backend server DATABASE_URL environment variable.'}
-                  </span>
                 </div>
 
-                <div className="flex gap-2">
+                {/* 2. Access Key ID */}
+                <div>
+                  <label className="block text-xs font-bold text-stone-800 mb-1 font-urdu-sans flex items-center justify-between">
+                    <span>{isUrdu ? 'ایکسس کی آئی ڈی (AWS_ACCESS_KEY_ID):' : 'Access Key ID (AWS_ACCESS_KEY_ID):'}</span>
+                    <span className="text-[10px] font-mono text-stone-400">nak_live_...</span>
+                  </label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={accessKeyId}
+                    onChange={(e) => setAccessKeyId(e.target.value)}
+                    placeholder="nak_live_7e98911cde9a4bba8dbd3ee59c16c23c"
+                    className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-mono text-stone-900 focus:ring-2 focus:ring-amber-600 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                {/* 3. Secret Access Key */}
+                <div>
+                  <label className="block text-xs font-bold text-stone-800 mb-1 font-urdu-sans flex items-center justify-between">
+                    <span>{isUrdu ? 'سیکریٹ ایکسس کی (AWS_SECRET_ACCESS_KEY):' : 'Secret Access Key (AWS_SECRET_ACCESS_KEY):'}</span>
+                    <span className="text-[10px] font-mono text-stone-400">nsk_live_...</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showSecretKey ? 'text' : 'password'}
+                      dir="ltr"
+                      value={secretAccessKey}
+                      onChange={(e) => setSecretAccessKey(e.target.value)}
+                      placeholder="nsk_live_8a85583b865c703a70e1125df78145c73b704f29ae21d2dd4349f244406c143b"
+                      className="w-full px-3 py-2 pr-10 bg-white border border-stone-300 rounded-xl text-xs font-mono text-stone-900 focus:ring-2 focus:ring-amber-600 focus:outline-none"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSecretKey(!showSecretKey)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 p-1 cursor-pointer"
+                    >
+                      {showSecretKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. Region and Bucket */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-800 mb-1 font-urdu-sans">
+                      {isUrdu ? 'ریجن (AWS_REGION):' : 'AWS Region:'}
+                    </label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={region}
+                      onChange={(e) => setRegion(e.target.value)}
+                      placeholder="us-east-2"
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-mono text-stone-900 focus:ring-2 focus:ring-amber-600 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-stone-800 mb-1 font-urdu-sans">
+                      {isUrdu ? 'بکٹ کا نام (Bucket Name):' : 'Bucket Name:'}
+                    </label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={bucketName}
+                      onChange={(e) => setBucketName(e.target.value)}
+                      placeholder="mandi-data"
+                      className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-mono text-stone-900 focus:ring-2 focus:ring-amber-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={handleTestPostgres}
-                    disabled={isTestingDb}
-                    className="flex-1 py-2.5 px-3 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white rounded-xl font-bold text-xs sm:text-sm font-urdu-sans transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                    onClick={handleTestS3}
+                    disabled={isTestingS3 || !endpointUrl || !accessKeyId || !secretAccessKey}
+                    className="flex-1 py-2.5 px-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs sm:text-sm font-urdu-sans transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
                   >
-                    {isTestingDb ? (
+                    {isTestingS3 ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>{isUrdu ? 'کنکشن ٹیسٹ ہو رہا ہے...' : 'Testing Connection...'}</span>
+                        <span>{isUrdu ? 'S3 کنکشن ٹیسٹ ہو رہا ہے...' : 'Testing S3 Connection...'}</span>
                       </>
                     ) : (
                       <>
                         <Database className="w-4 h-4" />
-                        <span>{isUrdu ? 'کنکشن ٹیسٹ کریں (Test DB)' : 'Test Connection'}</span>
+                        <span>{isUrdu ? 'S3 کنکشن ٹیسٹ کریں (Test Connection)' : 'Test S3 Connection'}</span>
                       </>
                     )}
                   </button>
 
                   <button
                     type="submit"
-                    className="py-2.5 px-4 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-bold text-xs sm:text-sm font-urdu-sans transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                    className="py-2.5 px-4 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-bold text-xs sm:text-sm font-urdu-sans transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
                   >
                     <Save className="w-4 h-4" />
                     <span>{isUrdu ? 'محفوظ کریں' : 'Save'}</span>
@@ -645,29 +817,31 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 </div>
               </form>
 
-              {/* DB Test Result Banner */}
-              {dbTestResult && (
+              {/* S3 Test Result Banner */}
+              {s3TestResult && (
                 <div
-                  className={`p-3.5 rounded-2xl border text-xs font-urdu-sans ${
-                    dbTestResult.success
+                  className={`p-3.5 rounded-2xl border text-xs font-urdu-sans animate-in fade-in duration-150 ${
+                    s3TestResult.success
                       ? 'bg-emerald-50 text-emerald-950 border-emerald-300'
                       : 'bg-red-50 text-red-950 border-red-300'
                   }`}
                 >
                   <div className="flex items-start gap-2">
-                    {dbTestResult.success ? (
+                    {s3TestResult.success ? (
                       <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
                     ) : (
                       <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                     )}
                     <div className="space-y-1">
-                      <p className="font-bold">{dbTestResult.message}</p>
-                      {dbTestResult.version && (
-                        <p className="text-[11px] font-mono text-stone-600 truncate">{dbTestResult.version}</p>
+                      <p className="font-bold">{s3TestResult.message}</p>
+                      {s3TestResult.bucketName && (
+                        <p className="text-[11px] font-mono text-stone-600 truncate">
+                          Bucket: {s3TestResult.bucketName} ({s3TestResult.storageEngine || 'Neon S3'})
+                        </p>
                       )}
-                      {dbTestResult.serverTime && (
-                        <p className="text-[11px] font-mono text-emerald-800">
-                          Server Time: {new Date(dbTestResult.serverTime).toLocaleString()}
+                      {s3TestResult.endpoint && (
+                        <p className="text-[11px] font-mono text-emerald-800 truncate">
+                          Endpoint: {s3TestResult.endpoint}
                         </p>
                       )}
                     </div>
@@ -678,19 +852,20 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           )}
         </div>
 
-        {/* Modal Footer with Close Button */}
-        <div className="p-3.5 bg-stone-100 border-t border-stone-200 flex items-center justify-between gap-3 flex-shrink-0">
-          <div className="flex items-center gap-2 text-xs text-stone-600 font-urdu-sans">
-            <ShieldCheck className="w-4 h-4 text-emerald-700" />
-            <span className="hidden sm:inline">{isUrdu ? 'آف لائن IndexedDB + کلاؤڈ PostgreSQL ہم آہنگی فعال ہے' : 'Offline-first IndexedDB + PostgreSQL Cloud Sync'}</span>
+        {/* Modal Footer */}
+        <div className="bg-stone-50 px-4 py-3 border-t border-stone-200 flex items-center justify-between text-xs text-stone-500 font-urdu-sans flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span className="hidden sm:inline">
+              {isUrdu ? 'آف لائن IndexedDB + کلاؤڈ S3 آبجیکٹ اسٹوریج فعال ہے' : 'Offline-first IndexedDB + S3 Cloud Storage'}
+            </span>
           </div>
-
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-900 text-white font-bold text-xs sm:text-sm font-urdu-sans transition shadow-xs cursor-pointer active:scale-95"
+            className="px-4 py-2 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-xl font-bold transition cursor-pointer"
           >
-            {isUrdu ? 'بند کریں (Close)' : 'Close'}
+            {isUrdu ? 'بند کریں' : 'Close'}
           </button>
         </div>
       </div>

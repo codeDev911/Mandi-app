@@ -169,6 +169,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   // Sub-pagination states for expanded Customer Details and Vendor Details
   const [customerSalesSubPages, setCustomerSalesSubPages] = useState<Record<string, number>>({});
   const [customerPaymentsSubPages, setCustomerPaymentsSubPages] = useState<Record<string, number>>({});
+  const [customerCreditsSubPages, setCustomerCreditsSubPages] = useState<Record<string, number>>({});
   const [vendorLotsSubPages, setVendorLotsSubPages] = useState<Record<string, number>>({});
   const [vendorPaymentsSubPages, setVendorPaymentsSubPages] = useState<Record<string, number>>({});
 
@@ -215,6 +216,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         phone?: string;
         shopName?: string;
         address?: string;
+        openingBalance: number;
         totalPurchases: number;
         grossPurchasesAmount: number;
         cashPaidDirect: number;
@@ -236,6 +238,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         phone: c.phone,
         shopName: c.shopName,
         address: c.address,
+        openingBalance: c.openingBalance || 0,
         totalPurchases: 0,
         grossPurchasesAmount: (c.openingBalance || 0) + manualCreditsTotal,
         cashPaidDirect: 0,
@@ -255,6 +258,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
           id: `cust-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
           name: sale.buyerName,
           phone: sale.buyerPhone,
+          openingBalance: 0,
           totalPurchases: 0,
           grossPurchasesAmount: 0,
           cashPaidDirect: 0,
@@ -649,14 +653,37 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
 
   const handleSaveCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!custName.trim()) {
+    const trimmedName = custName.trim();
+    if (!trimmedName) {
       setCustError(isUrdu ? 'براہ کرم خریدار کا نام درج کریں' : 'Please enter customer name');
+      return;
+    }
+
+    const nameLower = trimmedName.toLowerCase();
+    const nameExists =
+      customers.some(
+        (c) =>
+          c.name.trim().toLowerCase() === nameLower &&
+          (!editingCustomer || c.id !== editingCustomer.id)
+      ) ||
+      customerList.some(
+        (c) =>
+          c.name.trim().toLowerCase() === nameLower &&
+          (!editingCustomer || c.id !== editingCustomer.id)
+      );
+
+    if (nameExists) {
+      setCustError(
+        isUrdu
+          ? 'اس نام سے گاہک پہلے سے موجود ہے (customer with name is already exists)'
+          : 'customer with name is already exists'
+      );
       return;
     }
 
     const newCust: CustomerBuyer = {
       id: editingCustomer?.id || `cust-${Date.now()}`,
-      name: custName.trim(),
+      name: trimmedName,
       phone: custPhone.trim() || undefined,
       shopName: custShop.trim() || undefined,
       address: custAddress.trim() || undefined,
@@ -1386,24 +1413,48 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                           currentPayPage * payPageSize
                         );
 
+                        const creditPageSize = 8;
+                        const currentCreditPage = customerCreditsSubPages[cust.name] || 1;
+                        const totalCreditPages = Math.ceil((cust.manualCreditHistory?.length || 0) / creditPageSize) || 1;
+                        const paginatedCustCredits = (cust.manualCreditHistory || []).slice(
+                          (currentCreditPage - 1) * creditPageSize,
+                          currentCreditPage * creditPageSize
+                        );
+
+                        const totalManualCredits = (cust.manualCreditHistory || []).reduce(
+                          (sum, cr) => sum + (Number(cr.amount) || 0),
+                          0
+                        );
+                        const totalOpeningAndManual = (cust.openingBalance || 0) + totalManualCredits;
+
                         return (
                         <div className="bg-slate-50 p-3 sm:p-4 border-t border-slate-200 space-y-4 animate-in fade-in duration-150">
                           {/* Individual Customer Financial Breakdown: Nakad vs Uddar */}
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-white p-2.5 rounded-xl border border-slate-200 text-xs font-urdu-sans">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2.5 rounded-xl border border-slate-200 text-xs font-urdu-sans">
                             <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-center">
-                              <span className="text-slate-500 text-[11px] block">{isUrdu ? 'کل مال خریداری' : 'Total Purchases'}</span>
+                              <span className="text-slate-500 text-[11px] block">{isUrdu ? 'بولی خریداری' : 'Auction Bids'}</span>
                               <span className="font-bold text-slate-800 text-sm font-numbers block">
-                                {formatPKR(cust.grossPurchasesAmount, settings.currencySymbol, settings.language)}
+                                {formatPKR(
+                                  cust.sales.reduce((sum, s) => sum + s.totalAmount, 0),
+                                  settings.currencySymbol,
+                                  settings.language
+                                )}
+                              </span>
+                            </div>
+                            <div className="bg-amber-50/80 p-2 rounded-lg border border-amber-100 text-center">
+                              <span className="text-amber-900 font-bold text-[11px] block">{isUrdu ? 'دستی ادھار و سابقہ' : 'Manual Credit / Prev'}</span>
+                              <span className="font-bold text-amber-800 text-sm font-numbers block">
+                                {formatPKR(totalOpeningAndManual, settings.currencySymbol, settings.language)}
                               </span>
                             </div>
                             <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-100 text-center">
-                              <span className="text-emerald-800 font-bold text-[11px] block">{isUrdu ? 'نقد وصول شدہ (Nakad)' : 'Cash Received (Nakad)'}</span>
+                              <span className="text-emerald-800 font-bold text-[11px] block">{isUrdu ? 'نقد وصول شدہ' : 'Cash Received'}</span>
                               <span className="font-bold text-emerald-700 text-sm font-numbers block">
                                 {formatPKR(cust.cashPaidDirect + cust.khataPaymentsReceived, settings.currencySymbol, settings.language)}
                               </span>
                             </div>
                             <div className={`p-2 rounded-lg border text-center ${isCleared ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
-                              <span className="text-amber-900 font-bold text-[11px] block">{isUrdu ? 'بقایا ادھار کھاتہ (Uddar)' : 'Balance Udhaar (Uddar)'}</span>
+                              <span className="text-amber-900 font-bold text-[11px] block">{isUrdu ? 'خالص بقایا ادھار' : 'Net Balance Due'}</span>
                               <span className={`font-bold text-sm font-numbers block ${isCleared ? 'text-emerald-700' : 'text-amber-800'}`}>
                                 {formatPKR(cust.balance, settings.currencySymbol, settings.language)}
                               </span>
@@ -1505,6 +1556,139 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                             </button>
                                           </td>
                                         )}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Manual Credit & Previous Balance Records */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-xs font-bold text-amber-950 font-urdu-sans flex items-center gap-1.5">
+                                  <ArrowUpRight className="w-3.5 h-3.5 text-amber-700 stroke-[2.5]" />
+                                  <span>{isUrdu ? 'دستی ادھار و کھاتہ بقایا ریکارڈز' : 'Manual Credit & Balance Records'}</span>
+                                  <span className="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 text-[10px] font-numbers font-bold">
+                                    {(cust.manualCreditHistory?.length || 0) + (cust.openingBalance && cust.openingBalance > 0 ? 1 : 0)}
+                                  </span>
+                                </h4>
+                                {totalOpeningAndManual > 0 && (
+                                  <span className="text-[11px] font-bold font-numbers text-amber-800 bg-amber-100/70 px-2 py-0.5 rounded-lg border border-amber-200">
+                                    +{formatPKR(totalOpeningAndManual, settings.currencySymbol, settings.language)}
+                                  </span>
+                                )}
+                              </div>
+
+                              {totalCreditPages > 1 && (
+                                <div className="flex items-center gap-1.5 text-[11px] font-urdu-sans">
+                                  <span className="text-slate-500 font-numbers">
+                                    {isUrdu ? `صفحہ ${currentCreditPage} از ${totalCreditPages}` : `Page ${currentCreditPage} of ${totalCreditPages}`}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={currentCreditPage <= 1}
+                                    onClick={() =>
+                                      setCustomerCreditsSubPages((prev) => ({
+                                        ...prev,
+                                        [cust.name]: Math.max(1, currentCreditPage - 1),
+                                      }))
+                                    }
+                                    className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                                  >
+                                    ‹ {isUrdu ? 'پچھلا' : 'Prev'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={currentCreditPage >= totalCreditPages}
+                                    onClick={() =>
+                                      setCustomerCreditsSubPages((prev) => ({
+                                        ...prev,
+                                        [cust.name]: Math.min(totalCreditPages, currentCreditPage + 1),
+                                      }))
+                                    }
+                                    className="px-2 py-0.5 rounded bg-white border border-slate-300 disabled:opacity-40 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                                  >
+                                    {isUrdu ? 'اگلا' : 'Next'} ›
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {(!cust.manualCreditHistory || cust.manualCreditHistory.length === 0) && (!cust.openingBalance || cust.openingBalance <= 0) ? (
+                              <div className="bg-white p-3 rounded-xl border border-dashed border-amber-200 text-center text-xs text-amber-900/70 font-urdu-sans">
+                                {isUrdu
+                                  ? 'اس گاہک کے کھاتے میں کوئی دستی ادھار یا سابقہ بقایا درج نہیں ہے۔ (اوپر "+ ادھار اضافہ" سے درج کریں)'
+                                  : 'No manual credit records for this customer. Use "+ Credit" button above to add.'}
+                              </div>
+                            ) : (
+                              <div className="overflow-x-auto bg-white rounded-xl border border-amber-200/90 shadow-2xs">
+                                <table className="w-full text-xs text-start font-urdu-sans">
+                                  <thead>
+                                    <tr className="bg-amber-50/80 text-amber-950 border-b border-amber-200 text-[11px] font-bold">
+                                      <th className="py-2 px-2.5 text-start">{t.date}</th>
+                                      <th className="py-2 px-2.5 text-end">{isUrdu ? 'ادھار رقم' : 'Credit Amount'}</th>
+                                      <th className="py-2 px-2.5 text-start">{isUrdu ? 'تفصیل / وجہ' : 'Description / Reason'}</th>
+                                      <th className="py-2 px-2 text-center">{isUrdu ? 'حذف' : 'Action'}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-amber-100/70">
+                                    {/* Opening balance row if present */}
+                                    {cust.openingBalance && cust.openingBalance > 0 && currentCreditPage === 1 && (
+                                      <tr className="bg-amber-50/40">
+                                        <td className="py-2 px-2.5 text-slate-500 font-urdu-sans text-[11px]">
+                                          {isUrdu ? 'کھاتہ آغاز' : 'Account Opening'}
+                                        </td>
+                                        <td className="py-2 px-2.5 text-end font-bold font-numbers text-amber-900">
+                                          +{formatPKR(cust.openingBalance, settings.currencySymbol, settings.language)}
+                                        </td>
+                                        <td className="py-2 px-2.5 text-amber-950">
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-bold font-urdu-sans">
+                                            {isUrdu ? 'سابقہ اوپننگ بیلنس' : 'Opening Balance'}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-2 text-center text-slate-400 text-[11px]">
+                                          -
+                                        </td>
+                                      </tr>
+                                    )}
+
+                                    {/* Itemized manual credit history entries */}
+                                    {paginatedCustCredits.map((cred) => (
+                                      <tr key={cred.id} className="hover:bg-amber-50/30">
+                                        <td className="py-2 px-2.5 text-slate-600 font-numbers">{cred.date || '-'}</td>
+                                        <td className="py-2 px-2.5 text-end font-bold font-numbers text-amber-900">
+                                          +{formatPKR(cred.amount, settings.currencySymbol, settings.language)}
+                                        </td>
+                                        <td className="py-2 px-2.5 text-slate-700">
+                                          {cred.notes || (isUrdu ? 'دستی ادھار رقم' : 'Manual credit balance')}
+                                        </td>
+                                        <td className="py-2 px-2 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              sound.playTick();
+                                              setPendingDeleteAction({
+                                                type: 'customer_credit',
+                                                title: isUrdu ? 'دستی ادھار ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Manual Credit Deletion',
+                                                description: isUrdu
+                                                  ? `دستی ادھار انٹری حذف کریں: ${cust.name} - رقم: ${formatPKR(cred.amount, settings.currencySymbol, settings.language)} (${cred.date || ''})`
+                                                  : `Delete manual credit: ${cust.name} - Amount: ${formatPKR(cred.amount, settings.currencySymbol, settings.language)}`,
+                                                execute: () => {
+                                                  if (onDeleteCustomerCredit) {
+                                                    onDeleteCustomerCredit(cust.name, cred.id);
+                                                  }
+                                                },
+                                              });
+                                            }}
+                                            className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                                            title={isUrdu ? 'ادھار ریکارڈ حذف کریں' : 'Delete credit record'}
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </td>
                                       </tr>
                                     ))}
                                   </tbody>

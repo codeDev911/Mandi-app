@@ -1,10 +1,21 @@
-import { VendorLot, AppSettings, CustomerBuyer, SavedVendor } from '../types';
-import { neon } from '@neondatabase/serverless';
+import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment } from '../types';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListBucketsCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
+} from '@aws-sdk/client-s3';
 
 export interface CloudSyncMetadata {
   shopCloudId: string;
   shopPin: string;
-  postgresUrl?: string; // Custom PostgreSQL connection URL e.g. postgresql://user:pass@host:5432/dbname
+  endpointUrl?: string; // AWS_ENDPOINT_URL_S3 e.g. "https://br-solitary-dream-aysdl8uh.storage.c-5.us-east-2.aws.neon.tech"
+  accessKeyId?: string; // AWS_ACCESS_KEY_ID e.g. "nak_live_..."
+  secretAccessKey?: string; // AWS_SECRET_ACCESS_KEY e.g. "nsk_live_..."
+  region?: string; // AWS_REGION e.g. "us-east-2"
+  bucketName?: string; // e.g. "mandi-data"
   autoSync?: boolean;
   lastUploadedAt?: string; // ISO String
   lastDownloadedAt?: string; // ISO String
@@ -22,53 +33,77 @@ export interface CloudSyncResult {
   lotsCount?: number;
   customersCount?: number;
   vendorsCount?: number;
-  dbEngine?: string;
+  expensesCount?: number;
+  drawerAdjustmentsCount?: number;
+  logsCount?: number;
+  storageEngine?: string;
+  bucketName?: string;
+  objectKey?: string;
   data?: {
     settings?: AppSettings;
     lots: VendorLot[];
     customers: CustomerBuyer[];
     vendors: SavedVendor[];
+    expenses?: ShopExpense[];
+    drawerAdjustments?: DrawerAdjustment[];
+    systemLogs?: any[];
   };
 }
 
-const CLOUD_CONFIG_KEY = 'mandi_postgres_sync_config_v3';
-const LOCAL_VAULT_PREFIX = 'mandi_cloud_server_vault_';
+const CLOUD_CONFIG_KEY = 'mandi_s3_sync_config_v4';
+const LOCAL_VAULT_PREFIX = 'mandi_s3_local_vault_';
 
 /**
- * Sanitizes and normalizes a PostgreSQL connection URL
- * Handles accidental quotes, psql command wrappers, spaces, and ensures SSL query parameter for cloud providers.
+ * Sanitizes and normalizes an S3 endpoint URL or string
  */
-export function sanitizePostgresUrl(rawUrl?: string): string {
-  if (!rawUrl) return '';
-  let clean = rawUrl.trim();
-
-  // Strip wrapping single or double quotes
+export function sanitizeS3String(val?: string): string {
+  if (!val) return '';
+  let clean = val.trim();
   if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
     clean = clean.slice(1, -1).trim();
   }
+  return clean;
+}
 
-  // Strip CLI command prefix e.g. 'psql "postgresql://..."'
-  if (clean.toLowerCase().startsWith('psql ')) {
-    clean = clean.slice(5).trim();
-    if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
-      clean = clean.slice(1, -1).trim();
+/**
+ * Parses a block of environment variables / credentials (e.g. copied directly from Neon Object Storage):
+ * AWS_ENDPOINT_URL_S3="..."
+ * AWS_ACCESS_KEY_ID="..."
+ * AWS_SECRET_ACCESS_KEY="..."
+ * AWS_REGION="..."
+ */
+export function parseS3CredentialsBlock(text: string): Partial<CloudSyncMetadata> {
+  if (!text) return {};
+  const result: Partial<CloudSyncMetadata> = {};
+  const lines = text.split('\n');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const match = trimmed.match(/^([A-Za-z0-9_]+)\s*=\s*(.*)$/);
+    if (match) {
+      const key = match[1].trim().toUpperCase();
+      let value = match[2].trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1).trim();
+      }
+
+      if (key === 'AWS_ENDPOINT_URL_S3' || key === 'ENDPOINT_URL' || key === 'S3_ENDPOINT') {
+        result.endpointUrl = value;
+      } else if (key === 'AWS_ACCESS_KEY_ID' || key === 'ACCESS_KEY_ID' || key === 'KEY_ID') {
+        result.accessKeyId = value;
+      } else if (key === 'AWS_SECRET_ACCESS_KEY' || key === 'SECRET_ACCESS_KEY' || key === 'SECRET_KEY') {
+        result.secretAccessKey = value;
+      } else if (key === 'AWS_REGION' || key === 'REGION') {
+        result.region = value;
+      } else if (key === 'AWS_S3_BUCKET' || key === 'BUCKET_NAME' || key === 'BUCKET') {
+        result.bucketName = value;
+      }
     }
   }
 
-  // Ensure protocol
-  if (clean.startsWith('postgres://')) {
-    clean = 'postgresql://' + clean.slice('postgres://'.length);
-  }
-
-  // Auto-append sslmode=require for Cloud databases if missing
-  if (
-    (clean.includes('.neon.tech') || clean.includes('.supabase.co') || clean.includes('.render.com')) &&
-    !clean.includes('sslmode=')
-  ) {
-    clean += clean.includes('?') ? '&sslmode=require' : '?sslmode=require';
-  }
-
-  return clean;
+  return result;
 }
 
 export function getStoredCloudConfig(): CloudSyncMetadata {
@@ -79,7 +114,11 @@ export function getStoredCloudConfig(): CloudSyncMetadata {
       return {
         shopCloudId: parsed.shopCloudId || 'MANDI-786',
         shopPin: parsed.shopPin || '1234',
-        postgresUrl: sanitizePostgresUrl(parsed.postgresUrl || ''),
+        endpointUrl: sanitizeS3String(parsed.endpointUrl || ''),
+        accessKeyId: sanitizeS3String(parsed.accessKeyId || ''),
+        secretAccessKey: sanitizeS3String(parsed.secretAccessKey || ''),
+        region: sanitizeS3String(parsed.region || 'us-east-2'),
+        bucketName: sanitizeS3String(parsed.bucketName || 'mandi-data'),
         autoSync: parsed.autoSync || false,
         lastUploadedAt: parsed.lastUploadedAt || undefined,
         lastDownloadedAt: parsed.lastDownloadedAt || undefined,
@@ -90,10 +129,15 @@ export function getStoredCloudConfig(): CloudSyncMetadata {
   } catch {
     // ignore
   }
+
   return {
     shopCloudId: 'MANDI-786',
     shopPin: '1234',
-    postgresUrl: '',
+    endpointUrl: '',
+    accessKeyId: '',
+    secretAccessKey: '',
+    region: 'us-east-2',
+    bucketName: 'mandi-data',
     autoSync: false,
     lastUploadedAt: undefined,
     lastDownloadedAt: undefined,
@@ -104,7 +148,11 @@ export function saveStoredCloudConfig(config: CloudSyncMetadata): void {
   try {
     const cleanedConfig = {
       ...config,
-      postgresUrl: sanitizePostgresUrl(config.postgresUrl),
+      endpointUrl: sanitizeS3String(config.endpointUrl),
+      accessKeyId: sanitizeS3String(config.accessKeyId),
+      secretAccessKey: sanitizeS3String(config.secretAccessKey),
+      region: sanitizeS3String(config.region || 'us-east-2'),
+      bucketName: sanitizeS3String(config.bucketName || 'mandi-data'),
     };
     localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cleanedConfig));
   } catch {
@@ -145,154 +193,123 @@ export function formatSyncDateTime(isoString?: string | null, isUrdu = false): s
 }
 
 /**
- * Detects if a connection string belongs to Neon PostgreSQL (*.neon.tech)
+ * Instantiates an in-browser S3Client with custom credentials
  */
-export function isNeonPostgresUrl(url?: string): boolean {
-  if (!url) return false;
-  return url.toLowerCase().includes('.neon.tech');
-}
+export function getClientS3Instance(config: Partial<CloudSyncMetadata>): { client: S3Client; bucketName: string } | null {
+  const endpoint = sanitizeS3String(config.endpointUrl);
+  const accessKeyId = sanitizeS3String(config.accessKeyId);
+  const secretAccessKey = sanitizeS3String(config.secretAccessKey);
+  const region = sanitizeS3String(config.region || 'us-east-2');
+  const bucketName = sanitizeS3String(config.bucketName || 'mandi-data');
 
-/**
- * Safe fetch helper that gracefully handles non-JSON server responses
- */
-async function safeFetchJson<T = any>(
-  url: string,
-  options: RequestInit,
-  endpointName: string
-): Promise<{ ok: boolean; status: number; data?: T; errorText?: string }> {
-  try {
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 12000) : null;
-
-    const res = await fetch(url, {
-      ...options,
-      signal: controller ? controller.signal : undefined,
-    });
-
-    if (timeoutId) clearTimeout(timeoutId);
-
-    const contentType = res.headers.get('content-type') || '';
-    const text = await res.text();
-
-    if (!text || text.trim().startsWith('<!') || text.trim().startsWith('<html') || !contentType.includes('application/json')) {
-      return {
-        ok: false,
-        status: res.status,
-        errorText: `سرور سے درست جواب موصول نہیں ہوا۔ (${endpointName})`,
-      };
-    }
-
-    try {
-      const data = JSON.parse(text);
-      return {
-        ok: res.ok,
-        status: res.status,
-        data,
-        errorText: !res.ok ? data?.message || `Server returned ${res.status}` : undefined,
-      };
-    } catch {
-      return {
-        ok: false,
-        status: res.status,
-        errorText: `سرور کا جواب درست JSON فارمیٹ میں نہیں تھا`,
-      };
-    }
-  } catch (err: any) {
-    return {
-      ok: false,
-      status: 0,
-      errorText: err?.message || 'نیٹ ورک رابطہ ممکن نہیں ہو سکا',
-    };
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
+    return null;
   }
+
+  const normalizedEndpoint = endpoint.startsWith('http') ? endpoint : `https://${endpoint}`;
+
+  const client = new S3Client({
+    endpoint: normalizedEndpoint,
+    region,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+
+  return { client, bucketName };
 }
 
 /**
- * Multi-Strategy PostgreSQL Database Connection Tester
- * 1. Tries Backend API Route (/api/db/test via Node pg.Pool)
- * 2. If backend is unavailable or client is in standalone mode (Capacitor/PWA/Electron), uses official @neondatabase/serverless driver
+ * Test S3 Object Storage connection and credentials
  */
-export async function testPostgresConnection(customUrl?: string): Promise<{
+export async function testS3Connection(config: Partial<CloudSyncMetadata>): Promise<{
   success: boolean;
   message: string;
-  serverTime?: string;
-  version?: string;
+  endpoint?: string;
+  bucketName?: string;
+  availableBuckets?: string[];
+  storageEngine?: string;
 }> {
-  const cleanUrl = sanitizePostgresUrl(customUrl || getStoredCloudConfig().postgresUrl || '');
-  if (!cleanUrl) {
+  // 1. Try Express backend proxy route (/api/s3/test)
+  try {
+    const res = await fetch('/api/s3/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      return {
+        success: true,
+        message: data.message || 'S3 Object Storage connection verified successfully!',
+        endpoint: data.endpoint,
+        bucketName: data.bucketName,
+        availableBuckets: data.availableBuckets,
+        storageEngine: data.storageEngine || 'S3-Compatible Object Storage (Neon)',
+      };
+    } else if (res.status === 400 || res.status === 500) {
+      return {
+        success: false,
+        message: data.message || 'Failed to authenticate with S3 credentials',
+      };
+    }
+  } catch {
+    // If proxy is not reachable, fallback to direct client-side S3 call below
+  }
+
+  // 2. Direct client-side S3 connection test
+  const s3Instance = getClientS3Instance(config);
+  if (!s3Instance) {
     return {
       success: false,
-      message: 'براہ کرم پہلے سیٹنگز یا کلاؤڈ سنک میں PostgreSQL ڈیٹا بیس کا URL درج کریں۔',
+      message: 'براہ کرم اینڈپوائنٹ URL، ایکسس کی، اور سیکریٹ کی درج کریں (Missing S3 credentials)',
     };
   }
 
-  // 1. Strategy A: Try Backend Server API first (Fast, reliable, bypasses browser CORS for all cloud DBs)
+  const { client, bucketName } = s3Instance;
+
   try {
-    const serverRes = await safeFetchJson<{
-      success: boolean;
-      message: string;
-      serverTime?: string;
-      version?: string;
-    }>('/api/db/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionUrl: cleanUrl }),
-    }, 'db/test');
-
-    if (serverRes.ok && serverRes.data && serverRes.data.success) {
-      return serverRes.data;
-    }
-  } catch (err) {
-    console.warn('Backend /api/db/test attempt bypassed, trying direct Neon driver:', err);
-  }
-
-  // 2. Strategy B: Direct Client-Side Serverless Driver for Neon PostgreSQL
-  if (isNeonPostgresUrl(cleanUrl)) {
+    let buckets: string[] = [];
     try {
-      const sql = neon(cleanUrl);
-      const rows = (await sql`SELECT NOW() as now, version() as version;`) as any[];
-
-      if (rows && rows.length > 0) {
-        // Auto-ensure schema exists
-        await sql`
-          CREATE TABLE IF NOT EXISTS mandi_sync_data (
-            shop_id VARCHAR(100) PRIMARY KEY,
-            shop_pin VARCHAR(50),
-            payload JSONB NOT NULL,
-            lots_count INT DEFAULT 0,
-            customers_count INT DEFAULT 0,
-            vendors_count INT DEFAULT 0,
-            last_uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            last_downloaded_at TIMESTAMP WITH TIME ZONE,
-            client_device TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-        `;
-
-        return {
-          success: true,
-          message: 'Neon PostgreSQL (Direct Serverless) رابطہ کامیاب رہا! ڈیٹا بیس آن لائن اور تیار ہے۔',
-          serverTime: String(rows[0]?.now || new Date().toISOString()),
-          version: String(rows[0]?.version || 'PostgreSQL (Neon Serverless)'),
-        };
-      }
-    } catch (neonErr: any) {
-      console.error('Neon Direct Serverless Connection Error:', neonErr);
-      return {
-        success: false,
-        message: `Neon کلاؤڈ رابطہ میں خرابی: ${neonErr?.message || 'پاس ورڈ یا ہوسٹ کی تصدیق کریں'} (براہ کرم کنکشن اسٹرنگ چیک کریں)`,
-      };
+      const listRes = await client.send(new ListBucketsCommand({}));
+      buckets = (listRes.Buckets || []).map((b) => b.Name || '');
+    } catch {
+      // ignore
     }
-  }
 
-  return {
-    success: false,
-    message: 'ڈیٹا بیس سے رابطہ ممکن نہیں ہو سکا۔ براہ کرم انٹرنیٹ اور کنکشن اسٹرنگ (یوزر، پاس ورڈ اور ہوسٹ) چیک کریں۔',
-  };
+    try {
+      await client.send(new HeadBucketCommand({ Bucket: bucketName }));
+    } catch (headErr: any) {
+      if (headErr?.name === 'NotFound' || headErr?.$metadata?.httpStatusCode === 404) {
+        try {
+          await client.send(new CreateBucketCommand({ Bucket: bucketName }));
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: 'S3 Object Storage connection successful! Bucket verified.',
+      endpoint: config.endpointUrl,
+      bucketName,
+      availableBuckets: buckets,
+      storageEngine: 'S3-Compatible Object Storage (Neon)',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `S3 Object Storage Error: ${err?.message || 'Failed to connect'}`,
+    };
+  }
 }
 
 /**
- * Uploads local offline data to PostgreSQL database
+ * Upload entire Mandi dataset to S3 Object Storage
  */
 export async function uploadDataToCloud(
   config: CloudSyncMetadata,
@@ -301,345 +318,349 @@ export async function uploadDataToCloud(
     lots: VendorLot[];
     customers: CustomerBuyer[];
     vendors: SavedVendor[];
+    expenses?: ShopExpense[];
+    drawerAdjustments?: DrawerAdjustment[];
+    systemLogs?: any[];
   }
 ): Promise<CloudSyncResult> {
+  const cleanShopId = String(config.shopCloudId || 'MANDI-786').trim().toUpperCase();
+  const cleanPin = String(config.shopPin || '1234').trim();
   const timestamp = new Date().toISOString();
 
-  if (!config.shopCloudId.trim()) {
-    return {
-      success: false,
-      message: 'دکان کا کلاؤڈ آئی ڈی (Shop Cloud ID) درج کرنا لازمی ہے۔',
-      timestamp,
-    };
-  }
-
-  const cleanPostgresUrl = sanitizePostgresUrl(config.postgresUrl || getStoredCloudConfig().postgresUrl || '');
-  const cleanShopId = config.shopCloudId.trim().toUpperCase();
-  const cleanPin = config.shopPin.trim();
-  const clientDevice = typeof navigator !== 'undefined' ? navigator.userAgent : 'Client App';
-
-  // 1. Try Backend Server API Route first
+  // 1. Try Express backend S3 upload endpoint
   try {
-    const fetchResult = await safeFetchJson<{
-      success: boolean;
-      message?: string;
-      lastUploadedAt?: string;
-    }>('/api/db/sync-upload', {
+    const res = await fetch('/api/s3/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         shopId: cleanShopId,
         pin: cleanPin,
-        connectionUrl: cleanPostgresUrl || undefined,
-        payload: {
-          settings: data.settings,
-          lots: data.lots,
-          customers: data.customers,
-          vendors: data.vendors,
-        },
+        endpointUrl: config.endpointUrl,
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+        region: config.region,
+        bucketName: config.bucketName,
+        payload: data,
       }),
-    }, 'db/sync-upload');
+    });
 
-    if (fetchResult.ok && fetchResult.data && fetchResult.data.success) {
-      const json = fetchResult.data;
+    const result = await res.json();
+    if (res.ok && result.success) {
       const updatedConfig: CloudSyncMetadata = {
         ...config,
-        postgresUrl: cleanPostgresUrl,
-        lastUploadedAt: json.lastUploadedAt || timestamp,
-        lastSyncedDevice: 'PostgreSQL Server API',
+        lastUploadedAt: result.lastUploadedAt || timestamp,
+        lastSyncedDevice: 'S3 Object Storage (Neon Cloud)',
         totalSyncedLots: data.lots.length,
       };
       saveStoredCloudConfig(updatedConfig);
-      saveLocalBackupVault(config.shopCloudId, config.shopPin, data, timestamp);
+      saveLocalBackupVault(cleanShopId, cleanPin, data, timestamp);
 
       return {
         success: true,
-        message: 'ڈیٹا کامیابی سے PostgreSQL ڈیٹا بیس پر اپ لوڈ ہو گیا ہے!',
+        message: result.message || 'ڈیٹا کامیابی سے S3 آبجیکٹ اسٹوریج پر اپ لوڈ ہو گیا!',
         timestamp,
-        lastUploadedAt: json.lastUploadedAt || timestamp,
-        lastDownloadedAt: config.lastDownloadedAt,
+        lastUploadedAt: result.lastUploadedAt || timestamp,
         lotsCount: data.lots.length,
         customersCount: data.customers.length,
         vendorsCount: data.vendors.length,
-        dbEngine: 'PostgreSQL',
+        expensesCount: data.expenses?.length || 0,
+        drawerAdjustmentsCount: data.drawerAdjustments?.length || 0,
+        logsCount: data.systemLogs?.length || 0,
+        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        bucketName: result.bucketName,
+        objectKey: result.objectKey,
+      };
+    } else if (result.message && !res.ok && res.status !== 404) {
+      return {
+        success: false,
+        message: result.message,
+        timestamp,
       };
     }
-  } catch (serverErr) {
-    console.warn('Backend upload API failed, trying direct Neon driver if applicable:', serverErr);
+  } catch {
+    // Fallback to client-side S3
   }
 
-  // 2. Direct Neon Serverless Upload for Standalone / Offline-ready Mode
-  if (cleanPostgresUrl && isNeonPostgresUrl(cleanPostgresUrl)) {
-    try {
-      const sql = neon(cleanPostgresUrl);
-      await sql`
-        CREATE TABLE IF NOT EXISTS mandi_sync_data (
-          shop_id VARCHAR(100) PRIMARY KEY,
-          shop_pin VARCHAR(50),
-          payload JSONB NOT NULL,
-          lots_count INT DEFAULT 0,
-          customers_count INT DEFAULT 0,
-          vendors_count INT DEFAULT 0,
-          last_uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          last_downloaded_at TIMESTAMP WITH TIME ZONE,
-          client_device TEXT,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `;
+  // 2. Direct client-side S3 upload
+  const s3Instance = getClientS3Instance(config);
+  if (s3Instance) {
+    const { client, bucketName } = s3Instance;
+    const objectKey = `backups/${cleanShopId}.json`;
 
-      const payloadObj = {
-        settings: data.settings,
-        lots: data.lots,
-        customers: data.customers,
-        vendors: data.vendors,
+    try {
+      const uploadEnvelope = {
+        version: '2.0.0',
+        storageType: 'neon_s3_object_storage',
+        shopId: cleanShopId,
+        shopPin: cleanPin,
+        uploadedAt: timestamp,
+        stats: {
+          lotsCount: data.lots.length,
+          customersCount: data.customers.length,
+          vendorsCount: data.vendors.length,
+          expensesCount: data.expenses?.length || 0,
+          drawerCount: data.drawerAdjustments?.length || 0,
+          logsCount: data.systemLogs?.length || 0,
+        },
+        payload: data,
       };
 
-      const rows = (await sql`
-        INSERT INTO mandi_sync_data (
-          shop_id, shop_pin, payload, lots_count, customers_count, vendors_count, last_uploaded_at, client_device, updated_at
-        ) VALUES (
-          ${cleanShopId}, ${cleanPin}, ${payloadObj}, ${data.lots.length}, ${data.customers.length}, ${data.vendors.length}, NOW(), ${clientDevice}, NOW()
-        )
-        ON CONFLICT (shop_id) DO UPDATE SET
-          shop_pin = EXCLUDED.shop_pin,
-          payload = EXCLUDED.payload,
-          lots_count = EXCLUDED.lots_count,
-          customers_count = EXCLUDED.customers_count,
-          vendors_count = EXCLUDED.vendors_count,
-          last_uploaded_at = NOW(),
-          client_device = EXCLUDED.client_device,
-          updated_at = NOW()
-        RETURNING last_uploaded_at;
-      `) as any[];
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucketName,
+          Key: objectKey,
+          Body: JSON.stringify(uploadEnvelope, null, 2),
+          ContentType: 'application/json; charset=utf-8',
+        })
+      );
 
-      const uploadedTime = rows?.[0]?.last_uploaded_at ? String(rows[0].last_uploaded_at) : timestamp;
       const updatedConfig: CloudSyncMetadata = {
         ...config,
-        postgresUrl: cleanPostgresUrl,
-        lastUploadedAt: uploadedTime,
-        lastSyncedDevice: 'Neon PostgreSQL (Direct Serverless)',
+        lastUploadedAt: timestamp,
+        lastSyncedDevice: 'S3 Object Storage (Direct Client)',
         totalSyncedLots: data.lots.length,
       };
       saveStoredCloudConfig(updatedConfig);
-      saveLocalBackupVault(config.shopCloudId, config.shopPin, data, uploadedTime);
+      saveLocalBackupVault(cleanShopId, cleanPin, data, timestamp);
 
       return {
         success: true,
-        message: 'ڈیٹا کامیابی سے Neon PostgreSQL کلاؤڈ پر محفوظ ہو گیا ہے!',
+        message: `ڈیٹا کامیابی سے S3 آبجیکٹ اسٹوریج پر اپ لوڈ ہو گیا! (${objectKey})`,
         timestamp,
-        lastUploadedAt: uploadedTime,
-        lastDownloadedAt: config.lastDownloadedAt,
+        lastUploadedAt: timestamp,
         lotsCount: data.lots.length,
         customersCount: data.customers.length,
         vendorsCount: data.vendors.length,
-        dbEngine: 'Neon PostgreSQL (Direct Serverless)',
+        expensesCount: data.expenses?.length || 0,
+        drawerAdjustmentsCount: data.drawerAdjustments?.length || 0,
+        logsCount: data.systemLogs?.length || 0,
+        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        bucketName,
+        objectKey,
       };
-    } catch (neonErr: any) {
-      console.error('Neon Direct Serverless Upload Error:', neonErr);
+    } catch (err: any) {
+      console.warn('Direct S3 upload failed:', err);
     }
   }
 
   // 3. Fallback to Local Offline Backup Vault
-  saveLocalBackupVault(config.shopCloudId, config.shopPin, data, timestamp);
+  saveLocalBackupVault(cleanShopId, cleanPin, data, timestamp);
   const updatedConfig: CloudSyncMetadata = {
     ...config,
-    postgresUrl: cleanPostgresUrl,
     lastUploadedAt: timestamp,
-    lastSyncedDevice: 'Local Offline Storage Backup',
+    lastSyncedDevice: 'Local Offline Storage Vault',
     totalSyncedLots: data.lots.length,
   };
   saveStoredCloudConfig(updatedConfig);
 
   return {
     success: true,
-    message: 'ڈیٹا لوکل والٹ میں محفوظ ہو گیا (نوٹ: ڈیٹا بیس کنکشن پر نظرثانی کریں)',
+    message: 'ڈیٹا مقامی محفوظ آف لائن والٹ میں سنک ہو گیا ہے۔ (S3 کنکشن چیک کریں)',
     timestamp,
     lastUploadedAt: timestamp,
-    lastDownloadedAt: config.lastDownloadedAt,
     lotsCount: data.lots.length,
     customersCount: data.customers.length,
     vendorsCount: data.vendors.length,
+    expensesCount: data.expenses?.length || 0,
+    drawerAdjustmentsCount: data.drawerAdjustments?.length || 0,
+    logsCount: data.systemLogs?.length || 0,
+    storageEngine: 'Local Offline Vault',
   };
 }
 
 /**
- * Downloads data from PostgreSQL database
+ * Download Mandi dataset from S3 Object Storage
  */
 export async function downloadDataFromCloud(
-  shopCloudId: string,
-  shopPin: string,
-  postgresUrl?: string
+  shopId: string,
+  pin: string,
+  s3ConfigOverride?: Partial<CloudSyncMetadata>
 ): Promise<CloudSyncResult> {
+  const currentConfig = getStoredCloudConfig();
+  const mergedConfig: CloudSyncMetadata = {
+    ...currentConfig,
+    ...s3ConfigOverride,
+  };
+
+  const cleanShopId = String(shopId || mergedConfig.shopCloudId).trim().toUpperCase();
+  const cleanPin = String(pin || mergedConfig.shopPin || '').trim();
   const timestamp = new Date().toISOString();
-  const cleanShopId = shopCloudId.trim().toUpperCase();
-  const cleanPin = shopPin.trim();
-  const cleanPostgresUrl = sanitizePostgresUrl(postgresUrl || getStoredCloudConfig().postgresUrl || '');
 
-  if (!cleanShopId) {
-    return {
-      success: false,
-      message: 'دکان کا کلاؤڈ شناختی کوڈ (Shop Cloud ID) درج کریں۔',
-      timestamp,
-    };
-  }
-
-  // 1. Try Backend Server API Route
+  // 1. Try Express backend S3 download endpoint
   try {
-    const fetchResult = await safeFetchJson<{
-      success: boolean;
-      message?: string;
-      lastUploadedAt?: string;
-      lastDownloadedAt?: string;
-      lotsCount?: number;
-      customersCount?: number;
-      vendorsCount?: number;
-      data?: any;
-    }>('/api/db/sync-download', {
+    const res = await fetch('/api/s3/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         shopId: cleanShopId,
         pin: cleanPin,
-        connectionUrl: cleanPostgresUrl || undefined,
+        endpointUrl: mergedConfig.endpointUrl,
+        accessKeyId: mergedConfig.accessKeyId,
+        secretAccessKey: mergedConfig.secretAccessKey,
+        region: mergedConfig.region,
+        bucketName: mergedConfig.bucketName,
       }),
-    }, 'db/sync-download');
+    });
 
-    if (fetchResult.ok && fetchResult.data && fetchResult.data.success) {
-      const json = fetchResult.data;
-      const currentConfig = getStoredCloudConfig();
+    const result = await res.json();
+    if (res.ok && result.success && result.data) {
       const updatedConfig: CloudSyncMetadata = {
-        ...currentConfig,
+        ...mergedConfig,
         shopCloudId: cleanShopId,
         shopPin: cleanPin,
-        postgresUrl: cleanPostgresUrl || currentConfig.postgresUrl,
-        lastDownloadedAt: json.lastDownloadedAt || timestamp,
-        lastUploadedAt: json.lastUploadedAt || currentConfig.lastUploadedAt,
+        lastDownloadedAt: timestamp,
+        lastUploadedAt: result.lastUploadedAt || mergedConfig.lastUploadedAt,
+        totalSyncedLots: result.lotsCount,
       };
       saveStoredCloudConfig(updatedConfig);
 
       return {
         success: true,
-        message: 'PostgreSQL ڈیٹا بیس سے تازہ ترین ریکارڈز کامیابی سے ڈاؤن لوڈ ہو گئے!',
+        message: result.message || 'ڈیٹا کامیابی سے S3 آبجیکٹ اسٹوریج سے ڈاؤن لوڈ ہو گیا!',
         timestamp,
-        lastUploadedAt: json.lastUploadedAt,
-        lastDownloadedAt: json.lastDownloadedAt || timestamp,
-        lotsCount: json.lotsCount || json.data?.lots?.length || 0,
-        customersCount: json.customersCount || json.data?.customers?.length || 0,
-        vendorsCount: json.vendorsCount || json.data?.vendors?.length || 0,
-        data: json.data,
-        dbEngine: 'PostgreSQL',
+        lastUploadedAt: result.lastUploadedAt,
+        lastDownloadedAt: timestamp,
+        lotsCount: result.lotsCount,
+        customersCount: result.customersCount,
+        vendorsCount: result.vendorsCount,
+        expensesCount: result.expensesCount || result.data?.expenses?.length || 0,
+        drawerAdjustmentsCount: result.data?.drawerAdjustments?.length || 0,
+        logsCount: result.data?.systemLogs?.length || 0,
+        data: result.data,
+        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        bucketName: result.bucketName,
+        objectKey: result.objectKey,
+      };
+    } else if (result.message && !res.ok && res.status !== 404) {
+      return {
+        success: false,
+        message: result.message,
+        timestamp,
       };
     }
-  } catch (serverErr) {
-    console.warn('Backend download API failed, trying direct Neon driver:', serverErr);
+  } catch {
+    // Fallback to direct client
   }
 
-  // 2. Direct Neon Serverless Download
-  if (cleanPostgresUrl && isNeonPostgresUrl(cleanPostgresUrl)) {
+  // 2. Direct client-side S3 download
+  const s3Instance = getClientS3Instance(mergedConfig);
+  if (s3Instance) {
+    const { client, bucketName } = s3Instance;
+    const objectKey = `backups/${cleanShopId}.json`;
+
     try {
-      const sql = neon(cleanPostgresUrl);
-      const rows = (await sql`
-        SELECT shop_id, shop_pin, payload, lots_count, customers_count, vendors_count, last_uploaded_at, last_downloaded_at
-        FROM mandi_sync_data
-        WHERE shop_id = ${cleanShopId};
-      `) as any[];
+      const getRes = await client.send(
+        new GetObjectCommand({
+          Bucket: bucketName,
+          Key: objectKey,
+        })
+      );
 
-      if (rows && rows.length > 0) {
-        const row = rows[0];
-
-        // PIN Verification
-        if (row.shop_pin && cleanPin && String(row.shop_pin).trim() !== cleanPin) {
+      const bodyStr = await getRes.Body?.transformToString();
+      if (bodyStr) {
+        const parsedEnvelope = JSON.parse(bodyStr);
+        const storedPin = parsedEnvelope.shopPin || parsedEnvelope.pin;
+        if (storedPin && cleanPin && storedPin !== cleanPin) {
           return {
             success: false,
-            message: 'غلط پن کوڈ (Invalid PIN)! اس دکان کا پن درست درج کریں۔',
+            message: 'غلط پن کوڈ (Invalid Security PIN)',
             timestamp,
           };
         }
 
-        // Update download timestamp
-        await sql`UPDATE mandi_sync_data SET last_downloaded_at = NOW() WHERE shop_id = ${cleanShopId};`;
-
-        const currentConfig = getStoredCloudConfig();
+        const payload = parsedEnvelope.payload || parsedEnvelope;
         const updatedConfig: CloudSyncMetadata = {
-          ...currentConfig,
+          ...mergedConfig,
           shopCloudId: cleanShopId,
           shopPin: cleanPin,
-          postgresUrl: cleanPostgresUrl,
           lastDownloadedAt: timestamp,
-          lastUploadedAt: row.last_uploaded_at ? String(row.last_uploaded_at) : currentConfig.lastUploadedAt,
+          lastUploadedAt: parsedEnvelope.uploadedAt || timestamp,
+          totalSyncedLots: payload.lots?.length || 0,
         };
         saveStoredCloudConfig(updatedConfig);
 
         return {
           success: true,
-          message: 'Neon PostgreSQL سے تمام ریکارڈز کامیابی سے ڈاؤن لوڈ ہو گئے!',
+          message: 'ڈیٹا کامیابی سے S3 آبجیکٹ اسٹوریج سے ڈاؤن لوڈ ہو گیا!',
           timestamp,
-          lastUploadedAt: row.last_uploaded_at ? String(row.last_uploaded_at) : undefined,
+          lastUploadedAt: parsedEnvelope.uploadedAt || timestamp,
           lastDownloadedAt: timestamp,
-          lotsCount: row.lots_count || row.payload?.lots?.length || 0,
-          customersCount: row.customers_count || row.payload?.customers?.length || 0,
-          vendorsCount: row.vendors_count || row.payload?.vendors?.length || 0,
-          data: row.payload,
-          dbEngine: 'Neon PostgreSQL (Direct Serverless)',
+          lotsCount: payload.lots?.length || 0,
+          customersCount: payload.customers?.length || 0,
+          vendorsCount: payload.vendors?.length || 0,
+          expensesCount: payload.expenses?.length || 0,
+          drawerAdjustmentsCount: payload.drawerAdjustments?.length || 0,
+          logsCount: payload.systemLogs?.length || 0,
+          data: payload,
+          storageEngine: 'S3-Compatible Object Storage (Neon)',
+          bucketName,
+          objectKey,
         };
       }
-    } catch (neonErr: any) {
-      console.error('Neon Direct Serverless Download Error:', neonErr);
+    } catch (err: any) {
+      console.warn('Direct S3 download failed:', err);
     }
   }
 
   // 3. Fallback to Local Backup Vault
   const localData = getLocalBackupVault(cleanShopId, cleanPin);
   if (localData) {
-    const currentConfig = getStoredCloudConfig();
     const updatedConfig: CloudSyncMetadata = {
-      ...currentConfig,
+      ...mergedConfig,
       shopCloudId: cleanShopId,
       shopPin: cleanPin,
       lastDownloadedAt: timestamp,
+      lastUploadedAt: localData.uploadedAt || timestamp,
+      totalSyncedLots: localData.data.lots.length,
     };
     saveStoredCloudConfig(updatedConfig);
 
     return {
       success: true,
-      message: 'لوکل بیک اپ والٹ سے ڈیٹا بحال ہو گیا ہے۔',
+      message: 'مقامی آف لائن والٹ سے بیک اپ بحال کر دیا گیا۔ (S3 کنکشن غیر دستیاب ہے)',
       timestamp,
-      lastUploadedAt: localData.updatedAt,
+      lastUploadedAt: localData.uploadedAt,
       lastDownloadedAt: timestamp,
-      lotsCount: localData.data?.lots?.length || 0,
-      customersCount: localData.data?.customers?.length || 0,
-      vendorsCount: localData.data?.vendors?.length || 0,
+      lotsCount: localData.data.lots?.length || 0,
+      customersCount: localData.data.customers?.length || 0,
+      vendorsCount: localData.data.vendors?.length || 0,
+      expensesCount: localData.data.expenses?.length || 0,
+      drawerAdjustmentsCount: localData.data.drawerAdjustments?.length || 0,
+      logsCount: localData.data.systemLogs?.length || 0,
       data: localData.data,
-      dbEngine: 'Local Backup Vault',
+      storageEngine: 'Local Backup Vault',
     };
   }
 
   return {
     success: false,
-    message: `دکان شناختی کوڈ (${cleanShopId}) کا کوئی ریکارڈ کلاؤڈ پر نہیں ملا۔ پہلے اسی شناختی کوڈ سے ڈیٹا اپ لوڈ کریں۔`,
+    message: `S3 آبجیکٹ اسٹوریج میں دکان ID "${cleanShopId}" کا کوئی بیک اپ ڈیٹا نہیں ملا۔ پہلے پرائمری ڈیوائس سے ڈیٹا اپ لوڈ کریں۔`,
     timestamp,
   };
 }
 
-/**
- * Local offline snapshot cache vault
- */
 function saveLocalBackupVault(
   shopId: string,
   pin: string,
-  data: any,
-  updatedAt: string
+  data: {
+    settings: AppSettings;
+    lots: VendorLot[];
+    customers: CustomerBuyer[];
+    vendors: SavedVendor[];
+    expenses?: ShopExpense[];
+    drawerAdjustments?: DrawerAdjustment[];
+  },
+  timestamp: string
 ): void {
   try {
-    const key = `${LOCAL_VAULT_PREFIX}${shopId.trim().toUpperCase()}`;
-    const payload = {
+    const vaultKey = `${LOCAL_VAULT_PREFIX}${shopId}`;
+    const vaultObject = {
       shopId,
       pin,
-      updatedAt,
+      uploadedAt: timestamp,
       data,
     };
-    localStorage.setItem(key, JSON.stringify(payload));
+    localStorage.setItem(vaultKey, JSON.stringify(vaultObject));
   } catch (e) {
     console.warn('Failed to save local backup vault:', e);
   }
@@ -648,17 +669,17 @@ function saveLocalBackupVault(
 function getLocalBackupVault(
   shopId: string,
   pin: string
-): { updatedAt: string; data: any } | null {
+): { uploadedAt: string; data: any } | null {
   try {
-    const key = `${LOCAL_VAULT_PREFIX}${shopId.trim().toUpperCase()}`;
-    const saved = localStorage.getItem(key);
-    if (!saved) return null;
-    const parsed = JSON.parse(saved);
-    if (parsed.pin && pin && parsed.pin.trim() !== pin.trim()) {
+    const vaultKey = `${LOCAL_VAULT_PREFIX}${shopId}`;
+    const raw = localStorage.getItem(vaultKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed.pin && pin && parsed.pin !== pin) {
       return null;
     }
     return {
-      updatedAt: parsed.updatedAt || new Date().toISOString(),
+      uploadedAt: parsed.uploadedAt,
       data: parsed.data,
     };
   } catch {

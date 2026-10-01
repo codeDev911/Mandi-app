@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { VendorLot, PaymentStatus, AppSettings, CustomerBuyer } from '../types';
 import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
@@ -154,12 +154,17 @@ export const AddBidSaleModal: React.FC<AddBidSaleModalProps> = ({
 
     // Save customer to directory if checkbox is checked and name is not walk-in
     if (saveCustomerToDb && onSaveCustomer && rawName && rawName !== defaultWalkIn) {
-      onSaveCustomer({
-        id: `cust-${Date.now()}`,
-        name: rawName,
-        phone: buyerPhone.trim() || undefined,
-        createdAt: new Date().toISOString(),
-      });
+      const alreadyExists = customers.some(
+        (c) => c.name.trim().toLowerCase() === rawName.trim().toLowerCase()
+      );
+      if (!alreadyExists) {
+        onSaveCustomer({
+          id: `cust-${Date.now()}`,
+          name: rawName.trim(),
+          phone: buyerPhone.trim() || undefined,
+          createdAt: new Date().toISOString(),
+        });
+      }
     }
 
     sound.playBidSound();

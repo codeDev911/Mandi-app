@@ -185,6 +185,7 @@ export interface BuyerCreditRecord {
   date?: string;
   notes?: string;
   timestamp?: string;
+  createdAt?: string;
 }
 
 export interface CustomerBuyer {

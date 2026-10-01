@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { AppSettings, VendorLot, CustomerBuyer, SavedVendor } from '../types';
+import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment } from '../types';
 import { sound } from '../utils/sound';
 import { downloadJSONBackup, shareJSONBackup, copyTextToClipboard } from '../utils/fileDownloader';
+import { getSystemLogs } from '../utils/systemLogs';
 import {
   X,
   Share2,
@@ -23,6 +24,8 @@ interface ShareBackupModalProps {
   lots?: VendorLot[];
   customers?: CustomerBuyer[];
   vendors?: SavedVendor[];
+  expenses?: ShopExpense[];
+  drawerAdjustments?: DrawerAdjustment[];
 }
 
 export const ShareBackupModal: React.FC<ShareBackupModalProps> = ({
@@ -32,6 +35,8 @@ export const ShareBackupModal: React.FC<ShareBackupModalProps> = ({
   lots = [],
   customers = [],
   vendors = [],
+  expenses = [],
+  drawerAdjustments = [],
 }) => {
   const isUrdu = settings.language === 'ur';
   const [copied, setCopied] = useState(false);
@@ -40,13 +45,26 @@ export const ShareBackupModal: React.FC<ShareBackupModalProps> = ({
 
   if (!isOpen) return null;
 
+  const systemLogs = getSystemLogs();
   const exportPayload = {
     version: '2.0.0',
+    appName: 'MandiMunshiMasterSystem',
     exportedAt: new Date().toISOString(),
+    stats: {
+      lotsCount: lots.length,
+      customersCount: customers.length,
+      vendorsCount: vendors.length,
+      expensesCount: expenses.length,
+      drawerCount: drawerAdjustments.length,
+      logsCount: systemLogs.length,
+    },
     settings,
     lots,
     customers,
     vendors,
+    expenses,
+    drawerAdjustments,
+    systemLogs,
   };
 
   const jsonStr = JSON.stringify(exportPayload, null, 2);
@@ -65,6 +83,8 @@ export const ShareBackupModal: React.FC<ShareBackupModalProps> = ({
 ⚖️ کل بولیاں و سودے: ${totalBids}
 👥 کل خریدار کھاتے: ${customers.length}
 👨‍🌾 کل زمیندار: ${vendors.length}
+💸 کل دکان اخراجات: ${expenses.length}
+💵 کیش دراز انٹریز: ${drawerAdjustments.length}
 ━━━━━━━━━━━━━━━━━
 یہ بیک اپ سبزی منڈی ایپ میں سیٹنگز سے بآسانی بحال (Restore) کیا جا سکتا ہے۔`;
 
@@ -183,7 +203,7 @@ export const ShareBackupModal: React.FC<ShareBackupModalProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
               <div className="bg-white p-2.5 rounded-xl border border-stone-200">
                 <span className="text-[10px] text-stone-500 font-urdu-sans block">{isUrdu ? 'کل مال لاٹس' : 'Lots'}</span>
                 <span className="text-sm font-bold text-stone-800 font-mono">{lots.length}</span>
@@ -199,6 +219,14 @@ export const ShareBackupModal: React.FC<ShareBackupModalProps> = ({
               <div className="bg-white p-2.5 rounded-xl border border-stone-200">
                 <span className="text-[10px] text-stone-500 font-urdu-sans block">{isUrdu ? 'زمیندار' : 'Vendors'}</span>
                 <span className="text-sm font-bold text-stone-800 font-mono">{vendors.length}</span>
+              </div>
+              <div className="bg-white p-2.5 rounded-xl border border-stone-200">
+                <span className="text-[10px] text-stone-500 font-urdu-sans block">{isUrdu ? 'دکان اخراجات' : 'Expenses'}</span>
+                <span className="text-sm font-bold text-stone-800 font-mono">{expenses.length}</span>
+              </div>
+              <div className="bg-white p-2.5 rounded-xl border border-stone-200">
+                <span className="text-[10px] text-stone-500 font-urdu-sans block">{isUrdu ? 'کیش دراز انٹریز' : 'Drawer Records'}</span>
+                <span className="text-sm font-bold text-stone-800 font-mono">{drawerAdjustments.length}</span>
               </div>
             </div>
           </div>

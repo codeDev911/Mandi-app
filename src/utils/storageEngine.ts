@@ -1,4 +1,4 @@
-import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment } from '../types';
+import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment, SystemLog } from '../types';
 import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors, sampleExpenses } from './sampleData';
 import * as Neutralino from '@neutralinojs/lib';
 
@@ -782,14 +782,16 @@ export function computeDatabaseMetrics(
 }
 
 /**
- * Generates an encrypted/structured Full JSON Backup file
+ * Generates an encrypted/structured Full JSON Backup file containing all system data
  */
 export function generateFullBackupPayload(
   settings: AppSettings,
   lots: VendorLot[],
   customers: CustomerBuyer[],
   vendors: SavedVendor[],
-  expenses: ShopExpense[] = []
+  expenses: ShopExpense[] = [],
+  drawerAdjustments: DrawerAdjustment[] = [],
+  systemLogs: SystemLog[] = []
 ): string {
   const payload = {
     version: '2.0.0',
@@ -800,12 +802,16 @@ export function generateFullBackupPayload(
       customersCount: customers.length,
       vendorsCount: vendors.length,
       expensesCount: expenses.length,
+      drawerCount: drawerAdjustments.length,
+      logsCount: systemLogs.length,
     },
     settings,
     lots,
     customers,
     vendors,
     expenses,
+    drawerAdjustments,
+    systemLogs,
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -820,28 +826,99 @@ export function parseAndValidateBackupPayload(jsonText: string): {
   customers?: CustomerBuyer[];
   vendors?: SavedVendor[];
   expenses?: ShopExpense[];
+  drawerAdjustments?: DrawerAdjustment[];
+  systemLogs?: SystemLog[];
   error?: string;
 } {
   try {
     const parsed = JSON.parse(jsonText);
     if (!parsed || typeof parsed !== 'object') {
-      return { success: false, error: 'غیر موزوں فائل فارمیٹ' };
+      return { success: false, error: 'غیر موزوں فائل فارمیٹ (Invalid file format)' };
     }
 
-    if (!Array.isArray(parsed.lots)) {
-      return { success: false, error: 'بیک اپ فائل میں لاٹس کا ڈیٹا موجود نہیں ہے' };
+    if (!Array.isArray(parsed.lots) && !parsed.settings && !Array.isArray(parsed.customers)) {
+      return { success: false, error: 'بیک اپ فائل میں ڈیٹا موجود نہیں ہے (No recognizable data found in backup)' };
     }
 
     return {
       success: true,
       settings: parsed.settings || defaultSettings,
-      lots: parsed.lots || [],
+      lots: Array.isArray(parsed.lots) ? parsed.lots : [],
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
       vendors: Array.isArray(parsed.vendors) ? parsed.vendors : [],
       expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
+      drawerAdjustments: Array.isArray(parsed.drawerAdjustments) ? parsed.drawerAdjustments : [],
+      systemLogs: Array.isArray(parsed.systemLogs) ? parsed.systemLogs : [],
     };
   } catch (err: any) {
-    return { success: false, error: err?.message || 'فائل پڑھنے میں غلطی' };
+    return { success: false, error: err?.message || 'فائل پڑھنے میں غلطی (Error reading file)' };
+  }
+}
+
+/**
+ * Generates an Individual Settings Backup JSON payload
+ */
+export function generateSettingsBackupPayload(settings: AppSettings): string {
+  const payload = {
+    version: '2.0.0',
+    type: 'mandi_individual_settings_backup',
+    exportedAt: new Date().toISOString(),
+    shopProfile: {
+      shopNameUrdu: settings.shopNameUrdu,
+      shopNameEn: settings.shopNameEn,
+      shopPhone: settings.shopPhone,
+      shopPhone2: settings.shopPhone2,
+      shopAddressUrdu: settings.shopAddressUrdu,
+      shopAddressEn: settings.shopAddressEn,
+      arhtiNameUrdu: settings.arhtiNameUrdu,
+      arhtiNameEn: settings.arhtiNameEn,
+    },
+    settings,
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+/**
+ * Validates and extracts Individual Settings from JSON text
+ */
+export function parseAndValidateSettingsPayload(jsonText: string): {
+  success: boolean;
+  settings?: AppSettings;
+  error?: string;
+} {
+  try {
+    const parsed = JSON.parse(jsonText);
+    if (!parsed || typeof parsed !== 'object') {
+      return { success: false, error: 'غیر موزوں فائل فارمیٹ (Invalid file format)' };
+    }
+
+    // Support both wrapped settings payload and direct settings object
+    const candidateSettings = parsed.settings || parsed;
+
+    // Validate that candidate looks like AppSettings
+    if (
+      candidateSettings &&
+      (candidateSettings.shopNameUrdu !== undefined ||
+        candidateSettings.shopNameEn !== undefined ||
+        candidateSettings.defaultCommissionPercent !== undefined ||
+        candidateSettings.language !== undefined)
+    ) {
+      const mergedSettings: AppSettings = {
+        ...defaultSettings,
+        ...candidateSettings,
+      };
+      return {
+        success: true,
+        settings: mergedSettings,
+      };
+    }
+
+    return {
+      success: false,
+      error: 'فائل میں ترتیبات کا درست ڈیٹا موجود نہیں ہے (No valid settings found in file)',
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'فائل پڑھنے میں غلطی (Error reading file)' };
   }
 }
 

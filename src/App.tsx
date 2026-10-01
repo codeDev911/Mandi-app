@@ -27,6 +27,7 @@ import {
   saveLotsToIndexedDB,
   saveCustomersToIndexedDB,
   saveVendorsToIndexedDB,
+  saveExpensesToIndexedDB,
   saveSettingsToIndexedDB,
 } from './utils/storageEngine';
 import { Header } from './components/Header';
@@ -42,7 +43,7 @@ import { SettingsView } from './components/SettingsView';
 import { NewLotModal } from './components/NewLotModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
 import { CashDrawerModal } from './components/CashDrawerModal';
-import { addSystemLog, seedInitialLogsIfEmpty } from './utils/systemLogs';
+import { addSystemLog, seedInitialLogsIfEmpty, saveSystemLogs } from './utils/systemLogs';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { App as CapApp } from '@capacitor/app';
@@ -515,25 +516,39 @@ export default function App() {
 
   const handleApplyCloudData = (data: {
     settings?: AppSettings;
-    lots: VendorLot[];
-    customers: CustomerBuyer[];
-    vendors: SavedVendor[];
+    lots?: VendorLot[];
+    customers?: CustomerBuyer[];
+    vendors?: SavedVendor[];
+    expenses?: ShopExpense[];
+    drawerAdjustments?: DrawerAdjustment[];
+    systemLogs?: any[];
   }) => {
     sound.playCashChime();
     setIsDataLoaded(true);
 
-    if (data.lots && data.lots.length > 0) {
+    if (data.lots) {
       saveLotsToIndexedDB(data.lots).catch(console.error);
       setLots(data.lots);
       if (data.lots[0]) setSelectedLotId(data.lots[0].id);
     }
-    if (data.customers && data.customers.length > 0) {
+    if (data.customers) {
       saveCustomersToIndexedDB(data.customers).catch(console.error);
       setCustomers(data.customers);
     }
-    if (data.vendors && data.vendors.length > 0) {
+    if (data.vendors) {
       saveVendorsToIndexedDB(data.vendors).catch(console.error);
       setVendors(data.vendors);
+    }
+    if (data.expenses) {
+      saveExpensesToIndexedDB(data.expenses).catch(console.error);
+      setExpenses(data.expenses);
+    }
+    if (data.drawerAdjustments) {
+      saveDrawerAdjustmentsAsync(data.drawerAdjustments);
+      setDrawerAdjustments(data.drawerAdjustments);
+    }
+    if (data.systemLogs && Array.isArray(data.systemLogs) && data.systemLogs.length > 0) {
+      saveSystemLogs(data.systemLogs);
     }
     if (data.settings) {
       saveSettingsToIndexedDB(data.settings).catch(console.error);
@@ -1304,6 +1319,8 @@ export default function App() {
             lots={lots}
             customers={customers}
             vendors={vendors}
+            expenses={expenses}
+            drawerAdjustments={drawerAdjustments}
             onUpdateSettings={handleUpdateSettings}
             onResetData={handleResetData}
             onOpenCloudSync={() => setIsCloudSyncOpen(true)}
@@ -1331,6 +1348,8 @@ export default function App() {
         lots={lots}
         customers={customers}
         vendors={vendors}
+        expenses={expenses}
+        drawerAdjustments={drawerAdjustments}
         settings={settings}
         onApplyCloudData={handleApplyCloudData}
       />

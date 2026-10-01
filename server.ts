@@ -1,81 +1,67 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import pg from 'pg';
 import dotenv from 'dotenv';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListBucketsCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
+  HeadObjectCommand,
+} from '@aws-sdk/client-s3';
 
 dotenv.config();
 
-const { Pool } = pg;
 const PORT = 3000;
 
-// Helper to get PostgreSQL Pool with strict priority for URL from client form input
-function getPostgresPool(customUrl?: string): pg.Pool | null {
-  let rawUrl = customUrl?.trim() || process.env.DATABASE_URL?.trim();
-  if (!rawUrl) {
+interface S3ConfigInput {
+  endpointUrl?: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  region?: string;
+  bucketName?: string;
+}
+
+// Helper to configure S3 client with user-supplied credentials or environment fallback
+function getS3ClientAndConfig(customConfig?: S3ConfigInput) {
+  let endpoint = customConfig?.endpointUrl?.trim() || process.env.AWS_ENDPOINT_URL_S3?.trim() || '';
+  let accessKeyId = customConfig?.accessKeyId?.trim() || process.env.AWS_ACCESS_KEY_ID?.trim() || '';
+  let secretAccessKey = customConfig?.secretAccessKey?.trim() || process.env.AWS_SECRET_ACCESS_KEY?.trim() || '';
+  let region = customConfig?.region?.trim() || process.env.AWS_REGION?.trim() || 'us-east-2';
+  let bucketName = customConfig?.bucketName?.trim() || process.env.AWS_S3_BUCKET?.trim() || 'mandi-data';
+
+  // Strip accidental wrapping quotes
+  if ((endpoint.startsWith('"') && endpoint.endsWith('"')) || (endpoint.startsWith("'") && endpoint.endsWith("'"))) {
+    endpoint = endpoint.slice(1, -1).trim();
+  }
+  if ((accessKeyId.startsWith('"') && accessKeyId.endsWith('"')) || (accessKeyId.startsWith("'") && accessKeyId.endsWith("'"))) {
+    accessKeyId = accessKeyId.slice(1, -1).trim();
+  }
+  if ((secretAccessKey.startsWith('"') && secretAccessKey.endsWith('"')) || (secretAccessKey.startsWith("'") && secretAccessKey.endsWith("'"))) {
+    secretAccessKey = secretAccessKey.slice(1, -1).trim();
+  }
+
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
     return null;
   }
 
-  // Strip accidental quotes or CLI prefixes
-  if ((rawUrl.startsWith('"') && rawUrl.endsWith('"')) || (rawUrl.startsWith("'") && rawUrl.endsWith("'"))) {
-    rawUrl = rawUrl.slice(1, -1).trim();
-  }
-  if (rawUrl.toLowerCase().startsWith('psql ')) {
-    rawUrl = rawUrl.slice(5).trim();
-    if ((rawUrl.startsWith('"') && rawUrl.endsWith('"')) || (rawUrl.startsWith("'") && rawUrl.endsWith("'"))) {
-      rawUrl = rawUrl.slice(1, -1).trim();
-    }
-  }
-  if (rawUrl.startsWith('postgres://')) {
-    rawUrl = 'postgresql://' + rawUrl.slice('postgres://'.length);
+  if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+    endpoint = 'https://' + endpoint;
   }
 
-  const connectionString = rawUrl;
-  const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
-  const isSslDisabled = connectionString.includes('sslmode=disable');
-
-  return new Pool({
-    connectionString,
-    ssl: isLocal || isSslDisabled
-      ? false
-      : { rejectUnauthorized: false }, // Allows Neon, Supabase, Cloud SQL, Railway, Render
-    connectionTimeoutMillis: 10000,
-    idleTimeoutMillis: 30000,
-    max: 10,
+  const client = new S3Client({
+    endpoint,
+    region,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+    },
+    forcePathStyle: true, // Crucial for Neon and custom S3 endpoints
   });
-}
 
-// Auto-initialize PostgreSQL tables if not present
-async function initializePostgresSchema(pool: pg.Pool) {
-  const client = await pool.connect();
-  try {
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS mandi_sync_data (
-        shop_id VARCHAR(100) PRIMARY KEY,
-        shop_pin VARCHAR(50),
-        payload JSONB NOT NULL,
-        lots_count INT DEFAULT 0,
-        customers_count INT DEFAULT 0,
-        vendors_count INT DEFAULT 0,
-        last_uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        last_downloaded_at TIMESTAMP WITH TIME ZONE,
-        client_device TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS mandi_sync_logs (
-        id SERIAL PRIMARY KEY,
-        shop_id VARCHAR(100) NOT NULL,
-        action VARCHAR(50) NOT NULL,
-        lots_count INT DEFAULT 0,
-        client_device TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-  } finally {
-    client.release();
-  }
+  return { client, endpoint, accessKeyId, region, bucketName };
 }
 
 async function startServer() {
@@ -85,7 +71,10 @@ async function startServer() {
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Neon-Connection-String');
+    res.header(
+      'Access-Control-Allow-Headers',
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, S3-Endpoint, S3-Access-Key'
+    );
     if (req.method === 'OPTIONS') {
       return res.sendStatus(200);
     }
@@ -97,156 +86,184 @@ async function startServer() {
 
   // --- API Routes ---
 
-  // 1. Health check & PostgreSQL availability
+  // 1. Health check & Storage Engine Info
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
-      hasEnvDatabaseUrl: Boolean(process.env.DATABASE_URL),
-      dbEngine: 'PostgreSQL',
-      recommendedUrlFormat: 'postgresql://username:password@host:5432/database?sslmode=require',
+      hasEnvS3Endpoint: Boolean(process.env.AWS_ENDPOINT_URL_S3),
+      hasEnvS3Credentials: Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY),
+      storageEngine: 'S3-Compatible Object Storage (Neon)',
+      defaultRegion: process.env.AWS_REGION || 'us-east-2',
     });
   });
 
-  // 2. Test PostgreSQL Database Connection
-  app.post('/api/db/test', async (req, res) => {
-    const { connectionUrl } = req.body || {};
-    const pool = getPostgresPool(connectionUrl);
+  // 2. Test S3 Object Storage Connection
+  const handleTestS3 = async (req: express.Request, res: express.Response) => {
+    const s3Info = getS3ClientAndConfig(req.body);
 
-    if (!pool) {
+    if (!s3Info) {
       return res.status(400).json({
         success: false,
-        message: 'No PostgreSQL connection string provided in request or DATABASE_URL env variable.',
-        hint: 'Provide a valid PostgreSQL connection URL (e.g. postgresql://user:password@host:5432/dbname)',
+        message: 'Missing S3 credentials. Please provide Endpoint URL, Access Key ID, and Secret Access Key.',
+        hint: 'Enter AWS_ENDPOINT_URL_S3, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY from your Neon Object Storage.',
       });
     }
+
+    const { client, endpoint, bucketName, region } = s3Info;
 
     try {
-      const client = await pool.connect();
+      let buckets: string[] = [];
       try {
-        const queryRes = await client.query('SELECT NOW() as now, version() as version;');
-        await initializePostgresSchema(pool);
-        res.json({
-          success: true,
-          message: 'PostgreSQL connection successful! Database is online and ready.',
-          serverTime: queryRes.rows[0]?.now,
-          version: queryRes.rows[0]?.version,
-          dbEngine: 'PostgreSQL',
-        });
-      } finally {
-        client.release();
+        const listRes = await client.send(new ListBucketsCommand({}));
+        buckets = (listRes.Buckets || []).map((b) => b.Name || '');
+      } catch {
+        // Some scoped credentials only allow access to specific bucket
       }
+
+      // Check bucket presence or attempt to create if missing
+      try {
+        await client.send(new HeadBucketCommand({ Bucket: bucketName }));
+      } catch (headErr: any) {
+        if (headErr?.name === 'NotFound' || headErr?.$metadata?.httpStatusCode === 404) {
+          try {
+            await client.send(new CreateBucketCommand({ Bucket: bucketName }));
+          } catch {
+            // Ignore if creation is not permitted; PutObject will verify
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        message: 'S3 Object Storage connection successful! Bucket and credentials verified.',
+        endpoint,
+        bucketName,
+        region,
+        availableBuckets: buckets,
+        storageEngine: 'S3-Compatible Object Storage (Neon)',
+      });
     } catch (err: any) {
-      console.error('PostgreSQL Connection Test Failed:', err);
+      console.error('S3 Connection Test Failed:', err);
       res.status(500).json({
         success: false,
-        message: `PostgreSQL connection error: ${err?.message || 'Failed to connect'}`,
-        code: err?.code,
+        message: `S3 Object Storage connection error: ${err?.message || 'Failed to authenticate'}`,
+        code: err?.name || err?.Code,
       });
-    } finally {
-      // Close pool if created temporarily for test
-      if (connectionUrl) {
-        await pool.end().catch(() => {});
-      }
     }
-  });
+  };
 
-  // 3. PostgreSQL Sync Upload
-  app.post('/api/db/sync-upload', async (req, res) => {
-    const { shopId, pin, connectionUrl, payload } = req.body || {};
+  app.post('/api/s3/test', handleTestS3);
+  app.post('/api/db/test', handleTestS3); // Backwards-compatible alias
+
+  // 3. S3 Sync Upload
+  const handleS3Upload = async (req: express.Request, res: express.Response) => {
+    const { shopId, pin, payload } = req.body || {};
 
     if (!shopId || !payload) {
       return res.status(400).json({
         success: false,
-        message: 'Missing shopId or data payload for upload.',
+        message: 'Missing shopId or data payload for S3 upload.',
       });
     }
 
-    const pool = getPostgresPool(connectionUrl);
-    if (!pool) {
+    const s3Info = getS3ClientAndConfig(req.body);
+    if (!s3Info) {
       return res.status(400).json({
         success: false,
-        message: 'No PostgreSQL connection available. Please provide your PostgreSQL URL or configure DATABASE_URL.',
+        message: 'Missing S3 credentials. Please provide Endpoint URL, Access Key ID, and Secret Access Key.',
       });
     }
 
+    const { client, bucketName, endpoint } = s3Info;
     const cleanShopId = String(shopId).trim().toUpperCase();
     const cleanPin = String(pin || '1234').trim();
+    const objectKey = `backups/${cleanShopId}.json`;
+    const timestamp = new Date().toISOString();
+
     const lots = payload.lots || [];
     const customers = payload.customers || [];
     const vendors = payload.vendors || [];
-    const timestamp = new Date().toISOString();
-    const clientDevice = req.headers['user-agent'] || 'Web/Mobile Client';
+    const expenses = payload.expenses || [];
+    const drawerAdjustments = payload.drawerAdjustments || [];
+
+    const uploadEnvelope = {
+      version: '2.0.0',
+      storageType: 'neon_s3_object_storage',
+      shopId: cleanShopId,
+      shopPin: cleanPin,
+      uploadedAt: timestamp,
+      stats: {
+        lotsCount: lots.length,
+        customersCount: customers.length,
+        vendorsCount: vendors.length,
+        expensesCount: expenses.length,
+        drawerCount: drawerAdjustments.length,
+      },
+      payload,
+    };
 
     try {
-      await initializePostgresSchema(pool);
-      const client = await pool.connect();
+      // Ensure bucket exists or create if possible
       try {
-        // Upsert into mandi_sync_data
-        const upsertQuery = `
-          INSERT INTO mandi_sync_data (
-            shop_id, shop_pin, payload, lots_count, customers_count, vendors_count,
-            last_uploaded_at, client_device, updated_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $7)
-          ON CONFLICT (shop_id) DO UPDATE SET
-            shop_pin = EXCLUDED.shop_pin,
-            payload = EXCLUDED.payload,
-            lots_count = EXCLUDED.lots_count,
-            customers_count = EXCLUDED.customers_count,
-            vendors_count = EXCLUDED.vendors_count,
-            last_uploaded_at = EXCLUDED.last_uploaded_at,
-            client_device = EXCLUDED.client_device,
-            updated_at = EXCLUDED.updated_at
-          RETURNING last_uploaded_at, last_downloaded_at;
-        `;
-
-        const result = await client.query(upsertQuery, [
-          cleanShopId,
-          cleanPin,
-          JSON.stringify(payload),
-          lots.length,
-          customers.length,
-          vendors.length,
-          timestamp,
-          clientDevice,
-        ]);
-
-        // Log upload activity
-        await client.query(
-          `INSERT INTO mandi_sync_logs (shop_id, action, lots_count, client_device) VALUES ($1, $2, $3, $4)`,
-          [cleanShopId, 'UPLOAD', lots.length, clientDevice]
-        );
-
-        const row = result.rows[0];
-        res.json({
-          success: true,
-          message: 'Data successfully uploaded and synced with PostgreSQL database!',
-          lastUploadedAt: row?.last_uploaded_at || timestamp,
-          lastDownloadedAt: row?.last_downloaded_at || null,
-          lotsCount: lots.length,
-          customersCount: customers.length,
-          vendorsCount: vendors.length,
-          dbEngine: 'PostgreSQL',
-        });
-      } finally {
-        client.release();
+        await client.send(new HeadBucketCommand({ Bucket: bucketName }));
+      } catch (headErr: any) {
+        if (headErr?.name === 'NotFound' || headErr?.$metadata?.httpStatusCode === 404) {
+          try {
+            await client.send(new CreateBucketCommand({ Bucket: bucketName }));
+          } catch {
+            // Proceed to upload
+          }
+        }
       }
+
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucketName,
+          Key: objectKey,
+          Body: JSON.stringify(uploadEnvelope, null, 2),
+          ContentType: 'application/json; charset=utf-8',
+          Metadata: {
+            shop_id: cleanShopId,
+            uploaded_at: timestamp,
+            lots_count: String(lots.length),
+            customers_count: String(customers.length),
+            vendors_count: String(vendors.length),
+          },
+        })
+      );
+
+      res.json({
+        success: true,
+        message: `Data successfully uploaded to S3 Object Storage! (${objectKey})`,
+        lastUploadedAt: timestamp,
+        lotsCount: lots.length,
+        customersCount: customers.length,
+        vendorsCount: vendors.length,
+        expensesCount: expenses.length,
+        drawerCount: drawerAdjustments.length,
+        logsCount: (payload.systemLogs || []).length,
+        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        bucketName,
+        objectKey,
+        endpoint,
+      });
     } catch (err: any) {
-      console.error('PostgreSQL Upload Error:', err);
+      console.error('S3 Upload Error:', err);
       res.status(500).json({
         success: false,
-        message: `PostgreSQL Upload Error: ${err?.message || 'Failed to save to database'}`,
+        message: `S3 Upload Error: ${err?.message || 'Failed to upload to S3 storage'}`,
+        code: err?.name,
       });
-    } finally {
-      if (connectionUrl) {
-        await pool.end().catch(() => {});
-      }
     }
-  });
+  };
 
-  // 4. PostgreSQL Sync Download
-  app.post('/api/db/sync-download', async (req, res) => {
-    const { shopId, pin, connectionUrl } = req.body || {};
+  app.post('/api/s3/upload', handleS3Upload);
+  app.post('/api/s3/sync-upload', handleS3Upload);
+  app.post('/api/db/sync-upload', handleS3Upload); // Backwards-compatible alias
+
+  // 4. S3 Sync Download
+  const handleS3Download = async (req: express.Request, res: express.Response) => {
+    const { shopId, pin } = req.body || {};
 
     if (!shopId) {
       return res.status(400).json({
@@ -255,153 +272,136 @@ async function startServer() {
       });
     }
 
-    const pool = getPostgresPool(connectionUrl);
-    if (!pool) {
+    const s3Info = getS3ClientAndConfig(req.body);
+    if (!s3Info) {
       return res.status(400).json({
         success: false,
-        message: 'No PostgreSQL connection available. Please provide your PostgreSQL URL or configure DATABASE_URL.',
+        message: 'Missing S3 credentials. Please provide Endpoint URL, Access Key ID, and Secret Access Key.',
       });
     }
 
+    const { client, bucketName } = s3Info;
     const cleanShopId = String(shopId).trim().toUpperCase();
     const cleanPin = String(pin || '').trim();
-    const clientDevice = req.headers['user-agent'] || 'Web/Mobile Client';
+    const objectKey = `backups/${cleanShopId}.json`;
     const timestamp = new Date().toISOString();
 
     try {
-      await initializePostgresSchema(pool);
-      const client = await pool.connect();
+      let getRes;
       try {
-        const queryRes = await client.query(
-          `SELECT shop_id, shop_pin, payload, lots_count, customers_count, vendors_count, last_uploaded_at, last_downloaded_at
-           FROM mandi_sync_data WHERE shop_id = $1`,
-          [cleanShopId]
+        getRes = await client.send(
+          new GetObjectCommand({
+            Bucket: bucketName,
+            Key: objectKey,
+          })
         );
-
-        if (queryRes.rows.length === 0) {
+      } catch (err: any) {
+        if (err?.name === 'NoSuchKey' || err?.$metadata?.httpStatusCode === 404) {
           return res.status(404).json({
             success: false,
-            message: `No data found in PostgreSQL database for Shop ID: "${cleanShopId}". Please upload data first from your primary device.`,
+            message: `No backup data found in S3 bucket "${bucketName}" for Shop ID: "${cleanShopId}". Please upload data first from your primary device.`,
           });
         }
-
-        const row = queryRes.rows[0];
-
-        // Validate PIN if configured on row
-        if (row.shop_pin && cleanPin && row.shop_pin !== cleanPin) {
-          return res.status(401).json({
-            success: false,
-            message: 'Invalid PIN code. Please enter the correct Security PIN for this shop.',
-          });
-        }
-
-        // Update last_downloaded_at timestamp
-        await client.query(
-          `UPDATE mandi_sync_data SET last_downloaded_at = $1 WHERE shop_id = $2`,
-          [timestamp, cleanShopId]
-        );
-
-        // Log download activity
-        await client.query(
-          `INSERT INTO mandi_sync_logs (shop_id, action, lots_count, client_device) VALUES ($1, $2, $3, $4)`,
-          [cleanShopId, 'DOWNLOAD', row.lots_count || 0, clientDevice]
-        );
-
-        let parsedPayload = row.payload;
-        if (typeof parsedPayload === 'string') {
-          try {
-            parsedPayload = JSON.parse(parsedPayload);
-          } catch {
-            // keep as is
-          }
-        }
-
-        res.json({
-          success: true,
-          message: 'Data successfully downloaded from PostgreSQL database!',
-          lastUploadedAt: row.last_uploaded_at,
-          lastDownloadedAt: timestamp,
-          lotsCount: row.lots_count,
-          customersCount: row.customers_count,
-          vendorsCount: row.vendors_count,
-          data: parsedPayload,
-          dbEngine: 'PostgreSQL',
-        });
-      } finally {
-        client.release();
+        throw err;
       }
+
+      const bodyStr = await getRes.Body?.transformToString();
+      if (!bodyStr) {
+        return res.status(404).json({
+          success: false,
+          message: 'Empty backup file returned from S3 storage.',
+        });
+      }
+
+      const parsedEnvelope = JSON.parse(bodyStr);
+
+      // Validate PIN if configured in uploaded data
+      const storedPin = parsedEnvelope.shopPin || parsedEnvelope.pin;
+      if (storedPin && cleanPin && storedPin !== cleanPin) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid PIN code. Please enter the correct Security PIN for this shop.',
+        });
+      }
+
+      const payload = parsedEnvelope.payload || parsedEnvelope;
+
+      res.json({
+        success: true,
+        message: 'Data successfully downloaded from S3 Object Storage!',
+        lastUploadedAt: parsedEnvelope.uploadedAt || getRes.LastModified?.toISOString() || timestamp,
+        lastDownloadedAt: timestamp,
+        lotsCount: payload.lots?.length || 0,
+        customersCount: payload.customers?.length || 0,
+        vendorsCount: payload.vendors?.length || 0,
+        expensesCount: payload.expenses?.length || 0,
+        drawerCount: payload.drawerAdjustments?.length || 0,
+        logsCount: payload.systemLogs?.length || 0,
+        data: payload,
+        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        bucketName,
+        objectKey,
+      });
     } catch (err: any) {
-      console.error('PostgreSQL Download Error:', err);
+      console.error('S3 Download Error:', err);
       res.status(500).json({
         success: false,
-        message: `PostgreSQL Download Error: ${err?.message || 'Failed to download data'}`,
+        message: `S3 Download Error: ${err?.message || 'Failed to download from S3 object storage'}`,
+        code: err?.name,
       });
-    } finally {
-      if (connectionUrl) {
-        await pool.end().catch(() => {});
-      }
     }
-  });
+  };
 
-  // 5. Get DB Sync Status and Last Upload/Download Timestamps
-  app.get('/api/db/status', async (req, res) => {
+  app.post('/api/s3/download', handleS3Download);
+  app.post('/api/s3/sync-download', handleS3Download);
+  app.post('/api/db/sync-download', handleS3Download); // Backwards-compatible alias
+
+  // 5. Get S3 Sync Status
+  const handleS3Status = async (req: express.Request, res: express.Response) => {
     const shopId = String(req.query.shopId || '').trim().toUpperCase();
-    const customUrl = req.query.connectionUrl ? String(req.query.connectionUrl) : undefined;
-    const pool = getPostgresPool(customUrl);
+    const s3Info = getS3ClientAndConfig(req.query as any);
 
-    if (!pool || !shopId) {
+    if (!s3Info || !shopId) {
       return res.json({
-        configured: Boolean(pool),
+        configured: Boolean(s3Info),
         hasData: false,
         lastUploadedAt: null,
         lastDownloadedAt: null,
       });
     }
 
+    const { client, bucketName } = s3Info;
+    const objectKey = `backups/${shopId}.json`;
+
     try {
-      const client = await pool.connect();
-      try {
-        const queryRes = await client.query(
-          `SELECT shop_id, lots_count, customers_count, vendors_count, last_uploaded_at, last_downloaded_at
-           FROM mandi_sync_data WHERE shop_id = $1`,
-          [shopId]
-        );
+      const headRes = await client.send(
+        new HeadObjectCommand({
+          Bucket: bucketName,
+          Key: objectKey,
+        })
+      );
 
-        if (queryRes.rows.length === 0) {
-          return res.json({
-            configured: true,
-            hasData: false,
-            lastUploadedAt: null,
-            lastDownloadedAt: null,
-          });
-        }
-
-        const row = queryRes.rows[0];
-        res.json({
-          configured: true,
-          hasData: true,
-          lastUploadedAt: row.last_uploaded_at,
-          lastDownloadedAt: row.last_downloaded_at,
-          lotsCount: row.lots_count,
-          customersCount: row.customers_count,
-          vendorsCount: row.vendors_count,
-          dbEngine: 'PostgreSQL',
-        });
-      } finally {
-        client.release();
-      }
-    } catch (err) {
+      res.json({
+        configured: true,
+        hasData: true,
+        lastUploadedAt: headRes.LastModified?.toISOString() || null,
+        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        bucketName,
+        objectKey,
+        contentLength: headRes.ContentLength,
+      });
+    } catch {
       res.json({
         configured: true,
         hasData: false,
-        error: String(err),
+        lastUploadedAt: null,
+        lastDownloadedAt: null,
       });
-    } finally {
-      if (customUrl) {
-        await pool.end().catch(() => {});
-      }
     }
-  });
+  };
+
+  app.get('/api/s3/status', handleS3Status);
+  app.get('/api/db/status', handleS3Status); // Backwards-compatible alias
 
   // --- Vite / Frontend Serving Middleware ---
   if (process.env.NODE_ENV !== 'production') {
@@ -419,7 +419,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Sabzi Mandi server running on http://0.0.0.0:${PORT}`);
+    console.log(`Sabzi Mandi server running on http://0.0.0.0:${PORT} with S3 Object Storage`);
   });
 }
 

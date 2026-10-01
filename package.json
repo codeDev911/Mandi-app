@@ -20,6 +20,7 @@
     "neu:run": "neu run"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1144.0",
     "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",
@@ -59,7 +60,6 @@
   "optionalDependencies": {
     "@rollup/rollup-win32-x64-msvc": "^4.34.8",
     "@rollup/rollup-linux-x64-gnu": "^4.34.8",
-    
     "lightningcss-win32-x64-msvc": "^1.29.1",
     "lightningcss-linux-x64-gnu": "^1.29.1",
     "@tailwindcss/oxide-win32-x64-msvc": "^4.1.14"

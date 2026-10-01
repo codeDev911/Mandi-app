@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, UnitType, MazdooriRateItem, ProductPreset } from '../types';
+import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, UnitType, MazdooriRateItem, ProductPreset, ShopExpense, DrawerAdjustment } from '../types';
 import { translations, unitLabels, commonMandiProducts, getAvailableProducts, resolveUnitType, getUnitDisplayLabel } from '../utils/localization';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
-import { getStoredCloudConfig } from '../utils/cloudSyncEngine';
+import { getStoredCloudConfig, saveStoredCloudConfig } from '../utils/cloudSyncEngine';
 import { DEFAULT_UNIT_MAZDOORI_RATES, getMazdooriItems, DEFAULT_MAZDOORI_ITEMS } from '../utils/calculations';
 import { downloadJSONBackup, shareJSONBackup } from '../utils/fileDownloader';
 import { ShareBackupModal } from './ShareBackupModal';
 import { ManageMazdooriModal } from './ManageMazdooriModal';
 import { PinPromptModal } from './PinPromptModal';
 import { SystemLogsModal } from './SystemLogsModal';
-import { seedInitialLogsIfEmpty, addSystemLog } from '../utils/systemLogs';
+import { seedInitialLogsIfEmpty, addSystemLog, getSystemLogs } from '../utils/systemLogs';
+import { parseAndValidateBackupPayload, parseAndValidateSettingsPayload } from '../utils/storageEngine';
 import {
   Settings,
   Store,
@@ -43,6 +44,10 @@ import {
   Eye,
   EyeOff,
   Sparkles,
+  Sliders,
+  FileJson,
+  CheckCircle2,
+  Database,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -50,6 +55,8 @@ interface SettingsViewProps {
   lots?: VendorLot[];
   customers?: CustomerBuyer[];
   vendors?: SavedVendor[];
+  expenses?: ShopExpense[];
+  drawerAdjustments?: DrawerAdjustment[];
   onUpdateSettings: (newSettings: AppSettings) => void;
   onResetData: () => void;
   onOpenCloudSync?: () => void;
@@ -58,6 +65,9 @@ interface SettingsViewProps {
     lots?: VendorLot[];
     customers?: CustomerBuyer[];
     vendors?: SavedVendor[];
+    expenses?: ShopExpense[];
+    drawerAdjustments?: DrawerAdjustment[];
+    systemLogs?: any[];
   }) => void;
 }
 
@@ -66,6 +76,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   lots = [],
   customers = [],
   vendors = [],
+  expenses = [],
+  drawerAdjustments = [],
   onUpdateSettings,
   onResetData,
   onOpenCloudSync,
@@ -196,7 +208,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [pinChangeSuccess, setPinChangeSuccess] = useState<string | null>(null);
   const [isPinModalOpenForLogs, setIsPinModalOpenForLogs] = useState(false);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
-  const cloudConfig = getStoredCloudConfig();
+  const [cloudConfigState, setCloudConfigState] = useState(getStoredCloudConfig());
 
   useEffect(() => {
     seedInitialLogsIfEmpty(lots);
@@ -221,17 +233,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleExportJSON = async () => {
     sound.playCashChime();
+    const systemLogs = getSystemLogs();
     const exportPayload = {
       version: '2.0.0',
+      appName: 'MandiMunshiMasterSystem',
       exportedAt: new Date().toISOString(),
-      settings,
+      stats: {
+        lotsCount: lots.length,
+        customersCount: customers.length,
+        vendorsCount: vendors.length,
+        expensesCount: expenses.length,
+        drawerCount: drawerAdjustments.length,
+        logsCount: systemLogs.length,
+      },
+      settings: form,
       lots,
       customers,
       vendors,
+      expenses,
+      drawerAdjustments,
+      systemLogs,
     };
-    const res = await downloadJSONBackup(exportPayload, 'sabzi-mandi-backup');
+    const res = await downloadJSONBackup(exportPayload, 'sabzi-mandi-full-backup');
     if (res.success) {
-      alert(isUrdu ? 'بیک اپ فائل کامیابی سے ڈیوائس پر محفوظ ہو گئی ہے!' : 'Backup file saved to device successfully!');
+      alert(
+        isUrdu
+          ? 'مکمل بیک اپ فائل (تمام لاٹس، کھاتے، اخراجات، دراز اور ترتیبات) کامیابی سے محفوظ ہو گئی ہے!'
+          : 'Full backup file (all lots, khata, expenses, drawer, and settings) saved successfully!'
+      );
     }
   };
 
@@ -248,31 +277,114 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        const parsed = JSON.parse(text);
-        if (parsed && (Array.isArray(parsed.lots) || parsed.settings || Array.isArray(parsed.customers))) {
-          const lotsCount = Array.isArray(parsed.lots) ? parsed.lots.length : 0;
-          const custCount = Array.isArray(parsed.customers) ? parsed.customers.length : 0;
+        const res = parseAndValidateBackupPayload(text);
+        if (res.success) {
+          const lotsCount = res.lots?.length || 0;
+          const custCount = res.customers?.length || 0;
+          const vendCount = res.vendors?.length || 0;
+          const expCount = res.expenses?.length || 0;
+          const drawerCount = res.drawerAdjustments?.length || 0;
           if (
             confirm(
               isUrdu
-                ? `کیا آپ یہ بیک اپ بحال کرنا چاہتے ہیں؟ (${lotsCount} لاٹس، ${custCount} خریدار)`
-                : `Restore backup with ${lotsCount} lots and ${custCount} buyers?`
+                ? `کیا آپ یہ مکمل بیک اپ بحال کرنا چاہتے ہیں؟\n• لاٹس: ${lotsCount}\n• خریدار کھاتے: ${custCount}\n• زمیندار کھاتے: ${vendCount}\n• دکان اخراجات: ${expCount}\n• دراز ریکارڈز: ${drawerCount}`
+                : `Restore full backup?\n• Lots: ${lotsCount}\n• Buyers: ${custCount}\n• Vendors: ${vendCount}\n• Expenses: ${expCount}\n• Drawer entries: ${drawerCount}`
             )
           ) {
             sound.playCashChime();
+            if (res.settings) {
+              setForm(res.settings);
+            }
             onRestoreBackup?.({
-              settings: parsed.settings || settings,
-              lots: Array.isArray(parsed.lots) ? parsed.lots : [],
-              customers: Array.isArray(parsed.customers) ? parsed.customers : [],
-              vendors: Array.isArray(parsed.vendors) ? parsed.vendors : [],
+              settings: res.settings || settings,
+              lots: res.lots || [],
+              customers: res.customers || [],
+              vendors: res.vendors || [],
+              expenses: res.expenses || [],
+              drawerAdjustments: res.drawerAdjustments || [],
+              systemLogs: res.systemLogs || [],
             });
-            alert(isUrdu ? 'بیک اپ کامیابی سے بحال ہو گیا ہے!' : 'Backup successfully restored!');
+            alert(isUrdu ? 'مکمل بیک اپ کامیابی سے بحال ہو گیا ہے!' : 'Full backup successfully restored!');
           }
         } else {
-          alert(isUrdu ? 'غلط بیک اپ فائل فارمیٹ' : 'Invalid backup file format');
+          alert(res.error || (isUrdu ? 'غلط بیک اپ فائل فارمیٹ' : 'Invalid backup file format'));
         }
       } catch (err) {
         alert(isUrdu ? 'فائل پڑھنے میں غلطی' : 'Error reading backup file');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleExportSettingsOnly = async () => {
+    sound.playCashChime();
+    const settingsPayload = {
+      version: '2.0.0',
+      type: 'mandi_individual_settings_backup',
+      exportedAt: new Date().toISOString(),
+      shopProfile: {
+        shopNameUrdu: form.shopNameUrdu,
+        shopNameEn: form.shopNameEn,
+        shopPhone: form.shopPhone,
+        shopPhone2: form.shopPhone2,
+        shopAddressUrdu: form.shopAddressUrdu,
+        shopAddressEn: form.shopAddressEn,
+        arhtiNameUrdu: form.arhtiNameUrdu,
+        arhtiNameEn: form.arhtiNameEn,
+      },
+      settings: form,
+    };
+    const dateStr = new Date().toISOString().split('T')[0];
+    const res = await downloadJSONBackup(settingsPayload, `mandi-settings-${dateStr}`);
+    if (res.success) {
+      alert(
+        isUrdu
+          ? 'صرف ترتیبات کی فائل (دکان پروفائل، ریٹس، کمیشن) کامیابی سے محفوظ ہو گئی ہے!'
+          : 'Individual settings file (shop profile, rates, commission) saved successfully!'
+      );
+    }
+  };
+
+  const handleImportSettingsOnly = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const res = parseAndValidateSettingsPayload(text);
+        if (res.success && res.settings) {
+          const shopTitle = res.settings.shopNameUrdu || res.settings.shopNameEn || 'دکان';
+          if (
+            confirm(
+              isUrdu
+                ? `کیا آپ صرف ترتیبات بحال کرنا چاہتے ہیں؟\nدکان: ${shopTitle}\n(نوٹ: آپ کے تمام لاٹس، خریدار، زمیندار اور کاروباری کھاتے محفوظ رہیں گے)`
+                : `Restore only settings from file?\nShop: ${shopTitle}\n(Note: All produce lots, customer khata, and business sales stay untouched)`
+            )
+          ) {
+            sound.playCashChime();
+            setForm(res.settings);
+            onUpdateSettings(res.settings);
+            addSystemLog({
+              title: 'ST',
+              status: 'updated',
+              description: `ترتیبات فائل سے انفرادی بحال کی گئیں: ${shopTitle}`,
+              descriptionEn: `Individual settings restored from file: ${shopTitle}`,
+              meta: { shopName: shopTitle },
+            });
+            alert(
+              isUrdu
+                ? 'ترتیبات کامیابی سے بحال ہو گئیں! (لاٹس اور کھاتے محفوظ رہے)'
+                : 'Settings restored successfully! (Lots and khata remained untouched)'
+            );
+          }
+        } else {
+          alert(res.error || (isUrdu ? 'غلط ترتیبات فائل فارمیٹ' : 'Invalid settings file format'));
+        }
+      } catch (err) {
+        alert(isUrdu ? 'فائل پڑھنے میں غلطی' : 'Error reading settings file');
       }
     };
     reader.readAsText(file);
@@ -302,26 +414,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
-      {/* Cloud Database & Multi-Device Sync Banner */}
+      {/* Neon S3 Cloud Object Storage Sync Banner */}
       <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-slate-800 shadow-md space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-bold flex-shrink-0 shadow-xs">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold flex-shrink-0 shadow-xs">
               <CloudUpload className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-sm sm:text-base font-urdu-nastaliq text-white">
-                  {isUrdu ? 'پوسٹگریس کیول (PostgreSQL) کلاؤڈ ڈیٹا بیس سنک' : 'PostgreSQL Cloud Database Sync'}
+                  {isUrdu ? 'نیون S3 کلاؤڈ آبجیکٹ اسٹوریج سنک' : 'Neon S3 Cloud Object Storage Sync'}
                 </h3>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-mono border border-amber-500/30">
+                  {cloudConfigState.shopCloudId}
+                </span>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono border border-emerald-500/30">
-                  {cloudConfig.shopCloudId}
+                  {cloudConfigState.endpointUrl ? 'S3 Storage Active' : 'Local Storage'}
                 </span>
               </div>
               <p className="text-xs text-slate-300 font-urdu-sans mt-0.5">
                 {isUrdu
-                  ? 'موبائل، ٹیبلٹ اور لیپ ٹاپ پر دکان کا تمام ریکارڈ PostgreSQL کلاؤڈ سے ہم آہنگ رکھیں۔'
-                  : 'Sync offline data to PostgreSQL database and access seamlessly on mobile & laptop.'}
+                  ? 'موبائل، ٹیبلٹ اور لیپ ٹاپ پر دکان کا تمام ریکارڈ S3 آبجیکٹ اسٹوریج کلاؤڈ سے ہم آہنگ رکھیں۔'
+                  : 'Sync offline data to Neon / AWS S3 object storage and access seamlessly on mobile & laptop.'}
               </p>
             </div>
           </div>
@@ -332,10 +447,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               sound.playPop();
               onOpenCloudSync?.();
             }}
-            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 shadow-xs active:scale-95 font-urdu-sans whitespace-nowrap cursor-pointer"
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs sm:text-sm transition flex items-center justify-center gap-2 shadow-xs active:scale-95 font-urdu-sans whitespace-nowrap cursor-pointer"
           >
             <Cloud className="w-4 h-4" />
-            <span>{isUrdu ? 'کلاؤڈ سنک کھولیں' : 'Open Cloud Sync'}</span>
+            <span>{isUrdu ? 'S3 کلاؤڈ سنک کھولیں' : 'Open S3 Cloud Sync'}</span>
           </button>
         </div>
 
@@ -346,7 +461,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {isUrdu ? 'آخری اپ لوڈ کا وقت (Last Uploaded):' : 'Last Uploaded:'}
             </span>
             <span className="font-bold text-emerald-400 font-numbers">
-              {cloudConfig.lastUploadedAt ? new Date(cloudConfig.lastUploadedAt).toLocaleString(isUrdu ? 'ur-PK' : 'en-PK') : (isUrdu ? 'ابھی تک نہیں ہوا (Never)' : 'Never')}
+              {cloudConfigState.lastUploadedAt ? new Date(cloudConfigState.lastUploadedAt).toLocaleString(isUrdu ? 'ur-PK' : 'en-PK') : (isUrdu ? 'ابھی تک نہیں ہوا (Never)' : 'Never')}
             </span>
           </div>
 
@@ -355,35 +470,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {isUrdu ? 'آخری ڈاؤن لوڈ کا وقت (Last Downloaded):' : 'Last Downloaded:'}
             </span>
             <span className="font-bold text-blue-400 font-numbers">
-              {cloudConfig.lastDownloadedAt ? new Date(cloudConfig.lastDownloadedAt).toLocaleString(isUrdu ? 'ur-PK' : 'en-PK') : (isUrdu ? 'ابھی تک نہیں ہوا (Never)' : 'Never')}
+              {cloudConfigState.lastDownloadedAt ? new Date(cloudConfigState.lastDownloadedAt).toLocaleString(isUrdu ? 'ur-PK' : 'en-PK') : (isUrdu ? 'ابھی تک نہیں ہوا (Never)' : 'Never')}
             </span>
           </div>
         </div>
 
-        {/* PostgreSQL Database URL from Form Input */}
+        {/* S3 Object Storage Endpoint Input */}
         <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <label className="text-xs font-bold text-slate-300 font-urdu-sans flex items-center gap-1.5">
-              <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isUrdu ? 'PostgreSQL ڈیٹا بیس کنکشن URL (براہ راست ان پٹ):' : 'PostgreSQL Database URL (Direct Input):'}</span>
+              <HardDrive className="w-3.5 h-3.5 text-amber-400" />
+              <span>{isUrdu ? 'S3 اینڈ پوائنٹ URL (AWS_ENDPOINT_URL_S3):' : 'S3 Endpoint URL (AWS_ENDPOINT_URL_S3):'}</span>
             </label>
-            <span className="text-[10px] text-slate-400 font-mono">Form Input</span>
+            <span className="text-[10px] text-slate-400 font-mono">Neon S3 Storage</span>
           </div>
           <div className="flex items-center gap-2">
             <input
               type="text"
               dir="ltr"
-              value={cloudConfig.postgresUrl || ''}
-              placeholder="postgresql://user:password@host:5432/mandidb?sslmode=require"
+              value={cloudConfigState.endpointUrl || ''}
+              placeholder="https://br-solitary-dream-aysdl8uh.storage.c-5.us-east-2.aws.neon.tech"
               onChange={(e) => {
-                const updated = { ...cloudConfig, postgresUrl: e.target.value };
-                try {
-                  localStorage.setItem('mandi_postgres_sync_config_v3', JSON.stringify(updated));
-                } catch {
-                  // ignore
-                }
+                const updated = { ...cloudConfigState, endpointUrl: e.target.value.trim() };
+                setCloudConfigState(updated);
+                saveStoredCloudConfig(updated);
               }}
-              className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-emerald-300 placeholder:text-slate-600 focus:ring-2 focus:ring-emerald-500"
+              className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-emerald-300 placeholder:text-slate-600 focus:ring-2 focus:ring-amber-500"
             />
             <button
               type="button"
@@ -391,15 +503,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 sound.playPop();
                 onOpenCloudSync?.();
               }}
-              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-urdu-sans rounded-xl transition active:scale-95 whitespace-nowrap"
+              className="px-3 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold font-urdu-sans rounded-xl transition active:scale-95 whitespace-nowrap cursor-pointer"
             >
-              {isUrdu ? 'ٹیسٹ و سنک' : 'Test & Sync'}
+              {isUrdu ? 'مکمل S3 سیٹنگز' : 'S3 Settings'}
             </button>
           </div>
           <p className="text-[10px] text-slate-400 font-urdu-sans">
             {isUrdu
-              ? 'ڈیٹا بیس URL براہ راست اس ان پٹ سے پڑھا جاتا ہے (کوئی .env پر انحصار نہیں)'
-              : 'Database URL is read directly from this input (no .env dependency required)'}
+              ? 'نیون آبجیکٹ اسٹوریج کا اینڈ پوائنٹ URL، ایکسس کی، اور سیکریٹ کی براؤزر اور سرور میں محفوظ رہتے ہیں'
+              : 'Neon S3 Object Storage endpoint, access keys, and bucket are stored securely for sync'}
           </p>
         </div>
 
@@ -410,7 +522,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <span>{isUrdu ? 'آف لائن ہائی اسپیڈ ڈیٹا بیس (IndexedDB)' : 'High-Speed Local Storage'}</span>
           </span>
           <span className="font-numbers text-slate-300">
-            {lots.length} {isUrdu ? 'لاٹس' : 'lots'} • {totalBidsCount} {isUrdu ? 'بولیاں' : 'bids'} • {customers.length} {isUrdu ? 'گاہک' : 'buyers'}
+            {lots.length} {isUrdu ? 'لاٹس' : 'lots'} • {totalBidsCount} {isUrdu ? 'بولیاں' : 'bids'} • {customers.length} {isUrdu ? 'گاہک' : 'buyers'} • {expenses.length} {isUrdu ? 'اخراجات' : 'expenses'}
           </span>
         </div>
       </div>
@@ -1318,40 +1430,96 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>{t.saveSettings}</span>
         </button>
 
-        {/* JSON File Backup & Restore */}
-        <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 space-y-2">
-          <span className="text-xs font-bold text-stone-700 font-urdu-sans block">
-            {isUrdu ? 'ڈیٹا بیک اپ، محفوظ کرنا و شیئر (JSON Backup):' : 'Data Backup, Device Save & Share (JSON):'}
-          </span>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={handleExportJSON}
-              className="py-2.5 px-3 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 text-xs font-bold border border-emerald-200 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer"
-            >
-              <Save className="w-4 h-4 text-emerald-700" />
-              <span>{isUrdu ? 'ڈیوائس پر محفوظ کریں' : 'Save to Device'}</span>
-            </button>
+        {/* Data Backup & Restore Section */}
+        <div className="space-y-3">
+          {/* 1. Full Data Backup & Restore */}
+          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-stone-800 font-urdu-sans flex items-center gap-1.5">
+                <Database className="w-4 h-4 text-emerald-700" />
+                <span>{isUrdu ? 'مکمل ڈیٹا بیک اپ، محفوظ کرنا و شیئر (Full Data Backup):' : 'Full Data Backup, Device Save & Share (JSON):'}</span>
+              </span>
+              <span className="text-[10px] text-stone-500 font-numbers flex items-center gap-1.5 flex-wrap">
+                <span>{lots.length} {isUrdu ? 'لاٹس' : 'lots'}</span>
+                <span>• {customers.length} {isUrdu ? 'گاہک' : 'buyers'}</span>
+                <span>• {vendors.length} {isUrdu ? 'زمیندار' : 'vendors'}</span>
+                <span>• {expenses.length} {isUrdu ? 'اخراجات' : 'expenses'}</span>
+              </span>
+            </div>
+            <p className="text-[11px] text-stone-500 font-urdu-sans">
+              {isUrdu
+                ? 'تمام لاٹس، خریدار، زمیندار، دکان اخراجات، دراز کیش اور ترتیبات کا مکمل بیک اپ محفوظ کریں۔'
+                : 'Back up all produce lots, buyers, vendors, shop expenses, cash drawer, and settings.'}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleExportJSON}
+                className="py-2.5 px-3 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 text-xs font-bold border border-emerald-200 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer active:scale-95"
+              >
+                <Save className="w-4 h-4 text-emerald-700" />
+                <span>{isUrdu ? 'مکمل بیک اپ ڈیوائس پر محفوظ کریں' : 'Save Full Backup to Device'}</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={handleShareJSON}
-              className="py-2.5 px-3 rounded-xl bg-white hover:bg-blue-50 text-blue-900 text-xs font-bold border border-blue-200 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer"
-            >
-              <Share2 className="w-4 h-4 text-blue-700" />
-              <span>{isUrdu ? 'شیئر کریں (WhatsApp/Drive)' : 'Share Backup File'}</span>
-            </button>
+              <button
+                type="button"
+                onClick={handleShareJSON}
+                className="py-2.5 px-3 rounded-xl bg-white hover:bg-blue-50 text-blue-900 text-xs font-bold border border-blue-200 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer active:scale-95"
+              >
+                <Share2 className="w-4 h-4 text-blue-700" />
+                <span>{isUrdu ? 'شیئر کریں (WhatsApp/Drive)' : 'Share Backup File'}</span>
+              </button>
 
-            <label className="py-2.5 px-3 rounded-xl bg-white hover:bg-stone-100 text-stone-800 text-xs font-bold border border-stone-300 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer">
-              <Upload className="w-4 h-4 text-stone-700" />
-              <span>{isUrdu ? 'بیک اپ بحال کریں' : 'Restore Backup'}</span>
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImportJSON}
-                className="hidden"
-              />
-            </label>
+              <label className="py-2.5 px-3 rounded-xl bg-white hover:bg-stone-100 text-stone-800 text-xs font-bold border border-stone-300 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer active:scale-95">
+                <Upload className="w-4 h-4 text-stone-700" />
+                <span>{isUrdu ? 'مکمل بیک اپ بحال کریں' : 'Restore Full Backup'}</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportJSON}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* 2. Individual Settings Backup & Restore */}
+          <div className="bg-amber-50/70 p-4 rounded-2xl border border-amber-200/80 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-950 font-urdu-sans flex items-center gap-1.5">
+                <Sliders className="w-4 h-4 text-amber-700" />
+                <span>{isUrdu ? 'صرف ترتیبات کا انفرادی بیک اپ (Settings Only Backup):' : 'Individual Settings Backup & Restore (JSON):'}</span>
+              </span>
+              <span className="text-[10px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full font-urdu-sans">
+                {isUrdu ? 'انفرادی ترتیبات' : 'Settings Only'}
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-900/80 font-urdu-sans leading-relaxed">
+              {isUrdu
+                ? 'صرف دکان پروفائل، پتہ، فون نمبر، کمیشن ریٹ اور مزدوری کے ریٹس کو علیحدہ محفوظ اور بحال کریں تاکہ کاروباری ڈیٹا، لاٹس اور کھاتے بالکل محفوظ رہیں۔'
+                : 'Export and import only shop profile, address, phone numbers, commission, and mazdoori rates without touching any produce lots, sales, or khata.'}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleExportSettingsOnly}
+                className="py-2.5 px-3 rounded-xl bg-white hover:bg-amber-100/60 text-amber-950 text-xs font-bold border border-amber-300 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer active:scale-95"
+              >
+                <Download className="w-4 h-4 text-amber-700" />
+                <span>{isUrdu ? 'صرف ترتیبات ڈاؤنلوڈ کریں (Export Settings)' : 'Export Settings Only (JSON)'}</span>
+              </button>
+
+              <label className="py-2.5 px-3 rounded-xl bg-white hover:bg-amber-100/60 text-amber-950 text-xs font-bold border border-amber-300 transition flex items-center justify-center gap-1.5 shadow-2xs font-urdu-sans cursor-pointer active:scale-95">
+                <Upload className="w-4 h-4 text-amber-700" />
+                <span>{isUrdu ? 'صرف ترتیبات بحال کریں (Import Settings)' : 'Import Settings Only (JSON)'}</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportSettingsOnly}
+                  className="hidden"
+                />
+              </label>
+            </div>
           </div>
         </div>
       </form>
@@ -1364,6 +1532,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         lots={lots}
         customers={customers}
         vendors={vendors}
+        expenses={expenses}
+        drawerAdjustments={drawerAdjustments}
       />
 
       {/* Manage Mazdoori Rates Modal */}
