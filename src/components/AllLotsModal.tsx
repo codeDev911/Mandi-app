@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { VendorLot, AppSettings } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { PaginationControls } from './PaginationControls';
@@ -312,7 +312,7 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {paginatedLots.map((lot) => {
                 const isSelected = selectedLotId === lot.id;
-                const unitLabel = unitLabels[lot.unitType][settings.language];
+                const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
                 const soldQty = lot.summary.soldQuantity;
                 const remainingQty = lot.summary.remainingQuantity;
                 const isCompleted = remainingQty === 0 || lot.status === 'completed';

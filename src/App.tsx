@@ -7,6 +7,7 @@ import {
   VendorPaymentStatus,
   CustomerBuyer,
   BuyerPaymentRecord,
+  BuyerCreditRecord,
   SavedVendor,
   VendorPaymentRecord,
   ShopExpense,
@@ -436,6 +437,72 @@ export default function App() {
           return {
             ...c,
             payments: newPayments,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return c;
+      });
+      saveCustomersToIndexedDB(updated).catch(console.error);
+      return updated;
+    });
+  };
+
+  const handleRecordCustomerCredit = (customerId: string, credit: BuyerCreditRecord) => {
+    sound.playCashChime();
+    addSystemLog({
+      title: 'BK',
+      status: 'created',
+      description: `خریدار کھاتہ میں دستی ادھار کا اندراج: خریدار ${credit.buyerName || customerId} کو رقم Rs.${credit.amount.toLocaleString()} کا ادھار شامل کیا گیا${credit.notes ? ` (${credit.notes})` : ''}`,
+      descriptionEn: `Customer manual credit recorded: ${credit.buyerName || customerId} - Rs.${credit.amount}`,
+      entityId: credit.id,
+      meta: { buyerName: credit.buyerName || customerId, amount: credit.amount, type: 'credit_addition' },
+    });
+    setCustomers((prev) => {
+      const existing = prev.find((c) => c.id === customerId || c.name === customerId);
+      if (existing) {
+        const updated = prev.map((c) => {
+          if (c.id !== existing.id) return c;
+          const updatedCredits = [credit, ...(c.manualCredits || [])];
+          return {
+            ...c,
+            manualCredits: updatedCredits,
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        saveCustomersToIndexedDB(updated).catch(console.error);
+        return updated;
+      } else {
+        const newCust: CustomerBuyer = {
+          id: customerId,
+          name: credit.buyerName || customerId,
+          balance: credit.amount,
+          manualCredits: [credit],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        const updated = [newCust, ...prev];
+        saveCustomersToIndexedDB(updated).catch(console.error);
+        return updated;
+      }
+    });
+  };
+
+  const handleDeleteCustomerCredit = (customerIdOrName: string, creditId: string) => {
+    sound.playPop();
+    addSystemLog({
+      title: 'BK',
+      status: 'deleted',
+      description: `خریدار کھاتہ سے دستی ادھار انٹری حذف کر دی گئی: خریدار ${customerIdOrName}`,
+      descriptionEn: `Buyer manual credit entry deleted for ${customerIdOrName}`,
+      entityId: creditId,
+    });
+    setCustomers((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id === customerIdOrName || c.name.trim().toLowerCase() === customerIdOrName.trim().toLowerCase()) {
+          const newCredits = (c.manualCredits || []).filter((cr) => cr.id !== creditId);
+          return {
+            ...c,
+            manualCredits: newCredits,
             updatedAt: new Date().toISOString(),
           };
         }
@@ -1181,6 +1248,8 @@ export default function App() {
             onDeleteCustomer={handleDeleteCustomer}
             onRecordCustomerPayment={handleRecordCustomerPayment}
             onDeleteCustomerPayment={handleDeleteCustomerPayment}
+            onRecordCustomerCredit={handleRecordCustomerCredit}
+            onDeleteCustomerCredit={handleDeleteCustomerCredit}
             onToggleSalePaymentStatus={handleToggleSalePaymentStatus}
             onSaveVendor={handleSaveVendor}
             onDeleteVendor={handleDeleteVendor}

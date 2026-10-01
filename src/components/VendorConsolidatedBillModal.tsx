@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import { VendorLot, AppSettings } from '../types';
-import { translations, unitLabels, formatFullRealDate } from '../utils/localization';
+import { translations, unitLabels, formatFullRealDate, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt, generateVendorConsolidatedInvoiceCanvas } from '../utils/receiptGenerator';
@@ -141,7 +141,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   }> = [];
 
   lots.forEach((lot) => {
-    const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+    const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
     if (lot.sales && lot.sales.length > 0) {
       lot.sales.forEach((s) => {
         allProductItems.push({
@@ -192,7 +192,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
 
   lots.forEach((lot) => {
     const prodKey = (lot.productUrdu || lot.productName || 'جنس').trim();
-    const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+    const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
     if (!productGroups.has(prodKey)) {
       productGroups.set(prodKey, {

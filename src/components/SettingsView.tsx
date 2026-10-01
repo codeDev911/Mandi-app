@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, UnitType, MazdooriRateItem } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, UnitType, MazdooriRateItem, ProductPreset } from '../types';
+import { translations, unitLabels, commonMandiProducts, getAvailableProducts, resolveUnitType, getUnitDisplayLabel } from '../utils/localization';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { getStoredCloudConfig } from '../utils/cloudSyncEngine';
@@ -30,6 +30,7 @@ import {
   Download,
   Upload,
   PackageCheck,
+  Package,
   Calculator,
   Save,
   Lock,
@@ -41,6 +42,7 @@ import {
   Tag,
   Eye,
   EyeOff,
+  Sparkles,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -81,6 +83,108 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editingMazdooriId, setEditingMazdooriId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [editingRate, setEditingRate] = useState<number>(25);
+
+  // Mandi Produce / Products in Settings State
+  const [newProdName, setNewProdName] = useState('');
+  const [newProdEmoji, setNewProdEmoji] = useState('🥔');
+  const [editingProdId, setEditingProdId] = useState<string | null>(null);
+  const [editProdName, setEditProdName] = useState('');
+  const [editProdEmoji, setEditProdEmoji] = useState('');
+
+  const VEG_FRUIT_EMOJI_LIST = [
+    '🥔', '🧅', '🍅', '🌶️', '🥬', '🥦', '🥒', '🍆', '🧄', '🫚', '🍋',
+    '🌽', '🥕', '🫑', '🫛', '🥜', '🍄', '🍎', '🍏', '🍐', '🍊', '🍌',
+    '🍉', '🍇', '🍓', '🍈', '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '📦'
+  ];
+
+  const handleAddProduct = () => {
+    if (!newProdName.trim()) {
+      alert(isUrdu ? 'براہ کرم جنس کا نام درج کریں' : 'Please enter product name');
+      return;
+    }
+    sound.playCashChime();
+    const currentProds = getAvailableProducts(form);
+    const newProd: ProductPreset = {
+      id: `prod-${Date.now()}`,
+      nameUrdu: newProdName.trim(),
+      nameEn: newProdName.trim(),
+      emoji: newProdEmoji.trim() || '📦',
+      isCustom: true,
+    };
+    const updated = [...currentProds, newProd];
+    const updatedForm = { ...form, products: updated };
+    setForm(updatedForm);
+    onUpdateSettings(updatedForm);
+    addSystemLog({
+      title: 'ST',
+      status: 'created',
+      description: `سیٹنگز میں نئی جنس شامل کی گئی: ${newProd.nameUrdu} (${newProd.emoji})`,
+      descriptionEn: `New product added to settings: ${newProd.nameUrdu} (${newProd.emoji})`,
+      meta: { productName: newProd.nameUrdu, emoji: newProd.emoji },
+    });
+    setNewProdName('');
+    setNewProdEmoji('🥔');
+  };
+
+  const handleSaveEditProduct = (prodId: string) => {
+    if (!editProdName.trim()) return;
+    sound.playPop();
+    const currentProds = getAvailableProducts(form);
+    const updated = currentProds.map((p, idx) => {
+      const matchId = p.id || `default-prod-${idx}`;
+      if (matchId === prodId) {
+        return {
+          ...p,
+          id: p.id || prodId,
+          nameUrdu: editProdName.trim(),
+          nameEn: editProdName.trim(),
+          emoji: editProdEmoji.trim() || p.emoji || '📦',
+        };
+      }
+      return p;
+    });
+    const updatedForm = { ...form, products: updated };
+    setForm(updatedForm);
+    onUpdateSettings(updatedForm);
+    addSystemLog({
+      title: 'ST',
+      status: 'updated',
+      description: `سیٹنگز میں جنس میں ترمیم: ${editProdName.trim()} (${editProdEmoji.trim()})`,
+      descriptionEn: `Product updated in settings: ${editProdName}`,
+    });
+    setEditingProdId(null);
+  };
+
+  const handleDeleteProduct = (prodId: string, prodName: string) => {
+    sound.playTrash();
+    const currentProds = getAvailableProducts(form);
+    const updated = currentProds.filter((p, idx) => (p.id || `default-prod-${idx}`) !== prodId);
+    const updatedForm = { ...form, products: updated };
+    setForm(updatedForm);
+    onUpdateSettings(updatedForm);
+    addSystemLog({
+      title: 'ST',
+      status: 'deleted',
+      description: `سیٹنگز سے جنس حذف کی گئی: ${prodName}`,
+      descriptionEn: `Product deleted from settings: ${prodName}`,
+    });
+  };
+
+  const handleResetDefaultProducts = () => {
+    if (confirm(isUrdu ? 'کیا آپ تمام اجناس کو ڈیفالٹ منڈی لسٹ پر بحال کرنا چاہتے ہیں؟' : 'Reset all products to default Mandi list?')) {
+      sound.playCashChime();
+      const updatedForm = { ...form, products: [...commonMandiProducts] };
+      setForm(updatedForm);
+      onUpdateSettings(updatedForm);
+      addSystemLog({
+        title: 'ST',
+        status: 'updated',
+        description: 'اجناس کی فہرست کو ڈیفالٹ منڈی لسٹ پر بحال کیا گیا',
+        descriptionEn: 'Products reset to default Mandi list',
+      });
+    }
+  };
+
   const [showPin, setShowPin] = useState(false);
   const [oldPin, setOldPin] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -526,11 +630,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       return;
                     }
                     sound.playCashChime();
+                    const cleanTitle = newQuickTitle.trim();
                     const currentItems = getMazdooriItems(form);
                     const newItem: MazdooriRateItem = {
                       id: `mzd-${Date.now()}`,
-                      title: newQuickTitle.trim(),
+                      title: cleanTitle,
                       rate: newQuickRate > 0 ? newQuickRate : 25,
+                      unitType: cleanTitle as UnitType,
                     };
                     const updated = [...currentItems, newItem];
                     const updatedForm = { ...form, mazdooriItems: updated };
@@ -636,9 +742,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <div className="font-bold text-xs text-stone-900 font-urdu-sans truncate">
                         {item.title}
                       </div>
-                      {item.unitType && (
+                      {item.unitType && item.unitType !== item.title && (
                         <span className="text-[10px] text-stone-400 font-urdu-sans">
-                          (پیکنگ: {unitLabels[item.unitType]?.[settings.language] || item.unitType})
+                          (پیکنگ: {getUnitDisplayLabel(item.unitType)})
                         </span>
                       )}
                     </div>
@@ -719,6 +825,220 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   ? 'جب آپ نئی لاٹ میں تعداد (مثلاً 50 بوری) اور مزدوری ریٹ (₨30) درج کریں گے تو کل کٹوتی خودکار 50 × ₨30 = ₨1,500 لاٹ پر لگ جائے گی۔'
                   : 'Entering quantity (e.g. 50 bori) and labor rate (Rs.30) automatically applies 50 × Rs.30 = Rs.1,500 total labor.'}
               </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Mandi Products & Vegetables Management (اجناس و سبزی / پھل ترتیبات) */}
+        <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-xs space-y-3.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-2">
+            <div>
+              <h3 className="font-bold text-xs sm:text-sm text-emerald-900 font-urdu-sans flex items-center gap-2">
+                <Package className="w-4 h-4 text-emerald-600" />
+                <span>اجناس و سبزی / پھل کی ترتیبات (Mandi Products & Vegetables)</span>
+              </h3>
+              <p className="text-[11px] text-stone-500 font-urdu-sans mt-0.5">
+                {isUrdu
+                  ? 'یہاں اپنی مرضی کی سبزی، پھل، علامت (ایموجی) اور ڈیفالٹ پیکنگ شامل کریں جو نئی لاٹ کے اندراج پر فوری ظاہر ہوں گے۔'
+                  : 'Configure custom produce, icons, and default packings to appear in New Lot Entry.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleResetDefaultProducts}
+              className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-2xs self-start sm:self-auto cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>{isUrdu ? 'ڈیفالٹ اجناس بحال کریں' : 'Reset Defaults'}</span>
+            </button>
+          </div>
+
+          {/* Add New Product Form */}
+          <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200/80 space-y-2.5">
+            <span className="text-xs font-bold text-emerald-950 font-urdu-sans flex items-center gap-1.5">
+              <Plus className="w-3.5 h-3.5 text-emerald-700" />
+              <span>{isUrdu ? 'نئی سبزی / پھل (جنس) شامل کریں:' : 'Add New Produce / Fruit:'}</span>
+            </span>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
+              {/* Product Name */}
+              <div className="sm:col-span-7">
+                <label className="text-[10px] text-slate-500 block mb-0.5 font-urdu-sans font-bold">
+                  {isUrdu ? 'جنس کا نام (Urdu Name):' : 'Product Name:'}
+                </label>
+                <input
+                  type="text"
+                  value={newProdName}
+                  onChange={(e) => setNewProdName(e.target.value)}
+                  placeholder={isUrdu ? 'مثلاً: شملہ مرچ یا امرود' : 'e.g. Green Chilies'}
+                  className="w-full px-3 py-1.5 bg-white border border-emerald-300 rounded-lg text-xs font-urdu-sans font-bold"
+                />
+              </div>
+
+              {/* Manually Enter Icon */}
+              <div className="sm:col-span-2">
+                <label className="text-[10px] text-slate-500 block mb-0.5 font-urdu-sans font-bold">
+                  {isUrdu ? 'علامت / آئیکن:' : 'Emoji / Icon:'}
+                </label>
+                <input
+                  type="text"
+                  value={newProdEmoji}
+                  onChange={(e) => setNewProdEmoji(e.target.value)}
+                  placeholder="🥔"
+                  className="w-full px-2 py-1.5 bg-white border border-emerald-300 rounded-lg text-base text-center font-bold"
+                />
+              </div>
+
+              {/* Add Button */}
+              <div className="sm:col-span-3 flex items-end">
+                <button
+                  type="button"
+                  onClick={handleAddProduct}
+                  className="w-full py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold font-urdu-sans text-xs flex items-center justify-center gap-1 transition shadow-2xs active:scale-95 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isUrdu ? 'شامل کریں' : 'Add'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* List of Vegetable & Fruit Icons to click and select */}
+            <div>
+              <span className="text-[10px] text-slate-600 block mb-1 font-urdu-sans font-semibold">
+                {isUrdu ? 'یا نیچے دی گئی سبزیوں و پھلوں کے آئیکن پر کلک کر کے منتخب کریں:' : 'Or click an icon from this list:'}
+              </span>
+              <div className="flex gap-1 overflow-x-auto pb-1 bg-white p-1.5 rounded-lg border border-emerald-200 scrollbar-none">
+                {VEG_FRUIT_EMOJI_LIST.map((em) => (
+                  <button
+                    type="button"
+                    key={em}
+                    onClick={() => {
+                      sound.playTick();
+                      setNewProdEmoji(em);
+                    }}
+                    className={`w-7 h-7 rounded-md text-base flex items-center justify-center transition flex-shrink-0 cursor-pointer ${
+                      newProdEmoji === em ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400' : 'hover:bg-slate-100'
+                    }`}
+                  >
+                    {em}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* List of Configured Products */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-stone-600 font-urdu-sans font-bold px-1">
+              <span>{isUrdu ? 'فعال محفوظ اجناس (لاٹ اندراج پر ظاہر ہوں گی):' : 'Saved Products (Active in New Lot):'}</span>
+              <span className="text-[11px] text-stone-400 font-numbers">
+                ({getAvailableProducts(form).length} {isUrdu ? 'اجناس' : 'products'})
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {getAvailableProducts(form).map((prod, idx) => {
+                const prodKey = prod.id || `default-prod-${idx}`;
+                const isEditing = editingProdId === prodKey;
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={prodKey}
+                      className="p-2.5 bg-amber-50/90 rounded-xl border border-amber-300 transition flex flex-col gap-2 shadow-xs col-span-2"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={editProdEmoji}
+                          onChange={(e) => setEditProdEmoji(e.target.value)}
+                          placeholder="🥔"
+                          className="w-10 px-1 py-1 bg-white border border-amber-400 rounded-lg text-base text-center"
+                        />
+                        <input
+                          type="text"
+                          value={editProdName}
+                          onChange={(e) => setEditProdName(e.target.value)}
+                          placeholder="نام جنس"
+                          className="flex-1 px-2 py-1 bg-white border border-amber-400 rounded-lg text-xs font-bold font-urdu-sans"
+                        />
+                      </div>
+
+                      <div className="flex gap-1 overflow-x-auto scrollbar-none py-1">
+                        {['🥔', '🧅', '🍅', '🌶️', '🥬', '🥦', '🥒', '🍆', '🍎', '🍌'].map((em) => (
+                          <button
+                            type="button"
+                            key={em}
+                            onClick={() => setEditProdEmoji(em)}
+                            className="text-base p-1 hover:bg-amber-100 rounded cursor-pointer"
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEditProduct(prodKey)}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold font-urdu-sans flex items-center gap-1 cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isUrdu ? 'محفوظ' : 'Save'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingProdId(null)}
+                          className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-urdu-sans cursor-pointer"
+                        >
+                          {isUrdu ? 'منسوخ' : 'Cancel'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={prodKey}
+                    className="p-2.5 bg-stone-50 hover:bg-emerald-50/40 rounded-xl border border-stone-200 hover:border-emerald-200 transition flex items-center justify-between gap-1.5 shadow-2xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="text-xl flex-shrink-0">{prod.emoji}</span>
+                      <div className="min-w-0">
+                        <div className="font-bold text-xs text-stone-900 font-urdu-sans truncate">
+                          {prod.nameUrdu}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-0.5 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sound.playTick();
+                          setEditingProdId(prodKey);
+                          setEditProdName(prod.nameUrdu);
+                          setEditProdEmoji(prod.emoji);
+                        }}
+                        className="p-1 rounded-md text-stone-400 hover:text-blue-700 hover:bg-blue-50 transition cursor-pointer"
+                        title={isUrdu ? 'تبدیل کریں' : 'Edit'}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteProduct(prodKey, prod.nameUrdu)}
+                        className="p-1 rounded-md text-stone-400 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                        title={isUrdu ? 'حذف کریں' : 'Delete'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

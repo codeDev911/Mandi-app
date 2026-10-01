@@ -1,4 +1,14 @@
-export type UnitType = 'bori' | 'tora' | 'kainchi' | 'shopper' | 'crates' | 'peti' | 'theli' | 'kg' | 'nag';
+export type UnitType = 'bori' | 'tora' | 'kainchi' | 'shopper' | 'crates' | 'peti' | 'theli' | 'kg' | 'nag' | (string & {});
+
+export interface ProductPreset {
+  id?: string;
+  nameEn?: string;
+  nameUrdu: string;
+  emoji: string;
+  defaultUnit?: UnitType;
+  defaultAvgRate?: number;
+  isCustom?: boolean;
+}
 
 export interface MazdooriRateItem {
   id: string;
@@ -152,6 +162,7 @@ export interface AppSettings {
   soundEnabled: boolean;
   viewMode: 'mobile' | 'desktop';
   securityPin?: string;
+  products?: ProductPreset[];
 }
 
 export interface SavedVendor {
@@ -166,6 +177,16 @@ export interface SavedVendor {
   updatedAt?: string;
 }
 
+export interface BuyerCreditRecord {
+  id: string;
+  buyerName?: string;
+  buyerPhone?: string;
+  amount: number;
+  date?: string;
+  notes?: string;
+  timestamp?: string;
+}
+
 export interface CustomerBuyer {
   id: string;
   name: string;
@@ -177,6 +198,7 @@ export interface CustomerBuyer {
   balance?: number;
   notes?: string;
   payments?: BuyerPaymentRecord[];
+  manualCredits?: BuyerCreditRecord[];
   createdAt?: string;
   updatedAt?: string;
 }

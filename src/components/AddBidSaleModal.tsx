@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { VendorLot, PaymentStatus, AppSettings, CustomerBuyer } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { parseUrduVoiceBid, VoiceBolliListener } from '../utils/voiceCommandParser';
@@ -36,7 +36,7 @@ export const AddBidSaleModal: React.FC<AddBidSaleModalProps> = ({
 }) => {
   const t = translations[settings.language];
   const isUrdu = settings.language === 'ur';
-  const unitLabel = unitLabels[lot.unitType][settings.language];
+  const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
   const maxAvailable = lot.summary.remainingQuantity;
 

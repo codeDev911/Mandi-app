@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { UnitType, AppSettings, VendorLot, SavedVendor, MazdooriRateItem } from '../types';
-import { translations, commonMandiProducts, unitLabels, ProductPreset } from '../utils/localization';
+import { translations, commonMandiProducts, unitLabels, ProductPreset, getAvailableProducts, getUnitDisplayLabel, resolveUnitType } from '../utils/localization';
 import { generateLotNumber, calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
@@ -45,24 +45,26 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const t = translations[settings.language];
   const isUrdu = settings.language === 'ur';
 
+  const availableProducts = useMemo(() => getAvailableProducts(settings), [settings.products]);
+  const mazdooriItems = useMemo(() => getMazdooriItems(settings), [settings.mazdooriItems]);
+  const defaultMazdoori = mazdooriItems[0];
+
   const [vendorName, setVendorName] = useState('');
   const [vendorPhone, setVendorPhone] = useState('');
   const [vendorCity, setVendorCity] = useState('');
   const [saveVendorToDb, setSaveVendorToDb] = useState(true);
   const [keepVendorAndStayOpen, setKeepVendorAndStayOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<ProductPreset | 'other'>(commonMandiProducts[0]);
+  const [selectedProduct, setSelectedProduct] = useState<ProductPreset | 'other'>(() => availableProducts[0] || commonMandiProducts[0]);
   const [isOtherProduct, setIsOtherProduct] = useState(false);
   const [customProductUrdu, setCustomProductUrdu] = useState('');
   const [customEmoji, setCustomEmoji] = useState('🥬');
-  const [unitType, setUnitType] = useState<UnitType>(commonMandiProducts[0].defaultUnit);
+  const [selectedMazdooriId, setSelectedMazdooriId] = useState<string | null>(() => defaultMazdoori?.id || null);
+  const [selectedMazdooriTitle, setSelectedMazdooriTitle] = useState<string>(() => defaultMazdoori ? cleanUrduTitle(defaultMazdoori.title) : 'بوری');
+  const [mazdooriRate, setMazdooriRate] = useState<number>(() => defaultMazdoori?.rate || 30);
+  const [unitType, setUnitType] = useState<UnitType>(() => defaultMazdoori ? (cleanUrduTitle(defaultMazdoori.title) as UnitType) : 'بوری');
   const [totalQuantity, setTotalQuantity] = useState<number | ''>(30);
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [commissionRate, setCommissionRate] = useState<number>(settings.defaultCommissionPercent);
-  const [mazdooriRate, setMazdooriRate] = useState<number>(() =>
-    getUnitMazdooriRate(commonMandiProducts[0].defaultUnit, settings)
-  );
-  const [selectedMazdooriTitle, setSelectedMazdooriTitle] = useState<string>('');
-  const [selectedMazdooriId, setSelectedMazdooriId] = useState<string | null>(null);
 
   const [kirayaAmount, setKirayaAmount] = useState<number>(0);
   const [advanceAmount, setAdvanceAmount] = useState<number>(0);
@@ -72,9 +74,15 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   // Sync / match mazdoori rate and title whenever unitType or settings change
   useEffect(() => {
     const items = getMazdooriItems(settings);
-    const matched = items.find(
-      (it) => it.unitType === unitType || it.title.toLowerCase().includes(unitType.toLowerCase())
-    );
+    let matched = selectedMazdooriId ? items.find((it) => it.id === selectedMazdooriId) : null;
+    if (!matched && unitType) {
+      matched = items.find(
+        (it) =>
+          cleanUrduTitle(it.title).toLowerCase() === String(unitType).toLowerCase() ||
+          it.unitType === unitType ||
+          it.title.toLowerCase().includes(String(unitType).toLowerCase())
+      );
+    }
     if (matched) {
       setSelectedMazdooriId(matched.id);
       setSelectedMazdooriTitle(cleanUrduTitle(matched.title));
@@ -82,19 +90,19 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
     } else {
       const uRate = getUnitMazdooriRate(unitType, settings);
       setMazdooriRate(uRate);
-      setSelectedMazdooriTitle(unitLabels[unitType]?.[settings.language] || unitType);
+      setSelectedMazdooriTitle(getUnitDisplayLabel(unitType, settings.language));
       setSelectedMazdooriId(null);
     }
-  }, [unitType, settings.mazdooriItems, settings.unitMazdooriRates]);
+  }, [unitType, selectedMazdooriId, settings.mazdooriItems, settings.unitMazdooriRates]);
 
   const handleSelectMazdooriItem = (item: MazdooriRateItem) => {
     sound.playTick();
+    const cleanTitle = cleanUrduTitle(item.title);
     setSelectedMazdooriId(item.id);
-    setSelectedMazdooriTitle(cleanUrduTitle(item.title));
+    setSelectedMazdooriTitle(cleanTitle);
     setMazdooriRate(item.rate);
-    if (item.unitType) {
-      setUnitType(item.unitType);
-    }
+    // Directly preserve the actual unit type title added by the user
+    setUnitType(cleanTitle as UnitType);
   };
 
   if (!isOpen) return null;
@@ -103,9 +111,8 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
     sound.playTick();
     setIsOtherProduct(false);
     setSelectedProduct(prod);
-    setUnitType(prod.defaultUnit);
-    const newRate = getUnitMazdooriRate(prod.defaultUnit, settings);
-    setMazdooriRate(newRate);
+    // Note: Do NOT overwrite unitType or mazdooriRate here!
+    // The user's selected unit type (e.g. شاپر) remains active.
     setError(null);
   };
 
@@ -173,7 +180,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       productName: prodName,
       productUrdu: prodUrdu,
       productEmoji: prodEmoji || '📦',
-      unitType,
+      unitType: (selectedMazdooriTitle || unitType || 'بوری') as UnitType,
       totalQuantity: numTotalQty,
       vehicleNumber: vehicleNumber.trim() || undefined,
       arrivalDate: new Date().toISOString().slice(0, 10),
@@ -252,8 +259,8 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       setKirayaAmount(0);
       setAdvanceAmount(0);
       setIsOtherProduct(false);
-      setSelectedProduct(commonMandiProducts[0]);
-      setUnitType(commonMandiProducts[0].defaultUnit);
+      const firstProd = availableProducts[0] || commonMandiProducts[0];
+      setSelectedProduct(firstProd);
       setCustomProductUrdu('');
       setError(null);
     } else {
@@ -501,7 +508,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               </h4>
               <div className="text-[11px] text-emerald-800 font-urdu-sans font-bold bg-emerald-100/70 px-2 py-0.5 rounded-md">
                 <span>
-                  {t.mazdoori}: {totalQuantity || 0} {unitLabels[unitType][settings.language]} × ₨{mazdooriRate} ={' '}
+                  {t.mazdoori}: {totalQuantity || 0} {getUnitDisplayLabel(unitType, settings.language)} × ₨{mazdooriRate} ={' '}
                   <span className="font-numbers font-extrabold text-emerald-950">
                     ₨{(((Number(totalQuantity) || 0) * mazdooriRate)).toLocaleString('en-US')}
                   </span>
@@ -576,12 +583,16 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
 
             {/* Product Quick Grid */}
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-              {commonMandiProducts.map((prod) => {
-                const isSelected = !isOtherProduct && typeof selectedProduct === 'object' && selectedProduct.nameEn === prod.nameEn;
+              {availableProducts.map((prod) => {
+                const isSelected =
+                  !isOtherProduct &&
+                  typeof selectedProduct === 'object' &&
+                  ((selectedProduct.id && prod.id && selectedProduct.id === prod.id) ||
+                    selectedProduct.nameUrdu === prod.nameUrdu);
                 return (
                   <button
                     type="button"
-                    key={prod.nameEn}
+                    key={prod.id || prod.nameUrdu}
                     onClick={() => handleSelectProduct(prod)}
                     className={`p-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-1 active:scale-95 ${
                       isSelected
@@ -700,7 +711,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
                   <span className="text-rose-500">*</span>
                 </label>
                 <span className="text-[11px] text-emerald-800 font-urdu-sans font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  {selectedMazdooriTitle || unitLabels[unitType]?.[settings.language]}: ₨{mazdooriRate}/یونٹ
+                  {selectedMazdooriTitle || getUnitDisplayLabel(unitType, settings.language)}: ₨{mazdooriRate}/یونٹ
                 </span>
               </div>
 
@@ -740,7 +751,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1 font-urdu-sans flex items-center gap-1">
                   <Hash className="w-3 h-3 text-slate-400" />
-                  <span>{t.totalQuantity} ({selectedMazdooriTitle || unitLabels[unitType][settings.language]})</span>
+                  <span>{t.totalQuantity} ({selectedMazdooriTitle || getUnitDisplayLabel(unitType, settings.language)})</span>
                   <span className="text-rose-500">*</span>
                 </label>
                 <div className="flex items-center gap-1.5">

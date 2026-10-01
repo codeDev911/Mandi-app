@@ -1,6 +1,6 @@
 import React from 'react';
 import { VendorLot, AppSettings } from '../types';
-import { unitLabels, formatFullRealDate } from '../utils/localization';
+import { unitLabels, formatFullRealDate, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 
 export interface InsafMandiBillViewProps {
@@ -99,7 +99,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
 
   if (!isAveraged) {
     lots.forEach((lot) => {
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
       if (lot.sales && lot.sales.length > 0) {
         lot.sales.forEach((s) => {
           allItems.push({
@@ -137,7 +137,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
 
     lots.forEach((lot) => {
       const prodKey = (lot.productUrdu || lot.productName || 'جنس').trim();
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
       if (!productGroups.has(prodKey)) {
         productGroups.set(prodKey, {

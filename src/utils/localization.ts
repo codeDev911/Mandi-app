@@ -1,4 +1,5 @@
-import { UnitType } from '../types';
+import { UnitType, AppSettings, ProductPreset } from '../types';
+export type { ProductPreset };
 
 export const translations = {
   ur: {
@@ -451,42 +452,91 @@ export const translations = {
   },
 };
 
-export const unitLabels: Record<UnitType, { ur: string; en: string }> = {
-  bori: { ur: 'بوری', en: 'Bori (Sack)' },
-  tora: { ur: 'توڑہ / تورڑہ', en: 'Tora (Bundle)' },
-  kainchi: { ur: 'کینچی', en: 'Kainchi (Frame)' },
-  shopper: { ur: 'شاپر', en: 'Shopper (Bag)' },
-  crates: { ur: 'کریٹ', en: 'Crates' },
-  theli: { ur: 'تھیلی', en: 'Theli (Bag)' },
-  peti: { ur: 'پیٹی', en: 'Peti (Box)' },
-  kg: { ur: 'کلوگرام', en: 'Kg' },
-  nag: { ur: 'نگ / عدد', en: 'Pieces' },
+export const unitLabels: Record<string, { ur: string; en: string }> = {
+  bori: { ur: 'بوری', en: 'بوری' },
+  tora: { ur: 'توڑہ', en: 'توڑہ' },
+  kainchi: { ur: 'کینچی', en: 'کینچی' },
+  shopper: { ur: 'شاپر', en: 'شاپر' },
+  crates: { ur: 'کریٹ', en: 'کریٹ' },
+  theli: { ur: 'تھیلی', en: 'تھیلی' },
+  peti: { ur: 'پیٹی', en: 'پیٹی' },
+  kg: { ur: 'کلو', en: 'کلو' },
+  nag: { ur: 'نگ', en: 'نگ' },
+  // Common Urdu aliases:
+  'بوری': { ur: 'بوری', en: 'بوری' },
+  'توڑہ': { ur: 'توڑہ', en: 'توڑہ' },
+  'تورڑہ': { ur: 'توڑہ', en: 'توڑہ' },
+  'کینچی': { ur: 'کینچی', en: 'کینچی' },
+  'شاپر': { ur: 'شاپر', en: 'شاپر' },
+  'کریٹ': { ur: 'کریٹ', en: 'کریٹ' },
+  'پیٹی': { ur: 'پیٹی', en: 'پیٹی' },
+  'تھیلی': { ur: 'تھیلی', en: 'تھیلی' },
+  'کلوگرام': { ur: 'کلو', en: 'کلو' },
+  'کلو': { ur: 'کلو', en: 'کلو' },
+  'نگ': { ur: 'نگ', en: 'نگ' },
+  'عدد': { ur: 'عدد', en: 'عدد' },
 };
 
-export interface ProductPreset {
-  nameEn: string;
-  nameUrdu: string;
-  emoji: string;
-  defaultUnit: UnitType;
-  defaultAvgRate: number;
+/**
+ * Returns actual unit label (e.g. 'شاپر', 'بوری', etc.) as configured, without static English descriptors
+ */
+export function getUnitDisplayLabel(unit?: string, _lang?: string): string {
+  if (!unit) return 'بوری';
+  const clean = unit.trim();
+  if (unitLabels[clean]) {
+    return unitLabels[clean].ur || clean;
+  }
+  const lower = clean.toLowerCase();
+  if (unitLabels[lower]) {
+    return unitLabels[lower].ur || clean;
+  }
+  return clean;
+}
+
+/**
+ * Resolves any Urdu title, text, or slug to standard UnitType
+ */
+export function resolveUnitType(titleOrUnit?: string): UnitType {
+  if (!titleOrUnit) return 'bori';
+  const lower = titleOrUnit.toLowerCase().trim();
+  if (lower.includes('شاپر') || lower.includes('shopper') || lower.includes('shaper')) return 'shopper';
+  if (lower.includes('بوری') || lower.includes('bori') || lower.includes('stack') || lower.includes('sack')) return 'bori';
+  if (lower.includes('توڑہ') || lower.includes('تورڑہ') || lower.includes('tora') || lower.includes('bundle')) return 'tora';
+  if (lower.includes('کینچی') || lower.includes('kainchi') || lower.includes('frame')) return 'kainchi';
+  if (lower.includes('کریٹ') || lower.includes('crate')) return 'crates';
+  if (lower.includes('پیٹی') || lower.includes('peti') || lower.includes('box')) return 'peti';
+  if (lower.includes('تھیلی') || lower.includes('theli')) return 'theli';
+  if (lower.includes('نگ') || lower.includes('عدد') || lower.includes('nag') || lower.includes('piece')) return 'nag';
+  if (lower.includes('کلو') || lower.includes('kg')) return 'kg';
+  return titleOrUnit as UnitType;
 }
 
 export const commonMandiProducts: ProductPreset[] = [
-  { nameEn: 'آلو', nameUrdu: 'آلو', emoji: '🥔', defaultUnit: 'bori', defaultAvgRate: 3200 },
-  { nameEn: 'پیاز', nameUrdu: 'پیاز', emoji: '🧅', defaultUnit: 'bori', defaultAvgRate: 3500 },
-  { nameEn: 'ٹماٹر', nameUrdu: 'ٹماٹر', emoji: '🍅', defaultUnit: 'kainchi', defaultAvgRate: 2800 },
-  { nameEn: 'سبز مرچ', nameUrdu: 'سبز مرچ', emoji: '🌶️', defaultUnit: 'shopper', defaultAvgRate: 2200 },
-  { nameEn: 'بند گوبھی', nameUrdu: 'بند گوبھی', emoji: '🥬', defaultUnit: 'tora', defaultAvgRate: 1400 },
-  { nameEn: 'پھول گوبھی', nameUrdu: 'پھول گوبھی', emoji: '🥦', defaultUnit: 'tora', defaultAvgRate: 1800 },
-  { nameEn: 'سیب', nameUrdu: 'سیب', emoji: '🍎', defaultUnit: 'peti', defaultAvgRate: 4500 },
-  { nameEn: 'کیلا', nameUrdu: 'کیلا', emoji: '🍌', defaultUnit: 'peti', defaultAvgRate: 1800 },
-  { nameEn: 'آم', nameUrdu: 'آم', emoji: '🥭', defaultUnit: 'peti', defaultAvgRate: 5000 },
-  { nameEn: 'کھیرا', nameUrdu: 'کھیرا', emoji: '🥒', defaultUnit: 'tora', defaultAvgRate: 1500 },
-  { nameEn: 'بینگن', nameUrdu: 'بینگن', emoji: '🍆', defaultUnit: 'tora', defaultAvgRate: 1200 },
-  { nameEn: 'لہسن', nameUrdu: 'لہسن', emoji: '🧄', defaultUnit: 'bori', defaultAvgRate: 6500 },
-  { nameEn: 'ادرک', nameUrdu: 'ادرک', emoji: '🫚', defaultUnit: 'bori', defaultAvgRate: 8000 },
-  { nameEn: 'لیموں', nameUrdu: 'لیموں', emoji: '🍋', defaultUnit: 'shopper', defaultAvgRate: 2400 },
+  { nameEn: 'آلو', nameUrdu: 'آلو', emoji: '🥔', defaultAvgRate: 3200 },
+  { nameEn: 'پیاز', nameUrdu: 'پیاز', emoji: '🧅', defaultAvgRate: 3500 },
+  { nameEn: 'ٹماٹر', nameUrdu: 'ٹماٹر', emoji: '🍅', defaultAvgRate: 2800 },
+  { nameEn: 'سبز مرچ', nameUrdu: 'سبز مرچ', emoji: '🌶️', defaultAvgRate: 2200 },
+  { nameEn: 'بند گوبھی', nameUrdu: 'بند گوبھی', emoji: '🥬', defaultAvgRate: 1400 },
+  { nameEn: 'پھول گوبھی', nameUrdu: 'پھول گوبھی', emoji: '🥦', defaultAvgRate: 1800 },
+  { nameEn: 'سیب', nameUrdu: 'سیب', emoji: '🍎', defaultAvgRate: 4500 },
+  { nameEn: 'کیلا', nameUrdu: 'کیلا', emoji: '🍌', defaultAvgRate: 1800 },
+  { nameEn: 'آم', nameUrdu: 'آم', emoji: '🥭', defaultAvgRate: 5000 },
+  { nameEn: 'کھیرا', nameUrdu: 'کھیرا', emoji: '🥒', defaultAvgRate: 1500 },
+  { nameEn: 'بینگن', nameUrdu: 'بینگن', emoji: '🍆', defaultAvgRate: 1200 },
+  { nameEn: 'لہسن', nameUrdu: 'لہسن', emoji: '🧄', defaultAvgRate: 6500 },
+  { nameEn: 'ادرک', nameUrdu: 'ادرک', emoji: '🫚', defaultAvgRate: 8000 },
+  { nameEn: 'لیموں', nameUrdu: 'لیموں', emoji: '🍋', defaultAvgRate: 2400 },
 ];
+
+/**
+ * Returns available products configured in settings, falling back to default Mandi presets
+ */
+export function getAvailableProducts(settings?: Partial<AppSettings>): ProductPreset[] {
+  if (settings?.products && settings.products.length > 0) {
+    return settings.products;
+  }
+  return commonMandiProducts;
+}
 
 /**
  * Resolves any date string (ISO, relative phrases, Urdu relative, etc.) to a full real calendar date (e.g. "29-09-2026").

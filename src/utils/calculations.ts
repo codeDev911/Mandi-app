@@ -54,16 +54,16 @@ export function getMazdooriItems(settings?: Partial<AppSettings>): MazdooriRateI
 export function getUnitMazdooriRate(unitType: UnitType, settings?: Partial<AppSettings>): number {
   const items = getMazdooriItems(settings);
   const found = items.find(
-    (item) => item.unitType === unitType || item.title.toLowerCase().includes(unitType.toLowerCase())
+    (item) => item.unitType === unitType || item.title.toLowerCase().includes(String(unitType).toLowerCase())
   );
   if (found) {
     return found.rate;
   }
-  if (settings?.unitMazdooriRates && typeof settings.unitMazdooriRates[unitType] === 'number') {
-    return settings.unitMazdooriRates[unitType]!;
+  if (settings?.unitMazdooriRates && typeof (settings.unitMazdooriRates as any)[unitType] === 'number') {
+    return (settings.unitMazdooriRates as any)[unitType]!;
   }
-  if (DEFAULT_UNIT_MAZDOORI_RATES[unitType] !== undefined) {
-    return DEFAULT_UNIT_MAZDOORI_RATES[unitType];
+  if ((DEFAULT_UNIT_MAZDOORI_RATES as any)[unitType] !== undefined) {
+    return (DEFAULT_UNIT_MAZDOORI_RATES as any)[unitType];
   }
   return settings?.defaultMazdooriPerUnit ?? 30;
 }

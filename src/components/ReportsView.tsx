@@ -10,7 +10,7 @@ import {
   DrawerAdjustment,
   CashDrawerSummary,
 } from '../types';
-import { translations, unitLabels, commonMandiProducts } from '../utils/localization';
+import { translations, unitLabels, commonMandiProducts, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { calculateCashDrawerSummary, calculateLotSummary, distributeMunshianaToLots } from '../utils/calculations';
 import { sound } from '../utils/sound';
@@ -285,12 +285,32 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       }
     >();
 
-    // If viewing all dates or filtering a specific customer, initialize with saved customers
-    if (dateFilter === 'all' || selectedCustomerFilter !== 'all') {
-      customers.forEach((c) => {
-        if (selectedCustomerFilter !== 'all' && c.name.toLowerCase() !== selectedCustomerFilter.toLowerCase()) {
-          return;
-        }
+    // Helper to calculate relevant manual credits & opening balance for a customer
+    const getCustomerInitialBalances = (c: CustomerBuyer) => {
+      const relevantCredits = (c.manualCredits || []).filter((cr) => {
+        if (dateFilter === 'all') return true;
+        const d = (cr.date || cr.createdAt || '').slice(0, 10);
+        return d ? isLotInDateRange(d) : false;
+      });
+      const manualCreditsTotal = relevantCredits.reduce((sum, cr) => sum + (Number(cr.amount) || 0), 0);
+      const opening = dateFilter === 'all' ? (Number(c.openingBalance) || 0) : 0;
+      return {
+        opening,
+        manualCreditsTotal,
+        initialTotal: opening + manualCreditsTotal,
+        relevantCredits,
+      };
+    };
+
+    // If viewing all dates, or filtering a specific customer, or customer has manual credits in date range:
+    customers.forEach((c) => {
+      if (selectedCustomerFilter !== 'all' && c.name.toLowerCase() !== selectedCustomerFilter.toLowerCase()) {
+        return;
+      }
+
+      const { initialTotal } = getCustomerInitialBalances(c);
+
+      if (dateFilter === 'all' || selectedCustomerFilter !== 'all' || initialTotal > 0) {
         if (!custMap.has(c.name)) {
           custMap.set(c.name, {
             customerName: c.name,
@@ -298,16 +318,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             shopName: c.shopName,
             totalPurchases: 0,
             totalUnitsBought: 0,
-            totalAmount: c.openingBalance || 0,
+            totalAmount: initialTotal,
             directCashPaid: 0,
             khataPaid: 0,
             cashPaid: 0,
-            creditPending: c.openingBalance || 0,
+            creditPending: initialTotal,
             transactions: [],
           });
         }
-      });
-    }
+      }
+    });
 
     filteredLotsByDate.forEach((lot) => {
       lot.sales.forEach((sale) => {
@@ -316,19 +336,26 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         }
 
         const savedCust = customers.find((c) => c.name.toLowerCase() === sale.buyerName.toLowerCase());
-        const existing = custMap.get(sale.buyerName) || {
-          customerName: sale.buyerName,
-          phone: sale.buyerPhone || savedCust?.phone,
-          shopName: savedCust?.shopName,
-          totalPurchases: 0,
-          totalUnitsBought: 0,
-          totalAmount: dateFilter === 'all' && savedCust ? (savedCust.openingBalance || 0) : 0,
-          directCashPaid: 0,
-          khataPaid: 0,
-          cashPaid: 0,
-          creditPending: 0,
-          transactions: [],
-        };
+        let existing = custMap.get(sale.buyerName);
+        if (!existing) {
+          const { initialTotal } = savedCust
+            ? getCustomerInitialBalances(savedCust)
+            : { initialTotal: 0 };
+
+          existing = {
+            customerName: sale.buyerName,
+            phone: sale.buyerPhone || savedCust?.phone,
+            shopName: savedCust?.shopName,
+            totalPurchases: 0,
+            totalUnitsBought: 0,
+            totalAmount: initialTotal,
+            directCashPaid: 0,
+            khataPaid: 0,
+            cashPaid: 0,
+            creditPending: initialTotal,
+            transactions: [],
+          };
+        }
 
         existing.totalPurchases += 1;
         existing.totalUnitsBought += sale.quantity;
@@ -361,12 +388,34 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       });
     });
 
+    // Append manual credits to each customer's transaction statement
+    Array.from(custMap.values()).forEach((c) => {
+      const savedCust = customers.find((sc) => sc.name.toLowerCase() === c.customerName.toLowerCase());
+      if (savedCust) {
+        const { relevantCredits } = getCustomerInitialBalances(savedCust);
+        relevantCredits.forEach((cr) => {
+          c.transactions.push({
+            lotId: `mc-${cr.id}`,
+            lotNumber: 'دستی ادھار',
+            productUrdu: cr.notes || (isUrdu ? 'دستی کھاتہ ادھار' : 'Manual Credit'),
+            date: (cr.date || cr.createdAt || '').slice(0, 10) || '-',
+            quantity: 1,
+            ratePerUnit: cr.amount,
+            totalAmount: cr.amount,
+            paymentStatus: 'credit',
+          });
+        });
+
+        c.transactions.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      }
+    });
+
     const list = Array.from(custMap.values()).map((c) => {
       const savedCust = customers.find((sc) => sc.name.toLowerCase() === c.customerName.toLowerCase());
       const customerPayments = (savedCust?.payments || []).filter(
         (p) => dateFilter === 'all' || isLotInDateRange((p.paymentDate || p.date || '').slice(0, 10))
       );
-      const khataPayments = customerPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const khataPayments = customerPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
       const totalPaid = c.directCashPaid + khataPayments;
       const creditRemaining = Math.max(0, c.totalAmount - totalPaid);
@@ -385,7 +434,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       (c.phone && c.phone.includes(searchTerm)) ||
       (c.shopName && c.shopName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
-  }, [filteredLotsByDate, selectedCustomerFilter, customers, searchTerm, dateFilter, customFromDate, customToDate]);
+  }, [filteredLotsByDate, selectedCustomerFilter, customers, searchTerm, dateFilter, customFromDate, customToDate, isUrdu]);
 
   // 2. DATE REPORT STATS
   const dateReportStats = useMemo(() => {
@@ -1419,7 +1468,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 font-urdu-sans mt-0.5">
-                          {lot.productUrdu} • {lot.totalQuantity} {unitLabels[lot.unitType][settings.language]} (
+                          {lot.productUrdu} • {lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)} (
                           <strong className="text-blue-700">{lot.summary.totalSoldQuantity} فروخت</strong>,{' '}
                           <strong className="text-amber-700">{lot.summary.remainingQuantity} باقی</strong>)
                         </p>
@@ -2021,7 +2070,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                                     {lot.productEmoji} {lot.productUrdu}
                                   </span>
                                   <span className="text-[11px] text-slate-400 font-numbers block">
-                                    {lot.lotNumber} • {lot.arrivalDate} ({lot.totalQuantity} {unitLabels[lot.unitType][settings.language]})
+                                    {lot.lotNumber} • {lot.arrivalDate} ({lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)})
                                   </span>
                                 </div>
 

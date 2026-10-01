@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { VendorLot, AppSettings, LotExpenses, CustomExpense } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
@@ -57,7 +57,7 @@ export const LotExpenseSlipView: React.FC<LotExpenseSlipViewProps> = ({
 }) => {
   const t = translations[settings.language];
   const isUrdu = settings.language === 'ur';
-  const unitLabel = unitLabels[lot.unitType]?.[settings.language] || lot.unitType;
+  const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
   // Local state for editable lot expenses
   const [expenses, setExpenses] = useState<LotExpenses>(() => JSON.parse(JSON.stringify(lot.expenses)));

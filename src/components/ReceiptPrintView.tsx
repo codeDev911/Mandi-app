@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import html2canvas from 'html2canvas';
 import { VendorLot, AppSettings } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { generateMandiInvoiceCanvas, printThermalPOSReceipt } from '../utils/receiptGenerator';
@@ -62,7 +62,7 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
 }) => {
   const t = translations[settings.language];
   const isUrdu = settings.language === 'ur';
-  const unitLabel = unitLabels[lot.unitType][settings.language];
+  const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
   const [isCopied, setIsCopied] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);

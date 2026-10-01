@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { VendorLot, BolliSale, AppSettings, PaymentStatus, CustomerBuyer } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import confetti from 'canvas-confetti';
@@ -158,7 +158,7 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
     );
   }
 
-  const unitLabel = selectedLot ? unitLabels[selectedLot.unitType][settings.language] : '';
+  const unitLabel = selectedLot ? getUnitDisplayLabel(selectedLot.unitType, settings.language) : '';
 
   return (
     <div className="space-y-4 pb-16 sm:pb-6">
@@ -248,7 +248,7 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                   {lot.vendorName}
                 </div>
                 <div className="text-[11px] text-slate-600 truncate font-urdu-sans">
-                  {lot.productUrdu} ({lot.totalQuantity} {unitLabels[lot.unitType][settings.language]})
+                  {lot.productUrdu} ({lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)})
                 </div>
 
                 {/* Micro progress bar */}

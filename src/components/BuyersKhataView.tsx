@@ -4,11 +4,12 @@ import {
   AppSettings,
   CustomerBuyer,
   BuyerPaymentRecord,
+  BuyerCreditRecord,
   SavedVendor,
   VendorPaymentRecord,
   VendorPaymentStatus,
 } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt } from '../utils/receiptGenerator';
@@ -57,6 +58,8 @@ interface BuyersKhataViewProps {
   onDeleteCustomer: (customerId: string) => void;
   onRecordCustomerPayment: (customerId: string, payment: BuyerPaymentRecord) => void;
   onDeleteCustomerPayment?: (customerIdOrName: string, paymentId: string) => void;
+  onRecordCustomerCredit?: (customerId: string, credit: BuyerCreditRecord) => void;
+  onDeleteCustomerCredit?: (customerIdOrName: string, creditId: string) => void;
   onToggleSalePaymentStatus: (lotId: string, saleId: string) => void;
   onSaveVendor?: (vendor: SavedVendor) => void;
   onDeleteVendor?: (vendorId: string) => void;
@@ -88,6 +91,8 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   onDeleteCustomer,
   onRecordCustomerPayment,
   onDeleteCustomerPayment,
+  onRecordCustomerCredit,
+  onDeleteCustomerCredit,
   onToggleSalePaymentStatus,
   onSaveVendor,
   onDeleteVendor,
@@ -108,7 +113,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
 
   // Unified PIN Security Delete Action State
   const [pendingDeleteAction, setPendingDeleteAction] = useState<{
-    type: 'buyer_sale' | 'customer_payment' | 'vendor_payment' | 'vendor_lot';
+    type: 'buyer_sale' | 'customer_payment' | 'customer_credit' | 'vendor_payment' | 'vendor_lot';
     title: string;
     description: string;
     execute: () => void;
@@ -119,6 +124,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'credit' | 'cleared'>('all');
   const [selectedCustomerIdForPayment, setSelectedCustomerIdForPayment] = useState<string | null>(null);
+  const [selectedCustomerIdForCredit, setSelectedCustomerIdForCredit] = useState<string | null>(null);
   const [expandedCustomerKhatas, setExpandedCustomerKhatas] = useState<Record<string, boolean>>({});
 
   // Performance / Lazy chunk rendering limits
@@ -141,6 +147,11 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   // Customer Payment Recording State
   const [custPaymentAmount, setCustPaymentAmount] = useState<number>(0);
   const [custPaymentNote, setCustPaymentNote] = useState('');
+
+  // Customer Manual Credit Recording State
+  const [custCreditAmount, setCustCreditAmount] = useState<number>(0);
+  const [custCreditNote, setCustCreditNote] = useState('');
+  const [custCreditDate, setCustCreditDate] = useState<string>(new Date().toISOString().slice(0, 10));
 
   // Vendor Section States
   const [vendorSearchTerm, setVendorSearchTerm] = useState('');
@@ -180,7 +191,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         lotNumber: lot.lotNumber,
         vendorName: lot.vendorName,
         productUrdu: lot.productUrdu,
-        unitLabel: unitLabels[lot.unitType][settings.language],
+        unitLabel: getUnitDisplayLabel(lot.unitType, settings.language),
         saleId: sale.id,
         buyerName: sale.buyerName,
         buyerPhone: sale.buyerPhone,
@@ -212,10 +223,13 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         balance: number;
         sales: typeof allSales;
         paymentHistory: BuyerPaymentRecord[];
+        manualCreditHistory: BuyerCreditRecord[];
       }
     >();
 
     customers.forEach((c) => {
+      const manualCreditsTotal = c.manualCredits?.reduce((sum, cr) => sum + cr.amount, 0) || 0;
+      const paymentsTotal = c.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
       customerMap.set(c.name, {
         id: c.id,
         name: c.name,
@@ -223,13 +237,14 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         shopName: c.shopName,
         address: c.address,
         totalPurchases: 0,
-        grossPurchasesAmount: c.openingBalance || 0,
+        grossPurchasesAmount: (c.openingBalance || 0) + manualCreditsTotal,
         cashPaidDirect: 0,
-        creditBidsAmount: c.openingBalance || 0,
-        khataPaymentsReceived: c.payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
-        balance: (c.openingBalance || 0) - (c.payments?.reduce((sum, p) => sum + p.amount, 0) || 0),
+        creditBidsAmount: (c.openingBalance || 0) + manualCreditsTotal,
+        khataPaymentsReceived: paymentsTotal,
+        balance: ((c.openingBalance || 0) + manualCreditsTotal) - paymentsTotal,
         sales: [],
         paymentHistory: c.payments || [],
+        manualCreditHistory: c.manualCredits || [],
       });
     });
 
@@ -248,6 +263,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
           balance: 0,
           sales: [],
           paymentHistory: [],
+          manualCreditHistory: [],
         };
         customerMap.set(sale.buyerName, entry);
       }
@@ -689,6 +705,51 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
     setSelectedCustomerIdForPayment(null);
     setCustPaymentAmount(0);
     setCustPaymentNote('');
+  };
+
+  const handleRecordCustomerCreditSubmit = (customer: typeof customerList[0]) => {
+    if (custCreditAmount <= 0) return;
+
+    sound.playCashChime();
+    const newRecord: BuyerCreditRecord = {
+      id: `crd-${Date.now()}`,
+      buyerName: customer.name,
+      buyerPhone: customer.phone,
+      amount: custCreditAmount,
+      date: custCreditDate || new Date().toISOString().slice(0, 10),
+      notes: custCreditNote.trim() || undefined,
+      timestamp: new Date().toISOString(),
+    };
+
+    let targetCust = customers.find((c) => c.name === customer.name);
+    if (!targetCust) {
+      targetCust = {
+        id: customer.id,
+        name: customer.name,
+        phone: customer.phone,
+        shopName: customer.shopName,
+        balance: custCreditAmount,
+        manualCredits: [newRecord],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      onSaveCustomer(targetCust);
+    } else {
+      if (onRecordCustomerCredit) {
+        onRecordCustomerCredit(targetCust.id, newRecord);
+      } else {
+        const updatedCredits = [newRecord, ...(targetCust.manualCredits || [])];
+        onSaveCustomer({
+          ...targetCust,
+          manualCredits: updatedCredits,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    setSelectedCustomerIdForCredit(null);
+    setCustCreditAmount(0);
+    setCustCreditNote('');
   };
 
   // Vendor Payment Submission
@@ -1135,6 +1196,29 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                               <MessageCircle className="w-4 h-4" />
                             </button>
 
+                            {/* Add Manual Credit Button - ALWAYS ACCESSIBLE */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                sound.playTick();
+                                setSelectedCustomerIdForCredit(
+                                  selectedCustomerIdForCredit === cust.name ? null : cust.name
+                                );
+                                setSelectedCustomerIdForPayment(null);
+                                setCustCreditAmount(0);
+                                setCustCreditNote('');
+                              }}
+                              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold font-urdu-sans transition flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer ${
+                                selectedCustomerIdForCredit === cust.name
+                                  ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                                  : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                              }`}
+                              title={isUrdu ? 'کھاتے میں دستی ادھار رقم کا اضافہ کریں' : 'Add manual credit'}
+                            >
+                              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>{isUrdu ? 'ادھار اضافہ' : '+ Credit'}</span>
+                            </button>
+
                             {/* Record Payment Button - STRICTLY ONLY IF PENDING BALANCE > 0 */}
                             {cust.balance > 0 ? (
                               <button
@@ -1144,9 +1228,10 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                   setSelectedCustomerIdForPayment(
                                     selectedCustomerIdForPayment === cust.name ? null : cust.name
                                   );
+                                  setSelectedCustomerIdForCredit(null);
                                   setCustPaymentAmount(cust.balance);
                                 }}
-                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans transition flex items-center gap-1 shadow-xs active:scale-95"
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold font-urdu-sans transition flex items-center gap-1 shadow-xs active:scale-95 cursor-pointer"
                               >
                                 <ArrowDownLeft className="w-3.5 h-3.5" />
                                 <span>{isUrdu ? 'وصولی' : 'Payment'}</span>
@@ -1220,7 +1305,61 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                               type="button"
                               onClick={() => handleRecordCustomerPaymentSubmit(cust)}
                               disabled={custPaymentAmount <= 0}
-                              className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold font-urdu-sans shadow-xs flex items-center gap-1"
+                              className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold font-urdu-sans shadow-xs flex items-center gap-1 cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>{t.save}</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Inline Record Manual Credit Form */}
+                      {selectedCustomerIdForCredit === cust.name && (
+                        <div className="bg-amber-50/90 p-3.5 border-t border-amber-200 flex flex-col sm:flex-row items-center gap-2 animate-in fade-in duration-150">
+                          <div className="text-xs font-bold text-amber-950 font-urdu-sans flex items-center gap-1.5 flex-shrink-0">
+                            <ArrowUpRight className="w-4 h-4 text-amber-700 stroke-[2.5]" />
+                            <span>{isUrdu ? 'دستی ادھار رقم کا اندراج:' : 'Record Manual Credit:'}</span>
+                          </div>
+
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            value={custCreditAmount || ''}
+                            onChange={(e) => setCustCreditAmount(parseNumber(e.target.value))}
+                            placeholder="رقم (روپے)"
+                            className="w-full sm:w-36 px-3 py-1.5 bg-white border border-amber-300 rounded-xl text-xs font-numbers font-bold text-amber-950 focus:ring-2 focus:ring-amber-500"
+                            autoFocus
+                          />
+
+                          <input
+                            type="text"
+                            value={custCreditNote}
+                            onChange={(e) => setCustCreditNote(e.target.value)}
+                            placeholder={isUrdu ? 'تفصیل (مثلاً: سابقہ بل، کیش لون، کھاتہ بقایا اضافہ)' : 'Note e.g. Previous balance, loan'}
+                            className="w-full sm:flex-1 px-3 py-1.5 bg-white border border-amber-300 rounded-xl text-xs font-urdu-sans"
+                          />
+
+                          <input
+                            type="date"
+                            value={custCreditDate}
+                            onChange={(e) => setCustCreditDate(e.target.value)}
+                            className="w-full sm:w-32 px-2 py-1.5 bg-white border border-amber-300 rounded-xl text-xs font-numbers"
+                          />
+
+                          <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCustomerIdForCredit(null)}
+                              className="px-3 py-1.5 bg-white text-slate-600 rounded-xl text-xs font-urdu-sans border border-slate-300 cursor-pointer"
+                            >
+                              {t.cancel}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRecordCustomerCreditSubmit(cust)}
+                              disabled={custCreditAmount <= 0}
+                              className="px-4 py-1.5 bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold font-urdu-sans shadow-xs flex items-center gap-1 cursor-pointer"
                             >
                               <Check className="w-3.5 h-3.5" />
                               <span>{t.save}</span>
@@ -2097,7 +2236,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                 <tbody className="divide-y divide-slate-100">
                                   {paginatedVendorLots.map((lot) => {
                                     const isLotPaid = lot.vendorPaymentStatus === 'paid';
-                                    const lotUnitLabel = unitLabels[lot.unitType][settings.language];
+                                    const lotUnitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
                                     return (
                                       <tr key={lot.id} className="hover:bg-slate-50/80">

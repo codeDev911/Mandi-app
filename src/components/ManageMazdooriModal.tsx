@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MazdooriRateItem, UnitType, AppSettings } from '../types';
-import { unitLabels } from '../utils/localization';
+import { unitLabels, resolveUnitType, getUnitDisplayLabel } from '../utils/localization';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { DEFAULT_MAZDOORI_ITEMS } from '../utils/calculations';
@@ -78,11 +78,13 @@ export const ManageMazdooriModal: React.FC<ManageMazdooriModalProps> = ({
     }
 
     sound.playCashChime();
+    const cleanTitle = newTitle.trim();
+    const resolvedUnit = (newUnitType as UnitType) || (cleanTitle as UnitType);
     const newItem: MazdooriRateItem = {
       id: `mzd-${Date.now()}`,
-      title: newTitle.trim(),
+      title: cleanTitle,
       rate: newRate,
-      unitType: (newUnitType as UnitType) || undefined,
+      unitType: resolvedUnit,
     };
 
     const updated = [...items, newItem];
@@ -114,13 +116,15 @@ export const ManageMazdooriModal: React.FC<ManageMazdooriModalProps> = ({
     }
 
     sound.playPop();
+    const cleanTitle = editTitle.trim();
+    const resolvedUnit = (editUnitType as UnitType) || (cleanTitle as UnitType);
     const updated = items.map((it) =>
       it.id === id
         ? {
             ...it,
-            title: editTitle.trim(),
+            title: cleanTitle,
             rate: editRate,
-            unitType: (editUnitType as UnitType) || undefined,
+            unitType: resolvedUnit,
           }
         : it
     );
@@ -329,9 +333,9 @@ export const ManageMazdooriModal: React.FC<ManageMazdooriModalProps> = ({
                           <div className="font-bold text-xs text-slate-900 font-urdu-sans truncate">
                             {item.title}
                           </div>
-                          {item.unitType && (
+                          {item.unitType && item.unitType !== item.title && (
                             <span className="text-[10px] text-slate-400 font-urdu-sans">
-                              (بنیادی یونٹ: {unitLabels[item.unitType]?.[settings.language] || item.unitType})
+                              (بنیادی یونٹ: {getUnitDisplayLabel(item.unitType)})
                             </span>
                           )}
                         </div>

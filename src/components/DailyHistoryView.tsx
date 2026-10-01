@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { VendorLot, AppSettings } from '../types';
-import { translations, unitLabels } from '../utils/localization';
+import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { AllLotsModal } from './AllLotsModal';
 import { PaginationControls } from './PaginationControls';
@@ -284,7 +284,7 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
         ) : (
           <div className="divide-y divide-stone-100">
             {paginatedLots.map((lot) => {
-            const unitLabel = unitLabels[lot.unitType][settings.language];
+            const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
             const isCompleted = lot.status === 'completed' || lot.summary.remainingQuantity === 0;
 
             return (
