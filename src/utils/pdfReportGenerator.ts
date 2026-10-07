@@ -1015,24 +1015,24 @@ export function buildSingleCustomerReportPDF(
   doc.setDrawColor(210, 225, 245);
   doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'D');
 
-  doc.setFontSize(7.5);
-  doc.setTextColor(100, 100, 100);
+  doc.setFontSize(9);
+  doc.setTextColor(90, 90, 90);
   doc.text('TOTAL PURCHASES (کل خریداری)', 20, currentY + 4.5);
   doc.text('TOTAL UNITS BOUGHT (تعداد)', 68, currentY + 4.5);
   doc.text('CASH PAID (نقد وصول شدہ)', 115, currentY + 4.5);
   doc.text('REMAINING UDHAAR (بقایا ادھار)', 155, currentY + 4.5);
 
-  doc.setFontSize(9.5);
+  doc.setFontSize(11.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20, 20, 20);
-  doc.text(`Rs. ${customer.totalAmount.toLocaleString()}`, 20, currentY + 11);
-  doc.text(`${customer.totalUnitsBought} Units`, 68, currentY + 11);
+  doc.text(`Rs. ${customer.totalAmount.toLocaleString()}`, 20, currentY + 11.5);
+  doc.text(`${customer.totalUnitsBought} Units`, 68, currentY + 11.5);
 
   doc.setTextColor(15, 120, 50);
-  doc.text(`Rs. ${customer.cashPaid.toLocaleString()}`, 115, currentY + 11);
+  doc.text(`Rs. ${customer.cashPaid.toLocaleString()}`, 115, currentY + 11.5);
 
   doc.setTextColor(180, 40, 20);
-  doc.text(`Rs. ${customer.creditPending.toLocaleString()}`, 155, currentY + 11);
+  doc.text(`Rs. ${customer.creditPending.toLocaleString()}`, 155, currentY + 11.5);
 
   currentY += 21;
 
@@ -1051,8 +1051,8 @@ export function buildSingleCustomerReportPDF(
     head: [['#', 'Date', 'Product / Commodity (جنس)', 'Qty', 'Rate (PKR)', 'Total Amount (PKR)']],
     body: txRows,
     theme: 'grid',
-    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 8.5, fontStyle: 'bold' },
-    styles: { fontSize: 8, cellPadding: 2.5 },
+    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 10, fontStyle: 'bold' },
+    styles: { fontSize: 9.5, cellPadding: 3.2 },
     columnStyles: {
       0: { cellWidth: 8, halign: 'center' },
       1: { cellWidth: 26, halign: 'center' },
@@ -1069,13 +1069,13 @@ export function buildSingleCustomerReportPDF(
       '',
       `Rs. ${customer.totalAmount.toLocaleString()}`,
     ]],
-    footStyles: { fillColor: [240, 243, 246], textColor: [20, 20, 20], fontStyle: 'bold', fontSize: 8.5 },
+    footStyles: { fillColor: [240, 243, 246], textColor: [20, 20, 20], fontStyle: 'bold', fontSize: 10 },
   });
 
   currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 8 : currentY + 30;
 
   // Section 2: Payments Received & Khata Recovery Table
-  doc.setFontSize(10);
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 110, 50);
   doc.text('PAYMENTS RECEIVED & KHATA RECOVERY (وصول شدہ نقد ادائیگیاں)', 14, currentY);
@@ -1105,8 +1105,8 @@ export function buildSingleCustomerReportPDF(
       head: [['#', 'Date', 'Payment Method', 'Notes / Description', 'Amount Received (PKR)']],
       body: paymentRows,
       theme: 'grid',
-      headStyles: { fillColor: [15, 110, 50], textColor: 255, fontSize: 8, fontStyle: 'bold' },
-      styles: { fontSize: 8, cellPadding: 2.2 },
+      headStyles: { fillColor: [15, 110, 50], textColor: 255, fontSize: 9.5, fontStyle: 'bold' },
+      styles: { fontSize: 9.5, cellPadding: 3 },
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
         1: { cellWidth: 26, halign: 'center' },

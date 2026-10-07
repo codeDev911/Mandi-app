@@ -65,17 +65,36 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
   }, []);
   const thisMonthPrefix = useMemo(() => new Date().toISOString().slice(0, 7), []);
 
-  const isLotInDateRange = (lot: VendorLot) => {
-    const lotDate = lot.arrivalDate || lot.createdAt?.slice(0, 10) || todayStr;
+  const isDateStrInRange = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const cleanDate = dateStr.slice(0, 10);
     if (dateFilter === 'all') return true;
-    if (dateFilter === 'today') return lotDate === todayStr;
-    if (dateFilter === 'yesterday') return lotDate === yesterdayStr;
-    if (dateFilter === 'this_week') return lotDate >= weekAgoStr && lotDate <= todayStr;
-    if (dateFilter === 'this_month') return lotDate.startsWith(thisMonthPrefix);
+    if (dateFilter === 'today') return cleanDate === todayStr;
+    if (dateFilter === 'yesterday') return cleanDate === yesterdayStr;
+    if (dateFilter === 'this_week') return cleanDate >= weekAgoStr && cleanDate <= todayStr;
+    if (dateFilter === 'this_month') return cleanDate.startsWith(thisMonthPrefix);
     if (dateFilter === 'custom') {
-      return (!customFromDate || lotDate >= customFromDate) && (!customToDate || lotDate <= customToDate);
+      return (!customFromDate || cleanDate >= customFromDate) && (!customToDate || cleanDate <= customToDate);
     }
     return true;
+  };
+
+  const getSaleDateStr = (sale: any, lot?: VendorLot): string => {
+    if (sale.date && typeof sale.date === 'string') return sale.date.slice(0, 10);
+    if (sale.timestamp && typeof sale.timestamp === 'string') return sale.timestamp.slice(0, 10);
+    if (lot?.arrivalDate) return lot.arrivalDate.slice(0, 10);
+    if (lot?.createdAt) return lot.createdAt.slice(0, 10);
+    return todayStr;
+  };
+
+  const isLotInDateRange = (lot: VendorLot) => {
+    if (dateFilter === 'all') return true;
+    const lotArrDate = lot.arrivalDate?.slice(0, 10);
+    const lotCreateDate = lot.createdAt?.slice(0, 10);
+    if (isDateStrInRange(lotArrDate) || isDateStrInRange(lotCreateDate)) return true;
+    if (lot.sales.some((s) => isDateStrInRange(getSaleDateStr(s, lot)))) return true;
+    if (lot.vendorPaymentDate && isDateStrInRange(lot.vendorPaymentDate)) return true;
+    return false;
   };
 
   const lotsByDate = useMemo(() => {
@@ -93,10 +112,35 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
     let sold = 0;
     for (let i = 0; i < lotsByDate.length; i++) {
       const l = lotsByDate[i];
-      gross += l.summary.grossSales || 0;
-      comm += l.summary.arhtiProfitCommission || 0;
-      handled += l.totalQuantity || 0;
-      sold += l.summary.totalSoldQuantity || 0;
+      if (dateFilter === 'all') {
+        gross += l.summary.grossSales || 0;
+        comm += l.summary.arhtiProfitCommission || 0;
+        handled += l.totalQuantity || 0;
+        sold += l.summary.totalSoldQuantity || 0;
+      } else {
+        const salesInRange = l.sales.filter((s) => isDateStrInRange(getSaleDateStr(s, l)));
+        const lotGross = salesInRange.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+        const lotSold = salesInRange.reduce((acc, s) => acc + (Number(s.quantity) || 0), 0);
+        gross += lotGross;
+        sold += lotSold;
+
+        const isArrival = isDateStrInRange(l.arrivalDate);
+        if (isArrival) {
+          handled += l.totalQuantity || 0;
+        } else {
+          handled += lotSold;
+        }
+
+        if (l.expenses?.commission?.enabled) {
+          if (l.expenses.commission.type === 'percentage') {
+            comm += Math.round((lotGross * (Number(l.expenses.commission.rate) || 0)) / 100);
+          } else if (isArrival) {
+            comm += Number(l.expenses.commission.amount) || 0;
+          } else if (l.totalQuantity > 0 && lotSold > 0) {
+            comm += Math.round(((Number(l.expenses.commission.amount) || 0) * lotSold) / l.totalQuantity);
+          }
+        }
+      }
     }
     return {
       totalGrossSales: gross,
@@ -104,7 +148,7 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
       totalCratesHandled: handled,
       totalCratesSold: sold,
     };
-  }, [lotsByDate]);
+  }, [lotsByDate, dateFilter, customFromDate, customToDate, todayStr, yesterdayStr, weekAgoStr, thisMonthPrefix]);
 
   const filteredLots = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -287,6 +331,28 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
             const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
             const isCompleted = lot.status === 'completed' || lot.summary.remainingQuantity === 0;
 
+            const salesInRange = lot.sales.filter((s) => isDateStrInRange(getSaleDateStr(s, lot)));
+            const isArrival = isDateStrInRange(lot.arrivalDate);
+            const lotGrossOnDate = dateFilter === 'all'
+              ? lot.summary.grossSales
+              : salesInRange.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+            const lotSoldOnDate = dateFilter === 'all'
+              ? lot.summary.totalSoldQuantity
+              : salesInRange.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+
+            let commOnDate = 0;
+            if (lot.expenses?.commission?.enabled) {
+              if (dateFilter === 'all') {
+                commOnDate = lot.summary.arhtiProfitCommission;
+              } else if (lot.expenses.commission.type === 'percentage') {
+                commOnDate = Math.round((lotGrossOnDate * (Number(lot.expenses.commission.rate) || 0)) / 100);
+              } else if (isArrival) {
+                commOnDate = Number(lot.expenses.commission.amount) || 0;
+              } else if (lot.totalQuantity > 0 && lotSoldOnDate > 0) {
+                commOnDate = Math.round(((Number(lot.expenses.commission.amount) || 0) * lotSoldOnDate) / lot.totalQuantity);
+              }
+            }
+
             return (
               <div
                 key={lot.id}
@@ -299,7 +365,7 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
                   </div>
 
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="font-bold text-sm text-stone-900 font-urdu-nastaliq truncate">
                         {lot.vendorName}
                       </h4>
@@ -315,11 +381,18 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
                       >
                         {isCompleted ? t.statusCompleted : t.statusActive}
                       </span>
+                      {dateFilter !== 'all' && !isArrival && salesInRange.length > 0 && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold font-urdu-sans">
+                          {isUrdu ? 'اس تاریخ کی بولی' : 'Bid on date'}
+                        </span>
+                      )}
                     </div>
 
                     <p className="text-xs text-stone-500 font-urdu-sans mt-0.5 font-numbers">
                       {lot.productUrdu} • {lot.totalQuantity} {unitLabel} (
-                      <span className="text-emerald-700 font-semibold">{lot.summary.totalSoldQuantity} فروخت</span>
+                      <span className="text-emerald-700 font-semibold">
+                        {dateFilter === 'all' ? `${lot.summary.totalSoldQuantity} فروخت` : `${lotSoldOnDate} اس تاریخ پر فروخت (کل: ${lot.summary.totalSoldQuantity})`}
+                      </span>
                       {lot.summary.remainingQuantity > 0 && (
                         <span className="text-amber-700 font-semibold">, {lot.summary.remainingQuantity} باقی</span>
                       )}
@@ -334,11 +407,11 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
                     <span className="text-[11px] text-stone-500 font-urdu-sans block">
                       {t.grossTotal}:{' '}
                       <strong className="text-stone-900 font-numbers">
-                        {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
+                        {formatPKR(lotGrossOnDate, settings.currencySymbol, settings.language)}
                       </strong>
                     </span>
                     <span className="text-xs font-bold text-emerald-800 font-numbers block">
-                      کمیشن منافع: {formatPKR(lot.summary.arhtiProfitCommission, settings.currencySymbol, settings.language)}
+                      کمیشن منافع: {formatPKR(commOnDate, settings.currencySymbol, settings.language)}
                     </span>
                   </div>
 

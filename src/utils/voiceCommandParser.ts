@@ -237,9 +237,9 @@ export function parseUrduVoiceBid(
 
   // 2. Remove filler packaging/unit words that don't contribute to values
   const fillerUnitWords = [
-    'کریٹ', 'کریٹس', 'پیٹی', 'پیٹیاں', 'بوری', 'بوریاں', 'توڑا', 'توڑے', 'تورڑہ', 'تورڑے',
+    'کریٹ', 'کریٹس', 'پیٹی', 'پیٹیاں', 'بوری', 'بوریاں', 'بورے', 'توڑا', 'توڑے', 'تورڑہ', 'تورڑے',
     'کینچی', 'کینچیاں', 'شاپر', 'شاپرز', 'ڈبہ', 'ڈبے', 'کاٹن', 'کلو', 'من', 'عدد', 'تھیلی', 'تھلیاں', 'نگ', 'نشان',
-    'bori', 'tora', 'kainchi', 'shopper', 'theli', 'peti', 'crate', 'crates', 'box', 'boxes',
+    'bori', 'bore', 'bora', 'tora', 'kainchi', 'shopper', 'theli', 'peti', 'crate', 'crates', 'box', 'boxes',
     'bag', 'bags', 'kg', 'qty', 'rate', 'price', 'rupees', 'rs', 'روپے',
     'والی', 'والا', 'میں', 'کا', 'کو', 'پر', 'والے', 'at', 'for', 'buy', 'bought'
   ];

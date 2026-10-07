@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { VendorLot, AppSettings } from '../types';
-import { translations, formatFullRealDate } from '../utils/localization';
+import { translations, formatFullRealDate, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printBatchVendorBillsA4, printVendorBillSlipA4 } from '../utils/printHelper';
@@ -504,9 +504,9 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
 
                       <div className="mt-3 space-y-1 text-xs">
                         <div className="flex justify-between text-slate-400">
-                          <span className="font-urdu-sans">کل لاٹس / نگ:</span>
+                          <span className="font-urdu-sans">کل لاٹس / تعداد:</span>
                           <span className="font-bold text-white font-numbers">
-                            {vg.lots.length} لاٹ • {vg.totalQuantity} نگ
+                            {vg.lots.length} لاٹ • {vg.totalQuantity} {getUnitDisplayLabel(vg.lots[0]?.unitType, settings.language)}
                           </span>
                         </div>
                         <div className="flex justify-between text-slate-400">

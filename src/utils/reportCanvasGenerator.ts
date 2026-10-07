@@ -150,7 +150,7 @@ function drawTableHeader(
   ctx.strokeRect(tableX, curY, tableW, 26);
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 11px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.font = 'bold 12.5px "Noto Sans Arabic", system-ui, sans-serif';
 
   let currentX = tableX;
   colDefs.forEach((h) => {
@@ -313,7 +313,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       { title: '#', w: 35, align: 'center' },
       { title: 'تاریخ', w: 85, align: 'center' },
       { title: 'جنس و تفصیل', w: 230, align: 'right' },
-      { title: 'تعداد (نگ)', w: 95, align: 'center' },
+      { title: 'تعداد (پیکنگ)', w: 95, align: 'center' },
       { title: 'ریٹ (روپے)', w: 105, align: 'right' },
       { title: 'کل خریداری رقم', w: 228, align: 'right' },
     ];
@@ -321,37 +321,37 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       let currentX = tableX;
       // #
       ctx.fillStyle = '#64748b';
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = '12px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(`${idx + 1}`, currentX + 17, y + 17);
       currentX += 35;
       // Date
       ctx.fillStyle = '#334155';
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = '12px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(tx.date || '-', currentX + 42, y + 17);
       currentX += 85;
       // Product
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.font = 'bold 13.5px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
       ctx.textAlign = 'right';
-      ctx.fillText(tx.productUrdu || (tx as any).productName || '-', currentX + 220, y + 17);
+      ctx.fillText(tx.productUrdu || (tx as any).productName || '-', currentX + 220, y + 18);
       currentX += 230;
       // Qty
       ctx.fillStyle = '#0f172a';
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = 'bold 12.5px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(`${tx.quantity}`, currentX + 47, y + 17);
       currentX += 95;
       // Rate
       ctx.fillStyle = '#334155';
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.font = '12.5px system-ui, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(`Rs. ${tx.ratePerUnit}`, currentX + 95, y + 17);
       currentX += 105;
       // Total
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 10.5px system-ui, sans-serif';
+      ctx.font = 'bold 13.5px system-ui, sans-serif';
       ctx.textAlign = 'right';
       ctx.fillText(formatPKR(tx.totalAmount, '', 'en'), currentX + 218, y + 17);
     };
@@ -380,7 +380,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       { title: 'لاٹ نمبر', w: 75, align: 'center' },
       { title: 'زمیندار / کاشتکار', w: 185, align: 'right' },
       { title: 'گاڑی نمبر', w: 85, align: 'center' },
-      { title: 'فروخت / آمد نگ', w: 85, align: 'center' },
+      { title: 'فروخت / آمد تعداد', w: 85, align: 'center' },
       { title: 'کل رقم', w: 118, align: 'right' },
       { title: 'کمیشن', w: 110, align: 'right' },
     ];
@@ -434,7 +434,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       ctx.textAlign = 'right';
       ctx.fillText(formatPKR(lot.summary?.arhtiProfitCommission || 0, '', 'en'), currentX + 100, y + 17);
     };
-    totalSummaryText = `کل لاٹس: ${rows.length} • کل فروخت نگ: ${sp.totalSold} / ${sp.totalUnits} • مجموعی ٹرن اوور: ${formatPKR(sp.grossTurnover, 'Rs.', 'en')} • کل کمیشن: ${formatPKR(sp.commissionEarned, 'Rs.', 'en')}`;
+    totalSummaryText = `کل لاٹس: ${rows.length} • کل فروخت تعداد: ${sp.totalSold} / ${sp.totalUnits} • مجموعی ٹرن اوور: ${formatPKR(sp.grossTurnover, 'Rs.', 'en')} • کل کمیشن: ${formatPKR(sp.commissionEarned, 'Rs.', 'en')}`;
   }
   // 4. Single Lot Auction Breakdown
   else if (singleLot || reportType === 'single_lot') {
@@ -444,7 +444,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       { title: '#', w: 35, align: 'center' },
       { title: 'وقت / تاریخ', w: 95, align: 'center' },
       { title: 'خریدار کا نام', w: 205, align: 'right' },
-      { title: 'تعداد (نگ)', w: 85, align: 'center' },
+      { title: 'تعداد (پیکنگ)', w: 85, align: 'center' },
       { title: 'بولی ریٹ', w: 85, align: 'right' },
       { title: 'کل رقم', w: 143, align: 'right' },
       { title: 'ادائیگی', w: 130, align: 'center' },
@@ -494,7 +494,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       ctx.textAlign = 'center';
       ctx.fillText(isCash ? 'نقد (وصول)' : 'ادھار', currentX + 65, y + 17);
     };
-    totalSummaryText = `کل فروخت نگ: ${sl?.summary?.totalSoldQuantity ?? 0} / ${sl?.totalQuantity ?? 0} • مجموعی فروخت: ${formatPKR(sl?.summary?.grossSales || 0, 'Rs.', 'en')} • کمیشن: ${formatPKR(sl?.summary?.arhtiProfitCommission || 0, 'Rs.', 'en')} • صافی میزان زمیندار: ${formatPKR(sl?.summary?.netPayableToVendor || 0, 'Rs.', 'en')}`;
+    totalSummaryText = `کل فروخت تعداد: ${sl?.summary?.totalSoldQuantity ?? 0} / ${sl?.totalQuantity ?? 0} • مجموعی فروخت: ${formatPKR(sl?.summary?.grossSales || 0, 'Rs.', 'en')} • کمیشن: ${formatPKR(sl?.summary?.arhtiProfitCommission || 0, 'Rs.', 'en')} • صافی میزان زمیندار: ${formatPKR(sl?.summary?.netPayableToVendor || 0, 'Rs.', 'en')}`;
   }
   // 5. General Shop Expenses Report
   else if (expenseRows || reportType === 'expenses') {
@@ -768,7 +768,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       { title: '#', w: 40, align: 'center' },
       { title: 'گاہک / خریدار', w: 230, align: 'right' },
       { title: 'فون نمبر', w: 120, align: 'center' },
-      { title: 'نگ خریدے', w: 90, align: 'center' },
+      { title: 'تعداد خریدی', w: 90, align: 'center' },
       { title: 'کل مال خریدا', w: 105, align: 'right' },
       { title: 'نقد وصولی', w: 95, align: 'right' },
       { title: 'بقایا ادھار', w: 98, align: 'right' },
@@ -910,7 +910,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       { title: '#', w: 40, align: 'center' },
       { title: 'جنس کا نام', w: 220, align: 'right' },
       { title: 'آمد ریکارڈز', w: 90, align: 'center' },
-      { title: 'فروخت / آمد نگ', w: 100, align: 'center' },
+      { title: 'فروخت / آمد تعداد', w: 100, align: 'center' },
       { title: 'کل رقم', w: 110, align: 'right' },
       { title: 'اوسط ریٹ', w: 100, align: 'right' },
       { title: 'کمیشن', w: 118, align: 'right' },
@@ -994,38 +994,35 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
 
     if (p === 0) {
       // PAGE 1: FULL OFFICIAL SHOP HEADER + METRIC CARDS
-      // 1. Header: Bismillah & Shop Info
-      ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 15px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-      ctx.textAlign = 'center';
-      ctx.fillText('بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ', PAGE_WIDTH / 2, curY + 9);
-      curY += 35;
+      // 1. Header: Shop Info (Bismillah removed as requested)
+      curY = 32;
 
-      ctx.font = 'bold 24px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.font = 'bold 25px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
       ctx.fillStyle = '#020617';
+      ctx.textAlign = 'center';
       const shopName = settings.shopNameUrdu || settings.shopNameEn || 'سبزی و پھل کمیشن شاپ';
-      ctx.fillText(shopName, PAGE_WIDTH / 2, curY + 12);
-      curY += 24;
+      ctx.fillText(shopName, PAGE_WIDTH / 2, curY + 16);
+      curY += 34;
 
-      ctx.font = 'bold 12px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.font = 'bold 12.5px "Noto Sans Arabic", system-ui, sans-serif';
       ctx.fillStyle = '#1e293b';
       const arhti = settings.arhtiNameUrdu || settings.arhtiNameEn || 'آڑھتی کمیشن شاپ';
       ctx.fillText(`پروپرائٹر: ${arhti}`, PAGE_WIDTH / 2, curY + 10);
-      curY += 18;
+      curY += 19;
 
-      ctx.font = '11px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.font = '11.5px "Noto Sans Arabic", system-ui, sans-serif';
       ctx.fillStyle = '#475569';
       const address = settings.shopAddressUrdu || settings.shopAddressEn || '';
       ctx.fillText(`📍 ${address}  •  📞 فون: ${settings.shopPhone || ''}`, PAGE_WIDTH / 2, curY + 10);
-      curY += 22;
+      curY += 24;
 
       // Report Title Badge
       ctx.fillStyle = '#0f766e';
-      ctx.fillRect(36, curY, PAGE_WIDTH - 72, 28);
+      ctx.fillRect(36, curY, PAGE_WIDTH - 72, 30);
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 13px "Noto Sans Arabic", system-ui, sans-serif';
-      ctx.fillText(title, PAGE_WIDTH / 2, curY + 19);
-      curY += 36;
+      ctx.font = 'bold 14px "Noto Sans Arabic", system-ui, sans-serif';
+      ctx.fillText(title, PAGE_WIDTH / 2, curY + 20);
+      curY += 38;
 
       // Period / Date Bar
       ctx.fillStyle = '#f8fafc';
@@ -1169,8 +1166,8 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
           card1Title = 'مجموعی ٹرن اوور';
           card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');
 
-          card2Title = 'فروخت / آمد نگ';
-          card2Val = `${summary.unitsSold || 0} نگ`;
+          card2Title = 'فروخت / آمد تعداد';
+          card2Val = `${summary.unitsSold || 0} یونٹ`;
 
           card3Title = 'لاٹس کی تعداد';
           card3Val = `${summary.lotsCount || 0} لاٹس`;
@@ -1224,11 +1221,11 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         ctx.strokeStyle = card1Border;
         ctx.strokeRect(36, curY, cardWidth, 46);
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#64748b';
-        ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText(card1Title, 36 + cardWidth / 2, curY + 15);
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 11.5px "Noto Sans Arabic", system-ui, sans-serif';
+        ctx.fillText(card1Title, 36 + cardWidth / 2, curY + 16);
         ctx.fillStyle = card1Text;
-        ctx.font = 'bold 12.5px system-ui, sans-serif';
+        ctx.font = 'bold 14px system-ui, sans-serif';
         ctx.fillText(card1Val, 36 + cardWidth / 2, curY + 34);
 
         // Card 2
@@ -1237,11 +1234,11 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         ctx.fillRect(c2X, curY, cardWidth, 46);
         ctx.strokeStyle = card2Border;
         ctx.strokeRect(c2X, curY, cardWidth, 46);
-        ctx.fillStyle = '#64748b';
-        ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText(card2Title, c2X + cardWidth / 2, curY + 15);
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 11.5px "Noto Sans Arabic", system-ui, sans-serif';
+        ctx.fillText(card2Title, c2X + cardWidth / 2, curY + 16);
         ctx.fillStyle = card2Text;
-        ctx.font = 'bold 12.5px system-ui, sans-serif';
+        ctx.font = 'bold 14px system-ui, sans-serif';
         ctx.fillText(card2Val, c2X + cardWidth / 2, curY + 34);
 
         // Card 3
@@ -1250,11 +1247,11 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         ctx.fillRect(c3X, curY, cardWidth, 46);
         ctx.strokeStyle = card3Border;
         ctx.strokeRect(c3X, curY, cardWidth, 46);
-        ctx.fillStyle = '#64748b';
-        ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText(card3Title, c3X + cardWidth / 2, curY + 15);
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 11.5px "Noto Sans Arabic", system-ui, sans-serif';
+        ctx.fillText(card3Title, c3X + cardWidth / 2, curY + 16);
         ctx.fillStyle = card3Text;
-        ctx.font = 'bold 12.5px system-ui, sans-serif';
+        ctx.font = 'bold 14px system-ui, sans-serif';
         ctx.fillText(card3Val, c3X + cardWidth / 2, curY + 34);
 
         // Card 4
@@ -1263,11 +1260,11 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         ctx.fillRect(c4X, curY, cardWidth, 46);
         ctx.strokeStyle = card4Border;
         ctx.strokeRect(c4X, curY, cardWidth, 46);
-        ctx.fillStyle = '#64748b';
-        ctx.font = '10px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText(card4Title, c4X + cardWidth / 2, curY + 15);
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 11.5px "Noto Sans Arabic", system-ui, sans-serif';
+        ctx.fillText(card4Title, c4X + cardWidth / 2, curY + 16);
         ctx.fillStyle = card4Text;
-        ctx.font = 'bold 12.5px system-ui, sans-serif';
+        ctx.font = 'bold 14px system-ui, sans-serif';
         ctx.fillText(card4Val, c4X + cardWidth / 2, curY + 34);
 
         curY += 56;

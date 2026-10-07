@@ -9,6 +9,8 @@ import {
   expenseCategoryLabels,
   DrawerAdjustment,
   CashDrawerSummary,
+  SavedVendor,
+  BolliSale,
 } from '../types';
 import { translations, unitLabels, commonMandiProducts, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
@@ -69,6 +71,7 @@ interface ReportsViewProps {
   customers: CustomerBuyer[];
   expenses?: ShopExpense[];
   drawerAdjustments?: DrawerAdjustment[];
+  vendors?: SavedVendor[];
   onAddDrawerAdjustment?: (adj: Omit<DrawerAdjustment, 'id' | 'timestamp'>) => void;
   onDeleteDrawerAdjustment?: (id: string) => void;
   onBatchUpdateLots?: (updatedLots: VendorLot[]) => void;
@@ -99,6 +102,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   customers,
   expenses = [],
   drawerAdjustments = [],
+  vendors = [],
   onAddDrawerAdjustment,
   onDeleteDrawerAdjustment,
   onBatchUpdateLots,
@@ -198,31 +202,71 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [vendorLotsSubPages, setVendorLotsSubPages] = useState<Record<string, number>>({});
   const [customerTransactionsSubPages, setCustomerTransactionsSubPages] = useState<Record<string, number>>({});
 
-  // Date filtering helper
-  const isLotInDateRange = (lotDate: string) => {
+  // Helper to extract the real date (YYYY-MM-DD) for a sale/bid record
+  const getSaleDate = (sale: BolliSale, lot?: VendorLot): string => {
+    if (sale.date && typeof sale.date === 'string') {
+      return sale.date.slice(0, 10);
+    }
+    if (sale.timestamp && typeof sale.timestamp === 'string') {
+      return sale.timestamp.slice(0, 10);
+    }
+    if (lot?.arrivalDate) {
+      return lot.arrivalDate.slice(0, 10);
+    }
+    if (lot?.createdAt) {
+      return lot.createdAt.slice(0, 10);
+    }
+    return new Date().toISOString().slice(0, 10);
+  };
+
+  // Date filtering helper for any ISO or YYYY-MM-DD date string
+  const isDateInRange = (dateStr?: string): boolean => {
+    if (!dateStr) return false;
+    const cleanDate = dateStr.slice(0, 10);
     const todayStr = new Date().toISOString().slice(0, 10);
     const yesterdayStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
     if (dateFilter === 'all') return true;
-    if (dateFilter === 'today') return lotDate === todayStr;
-    if (dateFilter === 'yesterday') return lotDate === yesterdayStr;
+    if (dateFilter === 'today') return cleanDate === todayStr;
+    if (dateFilter === 'yesterday') return cleanDate === yesterdayStr;
     if (dateFilter === 'last7days') {
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-      return lotDate >= sevenDaysAgo && lotDate <= todayStr;
+      return cleanDate >= sevenDaysAgo && cleanDate <= todayStr;
     }
     if (dateFilter === 'thismonth') {
       const thisMonthPrefix = new Date().toISOString().slice(0, 7);
-      return lotDate.startsWith(thisMonthPrefix);
+      return cleanDate.startsWith(thisMonthPrefix);
     }
     if (dateFilter === 'custom') {
-      return (!customFromDate || lotDate >= customFromDate) && (!customToDate || lotDate <= customToDate);
+      return (!customFromDate || cleanDate >= customFromDate) && (!customToDate || cleanDate <= customToDate);
     }
     return true;
   };
 
-  // Filtered lots based on date range
+  // Backward-compatible alias
+  const isLotInDateRange = isDateInRange;
+
+  // Helper to check if a lot has activity (arrival, sales, or vendor payment) in the selected date range
+  const isLotActiveInDateRange = (lot: VendorLot): boolean => {
+    if (dateFilter === 'all') return true;
+    // 1. Lot arrived or was created on this date
+    if (isDateInRange(lot.arrivalDate) || isDateInRange(lot.createdAt?.slice(0, 10))) {
+      return true;
+    }
+    // 2. Any auction sale / bid was recorded on this date
+    if (lot.sales.some((s) => isDateInRange(getSaleDate(s, lot)))) {
+      return true;
+    }
+    // 3. Any vendor payment was recorded on this date
+    if (lot.vendorPaymentDate && isDateInRange(lot.vendorPaymentDate)) {
+      return true;
+    }
+    return false;
+  };
+
+  // Filtered lots based on date range - includes lots that arrived OR have sales/payments in this date range
   const filteredLotsByDate = useMemo(() => {
-    return lots.filter((lot) => isLotInDateRange(lot.arrivalDate));
+    return lots.filter(isLotActiveInDateRange);
   }, [lots, dateFilter, customFromDate, customToDate]);
 
   // List of unique vendors
@@ -329,9 +373,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       }
     });
 
-    filteredLotsByDate.forEach((lot) => {
+    lots.forEach((lot) => {
       lot.sales.forEach((sale) => {
         if (selectedCustomerFilter !== 'all' && sale.buyerName.toLowerCase() !== selectedCustomerFilter.toLowerCase()) {
+          return;
+        }
+
+        const saleDate = getSaleDate(sale, lot);
+        if (dateFilter !== 'all' && !isDateInRange(saleDate)) {
           return;
         }
 
@@ -377,7 +426,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           lotId: lot.id,
           lotNumber: lot.lotNumber,
           productUrdu: lot.productUrdu,
-          date: lot.arrivalDate,
+          date: saleDate,
           quantity: sale.quantity,
           ratePerUnit: sale.ratePerUnit,
           totalAmount: sale.totalAmount,
@@ -413,7 +462,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const list = Array.from(custMap.values()).map((c) => {
       const savedCust = customers.find((sc) => sc.name.toLowerCase() === c.customerName.toLowerCase());
       const customerPayments = (savedCust?.payments || []).filter(
-        (p) => dateFilter === 'all' || isLotInDateRange((p.paymentDate || p.date || '').slice(0, 10))
+        (p) => dateFilter === 'all' || isDateInRange((p.paymentDate || p.date || '').slice(0, 10))
       );
       const khataPayments = customerPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
@@ -434,7 +483,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       (c.phone && c.phone.includes(searchTerm)) ||
       (c.shopName && c.shopName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
-  }, [filteredLotsByDate, selectedCustomerFilter, customers, searchTerm, dateFilter, customFromDate, customToDate, isUrdu]);
+  }, [lots, selectedCustomerFilter, customers, searchTerm, dateFilter, customFromDate, customToDate, isUrdu]);
 
   // 2. DATE REPORT STATS
   const dateReportStats = useMemo(() => {
@@ -449,39 +498,125 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     let totalMunshiana = 0;
 
     filteredLotsByDate.forEach((lot) => {
-      grossSales += lot.summary.grossSales;
-      commission += lot.summary.arhtiProfitCommission;
-      totalExpenses += lot.summary.totalExpenses;
-      vendorPayable += lot.summary.netPayableToVendor;
+      // 1. Sales on this date range
+      const salesInDate = lot.sales.filter((s) => {
+        if (dateFilter === 'all') return true;
+        return isDateInRange(getSaleDate(s, lot));
+      });
 
-      // Mazdoori deduction
-      if (lot.expenses?.mazdoori?.enabled) {
-        totalMazdoori += Number(lot.expenses.mazdoori.amount) || 0;
-      }
+      const lotGrossSales = dateFilter === 'all'
+        ? lot.summary.grossSales
+        : salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+      const lotUnitsSold = dateFilter === 'all'
+        ? lot.summary.totalSoldQuantity
+        : salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
 
-      // Munshiana fee
-      if (lot.expenses?.munshiana?.enabled) {
-        totalMunshiana += Number(lot.expenses.munshiana.amount) || 0;
-      }
+      grossSales += lotGrossSales;
+      unitsSold += lotUnitsSold;
 
-      const lotPaid =
-        lot.vendorPaymentAmount !== undefined
-          ? lot.vendorPaymentAmount
-          : lot.vendorPaymentStatus === 'paid'
-          ? lot.summary.netPayableToVendor
-          : 0;
-      vendorPaid += lotPaid;
-
-      unitsSold += lot.summary.totalSoldQuantity;
-
-      lot.sales.forEach((s) => {
+      const salesForCash = dateFilter === 'all' ? lot.sales : salesInDate;
+      salesForCash.forEach((s) => {
         if (s.paymentStatus === 'cash') {
-          directCashReceived += s.totalAmount;
+          directCashReceived += Number(s.totalAmount) || 0;
         } else if (s.paidAmount) {
-          directCashReceived += s.paidAmount;
+          directCashReceived += Number(s.paidAmount) || 0;
         }
       });
+
+      // 2. Commission
+      let lotCommission = 0;
+      if (lot.expenses?.commission?.enabled) {
+        if (dateFilter === 'all') {
+          lotCommission = Number(lot.expenses.commission.amount) || 0;
+        } else if (lot.expenses.commission.type === 'percentage') {
+          const rate = Number(lot.expenses.commission.rate) || 0;
+          lotCommission = Math.round((lotGrossSales * rate) / 100);
+        } else if (isDateInRange(lot.arrivalDate)) {
+          lotCommission = Number(lot.expenses.commission.amount) || 0;
+        } else if (lot.totalQuantity > 0 && lotUnitsSold > 0) {
+          lotCommission = Math.round(((Number(lot.expenses.commission.amount) || 0) * lotUnitsSold) / lot.totalQuantity);
+        }
+      }
+      commission += lotCommission;
+
+      // 3. Mazdoori & Munshiana
+      let lotMazdoori = 0;
+      let lotMunshiana = 0;
+
+      if (lot.expenses?.mazdoori?.enabled) {
+        if (dateFilter === 'all') {
+          lotMazdoori = Number(lot.expenses.mazdoori.amount) || 0;
+        } else if (isDateInRange(lot.arrivalDate)) {
+          lotMazdoori = Number(lot.expenses.mazdoori.amount) || 0;
+        } else if (lotUnitsSold > 0 && lot.expenses.mazdoori.ratePerUnit) {
+          lotMazdoori = lot.expenses.mazdoori.ratePerUnit * lotUnitsSold;
+        }
+      }
+      totalMazdoori += lotMazdoori;
+
+      if (lot.expenses?.munshiana?.enabled) {
+        if (dateFilter === 'all' || isDateInRange(lot.arrivalDate)) {
+          lotMunshiana = Number(lot.expenses.munshiana.amount) || 0;
+        }
+      }
+      totalMunshiana += lotMunshiana;
+
+      // 4. Expenses and Vendor Payable
+      let lotExpensesInDate = 0;
+      if (dateFilter === 'all') {
+        lotExpensesInDate = lot.summary.totalExpenses;
+      } else {
+        lotExpensesInDate = lotCommission + lotMazdoori + lotMunshiana;
+        if (isDateInRange(lot.arrivalDate)) {
+          if (lot.expenses?.kiraya?.enabled) lotExpensesInDate += Number(lot.expenses.kiraya.amount) || 0;
+          if (lot.expenses?.marketFee?.enabled) lotExpensesInDate += Number(lot.expenses.marketFee.amount) || 0;
+          if (lot.expenses?.naqdAdvance?.enabled) lotExpensesInDate += Number(lot.expenses.naqdAdvance.amount) || 0;
+          (lot.expenses?.customExpenses || []).forEach((ce) => {
+            lotExpensesInDate += Number(ce.amount) || 0;
+          });
+        }
+      }
+      totalExpenses += lotExpensesInDate;
+
+      const lotNetPayable = Math.max(0, lotGrossSales - lotExpensesInDate);
+      vendorPayable += lotNetPayable;
+
+      // 5. Vendor payment in this date range
+      if (dateFilter === 'all') {
+        const lotPaid =
+          lot.vendorPaymentAmount !== undefined
+            ? lot.vendorPaymentAmount
+            : lot.vendorPaymentStatus === 'paid'
+            ? lot.summary.netPayableToVendor
+            : 0;
+        vendorPaid += lotPaid;
+      } else {
+        if (lot.vendorPaymentDate && isDateInRange(lot.vendorPaymentDate)) {
+          const lotPaid =
+            lot.vendorPaymentAmount !== undefined
+              ? lot.vendorPaymentAmount
+              : lot.vendorPaymentStatus === 'paid'
+              ? lot.summary.netPayableToVendor
+              : 0;
+          vendorPaid += lotPaid;
+        } else if (!lot.vendorPaymentDate && isDateInRange(lot.arrivalDate) && lot.vendorPaymentStatus === 'paid') {
+          vendorPaid += lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : lot.summary.netPayableToVendor;
+        }
+      }
     });
+
+    // Also include vendor payments recorded in vendors list if date matches
+    if (vendors && Array.isArray(vendors)) {
+      vendors.forEach((v) => {
+        (v.payments || []).forEach((pay) => {
+          if (pay.lotId) return; // already counted under lot
+          const payDate = pay.paymentDate || pay.date || '';
+          if (dateFilter === 'all' || isDateInRange(payDate)) {
+            vendorPaid += Number(pay.amount) || 0;
+          }
+        });
+      });
+    }
 
     const totalKhataPaid = customerReports.reduce((sum, c) => sum + c.khataPaid, 0);
     const totalCreditPending = customerReports.reduce((sum, c) => sum + c.creditPending, 0);
@@ -502,7 +637,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       totalMazdoori,
       totalMunshiana,
     };
-  }, [filteredLotsByDate, customerReports]);
+  }, [filteredLotsByDate, customerReports, dateFilter, customFromDate, customToDate, vendors]);
 
   // Overall Cash in Drawer Summary
   const cashDrawerSummary = useMemo(() => {
@@ -535,6 +670,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         return;
       }
 
+      const salesInDate = lot.sales.filter((s) => {
+        if (dateFilter === 'all') return true;
+        return isDateInRange(getSaleDate(s, lot));
+      });
+
+      const isArrival = isDateInRange(lot.arrivalDate);
+      const isPaymentDate = Boolean(lot.vendorPaymentDate && isDateInRange(lot.vendorPaymentDate));
+
+      if (dateFilter !== 'all' && salesInDate.length === 0 && !isArrival && !isPaymentDate) {
+        return;
+      }
+
       const existing = vendorMap.get(lot.vendorName) || {
         vendorName: lot.vendorName,
         vendorPhone: lot.vendorPhone,
@@ -551,20 +698,64 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         lots: [],
       };
 
-      const lotPaid =
-        lot.vendorPaymentAmount !== undefined
-          ? lot.vendorPaymentAmount
-          : lot.vendorPaymentStatus === 'paid'
-          ? lot.summary.netPayableToVendor
-          : 0;
+      const lotGross = dateFilter === 'all'
+        ? lot.summary.grossSales
+        : salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+      const lotSold = dateFilter === 'all'
+        ? lot.summary.totalSoldQuantity
+        : salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
 
       existing.lotsCount += 1;
-      existing.totalUnits += lot.totalQuantity;
-      existing.unitsSold += lot.summary.totalSoldQuantity;
-      existing.grossSales += lot.summary.grossSales;
-      existing.totalExpenses += lot.summary.totalExpenses;
-      existing.commission += lot.summary.arhtiProfitCommission;
-      existing.netPayable += lot.summary.netPayableToVendor;
+      existing.totalUnits += (dateFilter === 'all' || isArrival) ? lot.totalQuantity : lotSold;
+      existing.unitsSold += lotSold;
+      existing.grossSales += lotGross;
+
+      let lotComm = 0;
+      if (lot.expenses?.commission?.enabled) {
+        if (dateFilter === 'all') {
+          lotComm = Number(lot.expenses.commission.amount) || 0;
+        } else if (lot.expenses.commission.type === 'percentage') {
+          lotComm = Math.round((lotGross * (Number(lot.expenses.commission.rate) || 0)) / 100);
+        } else if (isArrival) {
+          lotComm = Number(lot.expenses.commission.amount) || 0;
+        } else if (lot.totalQuantity > 0 && lotSold > 0) {
+          lotComm = Math.round(((Number(lot.expenses.commission.amount) || 0) * lotSold) / lot.totalQuantity);
+        }
+      }
+      existing.commission += lotComm;
+
+      let lotExp = lotComm;
+      if (dateFilter === 'all') {
+        lotExp = lot.summary.totalExpenses;
+      } else if (isArrival) {
+        lotExp = lot.summary.totalExpenses;
+      } else if (lot.expenses?.mazdoori?.enabled && lot.expenses.mazdoori.ratePerUnit) {
+        lotExp += lot.expenses.mazdoori.ratePerUnit * lotSold;
+      }
+      existing.totalExpenses += lotExp;
+
+      const lotNet = Math.max(0, lotGross - lotExp);
+      existing.netPayable += (dateFilter === 'all') ? lot.summary.netPayableToVendor : lotNet;
+
+      let lotPaid = 0;
+      if (dateFilter === 'all') {
+        lotPaid =
+          lot.vendorPaymentAmount !== undefined
+            ? lot.vendorPaymentAmount
+            : lot.vendorPaymentStatus === 'paid'
+            ? lot.summary.netPayableToVendor
+            : 0;
+      } else if (isPaymentDate) {
+        lotPaid =
+          lot.vendorPaymentAmount !== undefined
+            ? lot.vendorPaymentAmount
+            : lot.vendorPaymentStatus === 'paid'
+            ? lot.summary.netPayableToVendor
+            : 0;
+      } else if (!lot.vendorPaymentDate && isArrival && lot.vendorPaymentStatus === 'paid') {
+        lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : lot.summary.netPayableToVendor;
+      }
+
       existing.totalPaid += lotPaid;
       existing.pendingBalance = Math.max(0, existing.netPayable - existing.totalPaid);
       existing.lots.push(lot);
@@ -576,7 +767,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       v.vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (v.vendorCity && v.vendorCity.toLowerCase().includes(searchTerm.toLowerCase()))
     );
-  }, [filteredLotsByDate, selectedVendorFilter, searchTerm]);
+  }, [filteredLotsByDate, selectedVendorFilter, searchTerm, dateFilter, customFromDate, customToDate]);
 
   // 3. PRODUCT REPORT DATA
   const productReports = useMemo(() => {
@@ -602,6 +793,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         return;
       }
 
+      const salesInDate = lot.sales.filter((s) => {
+        if (dateFilter === 'all') return true;
+        return isDateInRange(getSaleDate(s, lot));
+      });
+
+      const isArrival = isDateInRange(lot.arrivalDate);
+      if (dateFilter !== 'all' && salesInDate.length === 0 && !isArrival) {
+        return;
+      }
+
       const existing = prodMap.get(lot.productName) || {
         productName: lot.productName,
         productUrdu: lot.productUrdu,
@@ -616,13 +817,35 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         rates: [],
       };
 
-      existing.totalLots += 1;
-      existing.totalUnits += lot.totalQuantity;
-      existing.totalSold += lot.summary.totalSoldQuantity;
-      existing.grossTurnover += lot.summary.grossSales;
-      existing.commissionEarned += lot.summary.arhtiProfitCommission;
+      const lotGross = dateFilter === 'all'
+        ? lot.summary.grossSales
+        : salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+      const lotSold = dateFilter === 'all'
+        ? lot.summary.totalSoldQuantity
+        : salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+      const lotUnits = (dateFilter === 'all' || isArrival) ? lot.totalQuantity : lotSold;
 
-      lot.sales.forEach((s) => {
+      existing.totalLots += 1;
+      existing.totalUnits += lotUnits;
+      existing.totalSold += lotSold;
+      existing.grossTurnover += lotGross;
+
+      let comm = 0;
+      if (lot.expenses?.commission?.enabled) {
+        if (dateFilter === 'all') {
+          comm = Number(lot.expenses.commission.amount) || 0;
+        } else if (lot.expenses.commission.type === 'percentage') {
+          comm = Math.round((lotGross * (Number(lot.expenses.commission.rate) || 0)) / 100);
+        } else if (isArrival) {
+          comm = Number(lot.expenses.commission.amount) || 0;
+        } else if (lot.totalQuantity > 0 && lotSold > 0) {
+          comm = Math.round(((Number(lot.expenses.commission.amount) || 0) * lotSold) / lot.totalQuantity);
+        }
+      }
+      existing.commissionEarned += comm;
+
+      const salesForRates = dateFilter === 'all' ? lot.sales : salesInDate;
+      salesForRates.forEach((s) => {
         if (s.ratePerUnit > 0) {
           existing.rates.push(s.ratePerUnit);
           if (s.ratePerUnit < existing.minRate) existing.minRate = s.ratePerUnit;
@@ -644,7 +867,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       p.productUrdu.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.productName.toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [filteredLotsByDate, selectedProductFilter, searchTerm]);
+  }, [filteredLotsByDate, selectedProductFilter, searchTerm, dateFilter, customFromDate, customToDate]);
 
   // 4. EXPENSES REPORT DATA (دکان کے روزنامچہ و عمومی اخراجات)
   const filteredExpensesByDate = useMemo(() => {
@@ -898,17 +1121,43 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       );
     } else {
       // Date report
-      const dateRows = filteredLotsByDate.map((l) => ({
-        lotNumber: l.lotNumber,
-        date: l.arrivalDate,
-        vendor: l.vendorName,
-        product: l.productUrdu,
-        totalQty: l.totalQuantity,
-        soldQty: l.summary.totalSoldQuantity,
-        grossSales: l.summary.grossSales,
-        commission: l.summary.arhtiProfitCommission,
-        netPayable: l.summary.netPayableToVendor,
-      }));
+      const dateRows = filteredLotsByDate.map((l) => {
+        const salesInDate = l.sales.filter((s) => {
+          if (dateFilter === 'all') return true;
+          return isDateInRange(getSaleDate(s, l));
+        });
+        const isArrival = isDateInRange(l.arrivalDate);
+        const lotGross = dateFilter === 'all'
+          ? l.summary.grossSales
+          : salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+        const lotSold = dateFilter === 'all'
+          ? l.summary.totalSoldQuantity
+          : salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+        let comm = 0;
+        if (l.expenses?.commission?.enabled) {
+          if (dateFilter === 'all') {
+            comm = l.summary.arhtiProfitCommission;
+          } else if (l.expenses.commission.type === 'percentage') {
+            comm = Math.round((lotGross * (Number(l.expenses.commission.rate) || 0)) / 100);
+          } else if (isArrival) {
+            comm = Number(l.expenses.commission.amount) || 0;
+          } else if (l.totalQuantity > 0 && lotSold > 0) {
+            comm = Math.round(((Number(l.expenses.commission.amount) || 0) * lotSold) / l.totalQuantity);
+          }
+        }
+        const recordDate = dateFilter === 'all' ? l.arrivalDate : (salesInDate[0] ? getSaleDate(salesInDate[0], l) : l.arrivalDate);
+        return {
+          lotNumber: l.lotNumber,
+          date: recordDate,
+          vendor: l.vendorName,
+          product: l.productUrdu,
+          totalQty: (dateFilter === 'all' || isArrival) ? l.totalQuantity : lotSold,
+          soldQty: lotSold,
+          grossSales: lotGross,
+          commission: comm,
+          netPayable: Math.max(0, lotGross - comm),
+        };
+      });
 
       previewData = buildReportPDF({
         reportType: 'date',
@@ -981,7 +1230,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     } else {
       csvContent += 'Lot #,Date,Vendor,Product,Total Qty,Sold Qty,Gross Sales,Expenses,Commission,Net Payable\n';
       filteredLotsByDate.forEach((l) => {
-        csvContent += `"${l.lotNumber}","${l.arrivalDate}","${l.vendorName}","${l.productUrdu}",${l.totalQuantity},${l.summary.totalSoldQuantity},${l.summary.grossSales},${l.summary.totalExpenses},${l.summary.arhtiProfitCommission},${l.summary.netPayableToVendor}\n`;
+        const salesInDate = l.sales.filter((s) => dateFilter === 'all' || isDateInRange(getSaleDate(s, l)));
+        const isArrival = isDateInRange(l.arrivalDate);
+        const lotGross = dateFilter === 'all' ? l.summary.grossSales : salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+        const lotSold = dateFilter === 'all' ? l.summary.totalSoldQuantity : salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+        let comm = 0;
+        if (l.expenses?.commission?.enabled) {
+          if (dateFilter === 'all') comm = l.summary.arhtiProfitCommission;
+          else if (l.expenses.commission.type === 'percentage') comm = Math.round((lotGross * (Number(l.expenses.commission.rate) || 0)) / 100);
+          else if (isArrival) comm = Number(l.expenses.commission.amount) || 0;
+          else if (l.totalQuantity > 0 && lotSold > 0) comm = Math.round(((Number(l.expenses.commission.amount) || 0) * lotSold) / l.totalQuantity);
+        }
+        const recordDate = dateFilter === 'all' ? l.arrivalDate : (salesInDate[0] ? getSaleDate(salesInDate[0], l) : l.arrivalDate);
+        csvContent += `"${l.lotNumber}","${recordDate}","${l.vendorName}","${l.productUrdu}",${(dateFilter === 'all' || isArrival) ? l.totalQuantity : lotSold},${lotSold},${lotGross},${comm},${comm},${Math.max(0, lotGross - comm)}\n`;
       });
     }
 
@@ -1446,6 +1707,31 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           ) : (
             <div className="divide-y divide-slate-100">
               {paginatedLotsByDate.map((lot) => {
+                const salesInDate = lot.sales.filter((s) => {
+                  if (dateFilter === 'all') return true;
+                  return isDateInRange(getSaleDate(s, lot));
+                });
+                const isArrival = isDateInRange(lot.arrivalDate);
+                const lotGrossOnDate = dateFilter === 'all'
+                  ? lot.summary.grossSales
+                  : salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+                const lotSoldOnDate = dateFilter === 'all'
+                  ? lot.summary.totalSoldQuantity
+                  : salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+
+                let commOnDate = 0;
+                if (lot.expenses?.commission?.enabled) {
+                  if (dateFilter === 'all') {
+                    commOnDate = lot.summary.arhtiProfitCommission;
+                  } else if (lot.expenses.commission.type === 'percentage') {
+                    commOnDate = Math.round((lotGrossOnDate * (Number(lot.expenses.commission.rate) || 0)) / 100);
+                  } else if (isArrival) {
+                    commOnDate = Number(lot.expenses.commission.amount) || 0;
+                  } else if (lot.totalQuantity > 0 && lotSoldOnDate > 0) {
+                    commOnDate = Math.round(((Number(lot.expenses.commission.amount) || 0) * lotSoldOnDate) / lot.totalQuantity);
+                  }
+                }
+
                 return (
                   <div
                     key={lot.id}
@@ -1456,7 +1742,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         {lot.productEmoji}
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-nastaliq truncate">
                             {lot.vendorName}
                           </h4>
@@ -1466,10 +1752,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           <span className="text-[10px] text-slate-400 font-numbers">
                             {lot.arrivalDate}
                           </span>
+                          {dateFilter !== 'all' && !isArrival && salesInDate.length > 0 && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold font-urdu-sans border border-blue-200">
+                              {isUrdu ? 'اس تاریخ کی بولی' : 'Bid on selected date'}
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-slate-500 font-urdu-sans mt-0.5">
                           {lot.productUrdu} • {lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)} (
-                          <strong className="text-blue-700">{lot.summary.totalSoldQuantity} فروخت</strong>,{' '}
+                          <strong className="text-blue-700">
+                            {dateFilter === 'all'
+                              ? `${lot.summary.totalSoldQuantity} فروخت`
+                              : `${lotSoldOnDate} اس تاریخ پر فروخت (کل: ${lot.summary.totalSoldQuantity})`}
+                          </strong>,{' '}
                           <strong className="text-amber-700">{lot.summary.remainingQuantity} باقی</strong>)
                         </p>
                       </div>
@@ -1479,10 +1774,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
                       <div className="text-start sm:text-end">
                         <span className="text-xs sm:text-sm font-black text-slate-900 font-numbers block">
-                          {formatPKR(lot.summary.grossSales, settings.currencySymbol, settings.language)}
+                          {formatPKR(lotGrossOnDate, settings.currencySymbol, settings.language)}
                         </span>
                         <span className="text-[11px] text-emerald-800 font-numbers font-semibold block">
-                          کمیشن: {formatPKR(lot.summary.arhtiProfitCommission, settings.currencySymbol, settings.language)}
+                          کمیشن: {formatPKR(commOnDate, settings.currencySymbol, settings.language)}
                         </span>
                       </div>
 

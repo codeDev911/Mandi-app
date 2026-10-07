@@ -282,24 +282,24 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
           </div>
 
           {/* 2. SUBHEADER METADATA ROW */}
-          <div className="my-1 border-y-2 border-red-700 py-0.5 px-2 flex items-center justify-between text-[11px] sm:text-xs font-bold text-slate-900 bg-white">
-            <div className="flex items-center gap-1">
-              <span className="text-red-700 font-urdu-nastaliq">نمبر:</span>
-              <span className="font-numbers underline font-bold px-1 text-slate-950">
+          <div className="my-1 border-y-2 border-red-700 py-0.5 sm:py-1 px-2 flex items-center justify-between text-[11px] sm:text-xs font-bold text-slate-900 bg-white">
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-bold">نمبر:</span>
+              <span className="font-numbers underline font-bold px-1 text-slate-950 text-xs sm:text-sm">
                 {displayBillNo}
               </span>
             </div>
 
-            <div className="flex items-center gap-1 flex-1 justify-center px-2 truncate">
-              <span className="text-red-700 font-urdu-nastaliq">بل بنام:</span>
-              <span className="underline font-bold text-slate-950 font-urdu-nastaliq text-xs sm:text-sm px-1 truncate">
+            <div className="flex items-center gap-2 flex-1 justify-center px-2 min-w-0">
+              <span className="text-red-700 font-urdu-nastaliq text-sm sm:text-base font-black flex-shrink-0">بل بنام:</span>
+              <span className="underline decoration-red-600 decoration-2 font-black text-slate-950 font-urdu-nastaliq text-lg sm:text-xl md:text-2xl px-1.5 truncate tracking-wide leading-tight drop-shadow-2xs">
                 {vendorName} {vendorCity ? `(${vendorCity})` : ''}
               </span>
             </div>
 
-            <div className="flex items-center gap-1">
-              <span className="text-red-700 font-urdu-nastaliq">السلام علیکم تاریخ:</span>
-              <span className="font-numbers underline font-bold px-1 text-slate-950">
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-bold">السلام علیکم تاریخ:</span>
+              <span className="font-numbers underline font-bold px-1 text-slate-950 text-xs sm:text-sm">
                 {realDate}
               </span>
             </div>
@@ -495,33 +495,33 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
               </div>
 
               {/* Bottom 3 Summary Rows */}
-              <div className="border-t-2 border-red-700 font-urdu-sans mt-auto">
-                {/* 1. خام بکری (Mauve) */}
-                <div className="h-6 sm:h-7 flex items-center bg-[#831843] text-white font-bold border-b border-white/20">
-                  <div className="w-20 sm:w-24 h-full border-l-2 border-white/40 flex items-center justify-center px-1 font-numbers text-[11px] sm:text-xs text-amber-200 font-black">
+              <div className="border-t-2 border-red-700 font-urdu-sans mt-auto bg-white">
+                {/* 1. خام بکری (Clean White Background) */}
+                <div className="h-6 sm:h-7 flex items-center bg-white text-slate-900 font-bold border-b border-red-700/60">
+                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-[11px] sm:text-xs text-slate-900 font-black">
                     {Math.round(totalGross).toLocaleString()}
                   </div>
-                  <div className="flex-1 h-full flex items-center justify-center px-2 text-[11px] sm:text-xs font-urdu-nastaliq font-bold">
+                  <div className="flex-1 h-full flex items-center justify-center px-2 text-[11px] sm:text-xs font-urdu-nastaliq font-bold text-red-900">
                     خام بکری
                   </div>
                 </div>
 
-                {/* 2. جملہ اخراجات (Navy Blue) */}
-                <div className="h-6 sm:h-7 flex items-center bg-[#1e3a8a] text-white font-bold border-b border-white/20">
-                  <div className="w-20 sm:w-24 h-full border-l-2 border-white/40 flex items-center justify-center px-1 font-numbers text-[11px] sm:text-xs text-rose-200 font-black">
+                {/* 2. جملہ اخراجات (Clean White Background) */}
+                <div className="h-6 sm:h-7 flex items-center bg-white text-slate-900 font-bold border-b border-red-700/60">
+                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-[11px] sm:text-xs text-slate-900 font-black">
                     {Math.round(meezanExpenses).toLocaleString()}
                   </div>
-                  <div className="flex-1 h-full flex items-center justify-center px-2 text-[11px] sm:text-xs font-urdu-nastaliq font-bold">
+                  <div className="flex-1 h-full flex items-center justify-center px-2 text-[11px] sm:text-xs font-urdu-nastaliq font-bold text-red-900">
                     جملہ اخراجات
                   </div>
                 </div>
 
-                {/* 3. پختہ بکری (Bright Green) */}
-                <div className="h-7 sm:h-8 flex items-center bg-[#15803d] text-white font-bold">
-                  <div className="w-20 sm:w-24 h-full border-l-2 border-white/40 flex items-center justify-center px-1 font-numbers text-xs sm:text-sm text-yellow-300 font-black">
+                {/* 3. پختہ بکری (Clean White Background) */}
+                <div className="h-7 sm:h-8 flex items-center bg-white text-slate-900 font-bold">
+                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-xs sm:text-sm text-slate-950 font-black">
                     {Math.round(totalNetPayable).toLocaleString()}
                   </div>
-                  <div className="flex-1 h-full flex items-center justify-center px-2 text-xs sm:text-sm font-urdu-nastaliq font-black">
+                  <div className="flex-1 h-full flex items-center justify-center px-2 text-xs sm:text-sm font-urdu-nastaliq font-black text-red-900">
                     پختہ بکری
                   </div>
                 </div>

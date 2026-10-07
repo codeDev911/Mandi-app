@@ -454,23 +454,38 @@ export const translations = {
 
 export const unitLabels: Record<string, { ur: string; en: string }> = {
   bori: { ur: 'بوری', en: 'بوری' },
+  bore: { ur: 'بوری', en: 'بوری' },
+  bora: { ur: 'بوری', en: 'بوری' },
+  boray: { ur: 'بوری', en: 'بوری' },
+  bory: { ur: 'بوری', en: 'بوری' },
+  sack: { ur: 'بوری', en: 'بوری' },
   tora: { ur: 'توڑہ', en: 'توڑہ' },
   kainchi: { ur: 'کینچی', en: 'کینچی' },
   shopper: { ur: 'شاپر', en: 'شاپر' },
   crates: { ur: 'کریٹ', en: 'کریٹ' },
+  crate: { ur: 'کریٹ', en: 'کریٹ' },
   theli: { ur: 'تھیلی', en: 'تھیلی' },
   peti: { ur: 'پیٹی', en: 'پیٹی' },
   kg: { ur: 'کلو', en: 'کلو' },
   nag: { ur: 'نگ', en: 'نگ' },
+  piece: { ur: 'نگ', en: 'نگ' },
   // Common Urdu aliases:
   'بوری': { ur: 'بوری', en: 'بوری' },
+  'بورے': { ur: 'بوری', en: 'بوری' },
+  'بوریاں': { ur: 'بوری', en: 'بوری' },
+  'بورا': { ur: 'بوری', en: 'بوری' },
   'توڑہ': { ur: 'توڑہ', en: 'توڑہ' },
+  'توڑے': { ur: 'توڑہ', en: 'توڑہ' },
   'تورڑہ': { ur: 'توڑہ', en: 'توڑہ' },
   'کینچی': { ur: 'کینچی', en: 'کینچی' },
   'شاپر': { ur: 'شاپر', en: 'شاپر' },
+  'شاپرز': { ur: 'شاپر', en: 'شاپر' },
   'کریٹ': { ur: 'کریٹ', en: 'کریٹ' },
+  'کریٹس': { ur: 'کریٹ', en: 'کریٹ' },
   'پیٹی': { ur: 'پیٹی', en: 'پیٹی' },
+  'پیٹیاں': { ur: 'پیٹی', en: 'پیٹی' },
   'تھیلی': { ur: 'تھیلی', en: 'تھیلی' },
+  'تھلیاں': { ur: 'تھیلی', en: 'تھیلی' },
   'کلوگرام': { ur: 'کلو', en: 'کلو' },
   'کلو': { ur: 'کلو', en: 'کلو' },
   'نگ': { ur: 'نگ', en: 'نگ' },
@@ -490,7 +505,11 @@ export function getUnitDisplayLabel(unit?: string, _lang?: string): string {
   if (unitLabels[lower]) {
     return unitLabels[lower].ur || clean;
   }
-  return clean;
+  const resolved = resolveUnitType(clean);
+  if (resolved && unitLabels[resolved]) {
+    return unitLabels[resolved].ur || clean;
+  }
+  return clean || 'بوری';
 }
 
 /**
@@ -500,8 +519,20 @@ export function resolveUnitType(titleOrUnit?: string): UnitType {
   if (!titleOrUnit) return 'bori';
   const lower = titleOrUnit.toLowerCase().trim();
   if (lower.includes('شاپر') || lower.includes('shopper') || lower.includes('shaper')) return 'shopper';
-  if (lower.includes('بوری') || lower.includes('bori') || lower.includes('stack') || lower.includes('sack')) return 'bori';
-  if (lower.includes('توڑہ') || lower.includes('تورڑہ') || lower.includes('tora') || lower.includes('bundle')) return 'tora';
+  if (
+    lower.includes('بوری') ||
+    lower.includes('بورے') ||
+    lower.includes('بوریاں') ||
+    lower.includes('بورا') ||
+    lower.includes('bori') ||
+    lower.includes('bore') ||
+    lower.includes('bora') ||
+    lower.includes('boray') ||
+    lower.includes('bory') ||
+    lower.includes('stack') ||
+    lower.includes('sack')
+  ) return 'bori';
+  if (lower.includes('توڑہ') || lower.includes('توڑے') || lower.includes('تورڑہ') || lower.includes('tora') || lower.includes('bundle')) return 'tora';
   if (lower.includes('کینچی') || lower.includes('kainchi') || lower.includes('frame')) return 'kainchi';
   if (lower.includes('کریٹ') || lower.includes('crate')) return 'crates';
   if (lower.includes('پیٹی') || lower.includes('peti') || lower.includes('box')) return 'peti';

@@ -42,6 +42,7 @@ export interface BolliSale {
   paymentStatus: PaymentStatus;
   paidAmount?: number;
   notes?: string;
+  date?: string; // YYYY-MM-DD
   timestamp: string;
 }
 

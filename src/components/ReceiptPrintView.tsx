@@ -491,10 +491,6 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
         >
           {/* Receipt Top Header */}
           <div className="text-center space-y-1">
-            <div className="font-urdu-nastaliq text-sm font-bold text-slate-900">
-              بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ
-            </div>
-
             <h1 className="text-xl sm:text-2xl font-black font-urdu-nastaliq text-slate-950 leading-tight">
               {isUrdu ? settings.shopNameUrdu : settings.shopNameEn}
             </h1>

@@ -217,8 +217,8 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
     }
     sound.playTick();
 
-    const firstImg = pageImages[0];
-    printDetailedReportDocument(previewData, firstImg || undefined);
+    const allImages = pageImages.length > 0 ? pageImages : undefined;
+    printDetailedReportDocument(previewData, allImages);
   };
 
   return (

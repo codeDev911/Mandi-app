@@ -1,5 +1,5 @@
 import { VendorLot, AppSettings } from '../types';
-import { unitLabels, formatFullRealDate } from './localization';
+import { unitLabels, formatFullRealDate, getUnitDisplayLabel } from './localization';
 import { formatPKR } from './currency';
 import { PDFPreviewData } from './pdfReportGenerator';
 
@@ -76,14 +76,47 @@ export function printHtmlViaIframe(htmlContent: string, documentTitle: string = 
       }
     };
 
-    // Wait for content & fonts to be ready
+    // Wait for content, fonts & all images to be fully loaded
+    const waitForImagesAndPrint = () => {
+      const imgs = Array.from(frameDoc.images || []);
+      if (imgs.length === 0) {
+        setTimeout(triggerPrint, 250);
+        return;
+      }
+      let loaded = 0;
+      let hasTriggered = false;
+      const done = () => {
+        if (hasTriggered) return;
+        loaded++;
+        if (loaded >= imgs.length) {
+          hasTriggered = true;
+          setTimeout(triggerPrint, 150);
+        }
+      };
+      imgs.forEach((img) => {
+        if (img.complete) {
+          done();
+        } else {
+          img.onload = done;
+          img.onerror = done;
+        }
+      });
+      // Safety timeout in case an image event stalls
+      setTimeout(() => {
+        if (!hasTriggered) {
+          hasTriggered = true;
+          triggerPrint();
+        }
+      }, 1000);
+    };
+
     if (frameDoc.readyState === 'complete') {
-      setTimeout(triggerPrint, 250);
+      waitForImagesAndPrint();
     } else {
       iframe.onload = () => {
-        setTimeout(triggerPrint, 250);
+        waitForImagesAndPrint();
       };
-      setTimeout(triggerPrint, 600);
+      setTimeout(waitForImagesAndPrint, 800);
     }
   } catch (err) {
     console.error('Print trigger error:', err);
@@ -206,7 +239,7 @@ export function generateInsafMandiBillHtmlSingle(
 
   if (!isAveraged) {
     lots.forEach((lot) => {
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
       if (lot.sales && lot.sales.length > 0) {
         lot.sales.forEach((s) => {
           allItems.push({
@@ -244,7 +277,7 @@ export function generateInsafMandiBillHtmlSingle(
 
     lots.forEach((lot) => {
       const prodKey = (lot.productUrdu || lot.productName || 'جنس').trim();
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
       if (!productGroups.has(prodKey)) {
         productGroups.set(prodKey, {
@@ -383,17 +416,17 @@ export function generateInsafMandiBillHtmlSingle(
 
         <!-- Subheader Metadata Row -->
         <div style="margin: 2px 0; border-top: 2px solid #b91c1c; border-bottom: 2px solid #b91c1c; padding: 2px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: bold; background: #ffffff;">
-          <div>
-            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif;">نمبر:</span>
-            <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px;">${displayBillNo}</span>
+          <div style="flex-shrink: 0;">
+            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold;">نمبر:</span>
+            <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 11.5px;">${displayBillNo}</span>
           </div>
-          <div style="flex: 1; text-align: center; padding: 0 6px;">
-            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif;">بل بنام:</span>
-            <span style="text-decoration: underline; font-size: 12.5px; font-family: 'Noto Nastaliq Urdu', serif; padding: 0 4px;">${vendorName} ${vendorCity ? `(${vendorCity})` : ''}</span>
+          <div style="flex: 1; text-align: center; padding: 0 6px; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px;">
+            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 14px; font-weight: 900; flex-shrink: 0;">بل بنام:</span>
+            <span style="text-decoration: underline; text-decoration-color: #b91c1c; font-size: 21px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif; padding: 0 4px; color: #020617; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">${vendorName} ${vendorCity ? `(${vendorCity})` : ''}</span>
           </div>
-          <div>
-            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif;">السلام علیکم تاریخ:</span>
-            <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px;">${displayDate}</span>
+          <div style="flex-shrink: 0;">
+            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold;">السلام علیکم تاریخ:</span>
+            <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 11.5px;">${displayDate}</span>
           </div>
         </div>
 
@@ -512,34 +545,34 @@ export function generateInsafMandiBillHtmlSingle(
               </div>
             </div>
 
-            <!-- Bottom 3 Summary Rows -->
-            <div style="border-top: 2px solid #b91c1c; margin-top: auto;">
-              <!-- خام بکری (Mauve) -->
-              <div style="height: 22px; display: flex; align-items: center; background: #831843; color: #ffffff; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.3);">
-                <div style="width: 82px; height: 100%; border-left: 2px solid rgba(255,255,255,0.4); display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11px; font-weight: 900; color: #fef08a;">
+            <!-- Bottom 3 Summary Rows (Background colors removed) -->
+            <div style="border-top: 2px solid #b91c1c; margin-top: auto; background: #ffffff;">
+              <!-- خام بکری -->
+              <div style="height: 22px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: bold; border-bottom: 1px solid #b91c1c;">
+                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11.5px; font-weight: 900; color: #0f172a;">
                   ${Math.round(totalGross).toLocaleString()}
                 </div>
-                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11px;">
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold; color: #991b1b;">
                   خام بکری
                 </div>
               </div>
 
-              <!-- جملہ اخراجات (Navy Blue) -->
-              <div style="height: 22px; display: flex; align-items: center; background: #1e3a8a; color: #ffffff; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.3);">
-                <div style="width: 82px; height: 100%; border-left: 2px solid rgba(255,255,255,0.4); display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11px; font-weight: 900; color: #fecdd3;">
+              <!-- جملہ اخراجات -->
+              <div style="height: 22px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: bold; border-bottom: 1px solid #b91c1c;">
+                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11.5px; font-weight: 900; color: #0f172a;">
                   ${Math.round(meezanExpenses).toLocaleString()}
                 </div>
-                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11px;">
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold; color: #991b1b;">
                   جملہ اخراجات
                 </div>
               </div>
 
-              <!-- پختہ بکری (Bright Green) -->
-              <div style="height: 24px; display: flex; align-items: center; background: #15803d; color: #ffffff; font-weight: 900;">
-                <div style="width: 82px; height: 100%; border-left: 2px solid rgba(255,255,255,0.4); display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 13px; font-weight: 900; color: #fef08a;">
+              <!-- پختہ بکری -->
+              <div style="height: 24px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: 900;">
+                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 13.5px; font-weight: 900; color: #0f172a;">
                   ${Math.round(totalNetPayable).toLocaleString()}
                 </div>
-                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 12.5px;">
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 13px; font-weight: 900; color: #991b1b;">
                   پختہ بکری
                 </div>
               </div>
@@ -762,7 +795,7 @@ export function printBatchVendorBillsA4(
  */
 export function printSingleLotReceiptA4(lot: VendorLot, settings: AppSettings): void {
   const isUrdu = settings.language === 'ur';
-  const unitLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+  const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
   const isPaid = lot.vendorPaymentStatus === 'paid';
 
   const tableRowsHtml =
@@ -850,7 +883,6 @@ export function printSingleLotReceiptA4(lot: VendorLot, settings: AppSettings): 
           padding-bottom: 14px;
           margin-bottom: 16px;
         }
-        .bismillah { font-size: 15px; font-weight: bold; margin-bottom: 4px; }
         .shop-name { font-size: 26px; font-weight: 800; color: #020617; margin-bottom: 4px; }
         .arhti-info { font-size: 13px; font-weight: bold; color: #1e293b; }
         .contact-info { font-size: 12px; color: #475569; margin-top: 3px; }
@@ -963,7 +995,6 @@ export function printSingleLotReceiptA4(lot: VendorLot, settings: AppSettings): 
       <div class="bill-container">
         <!-- Header -->
         <div class="header">
-          <div class="bismillah">بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ</div>
           <div class="shop-name">${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}</div>
           <div class="arhti-info">پروپرائٹر: ${isUrdu ? settings.arhtiNameUrdu : settings.arhtiNameEn}</div>
           <div class="contact-info">📍 ${isUrdu ? settings.shopAddressUrdu : settings.shopAddressEn}  •  📞 فون: ${settings.shopPhone}</div>
@@ -1053,13 +1084,18 @@ export function printSingleLotReceiptA4(lot: VendorLot, settings: AppSettings): 
 /**
  * Prints Detailed PDF / HTML Report in Clean Urdu Layout
  */
-export function printDetailedReportDocument(previewData: PDFPreviewData, previewImageUrl?: string): void {
+export function printDetailedReportDocument(previewData: PDFPreviewData, previewImageUrls?: string | string[]): void {
   const { settings, title, dateFilterLabel, dateRangeStr, generatedDate, summary, dateRows, customerRows, vendorRows, productRows, expenseRows } = previewData;
   const isUrdu = settings.language === 'ur';
 
-  // If exact rendered PDF Canvas image is available, print that pixel-perfect layout
-  if (previewImageUrl) {
-    const html = `
+  // If exact rendered PDF Canvas image(s) are available, print that pixel-perfect multi-page layout
+  if (previewImageUrls) {
+    const images = Array.isArray(previewImageUrls)
+      ? previewImageUrls
+      : (previewImageUrls ? [previewImageUrls] : []);
+
+    if (images.length > 0) {
+      const html = `
       <!DOCTYPE html>
       <html dir="rtl" lang="ur">
       <head>
@@ -1068,49 +1104,89 @@ export function printDetailedReportDocument(previewData: PDFPreviewData, preview
         <style>
           @page {
             size: A4 portrait;
-            margin: 6mm;
-          }
-          @media print {
-            body {
-              width: 100% !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
+            margin: 0;
           }
           * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
           }
-          body {
+          html, body {
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
             background: #ffffff;
             color: #000000;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .pdf-preview-page {
+            width: 100%;
+            max-width: 210mm;
+            height: 297mm;
+            min-height: 297mm;
+            max-height: 297mm;
+            margin: 0 auto;
+            padding: 0;
             display: flex;
             justify-content: center;
-            align-items: flex-start;
-            padding: 4px;
+            align-items: center;
+            page-break-after: always;
+            break-after: page;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            overflow: hidden;
+            background: #ffffff;
+          }
+          .pdf-preview-page:last-child {
+            page-break-after: auto;
+            break-after: auto;
           }
           .pdf-preview-print-img {
             width: 100%;
-            max-width: 820px;
-            height: auto;
+            height: 100%;
+            object-fit: contain;
             display: block;
             margin: 0 auto;
             image-rendering: -webkit-optimize-contrast;
           }
+          @media print {
+            body {
+              width: 100% !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+            .pdf-preview-page {
+              width: 210mm !important;
+              height: 297mm !important;
+              max-width: none !important;
+              margin: 0 !important;
+              page-break-after: always !important;
+              break-after: page !important;
+            }
+            .pdf-preview-page:last-child {
+              page-break-after: auto !important;
+              break-after: auto !important;
+            }
+          }
         </style>
       </head>
       <body>
-        <div style="width: 100%; text-align: center;">
-          <img src="${previewImageUrl}" alt="${title}" class="pdf-preview-print-img" />
-        </div>
+        ${images
+          .map(
+            (imgUrl, idx) => `
+          <div class="pdf-preview-page">
+            <img src="${imgUrl}" alt="${title} - Page ${idx + 1}" class="pdf-preview-print-img" />
+          </div>
+        `
+          )
+          .join('')}
       </body>
       </html>
     `;
-    printHtmlViaIframe(html, title);
-    return;
+      printHtmlViaIframe(html, title);
+      return;
+    }
   }
 
   let tableHtml = '';
@@ -1268,7 +1344,7 @@ export function printDetailedReportDocument(previewData: PDFPreviewData, preview
             <th style="text-align: right;">خریدار / دکاندار</th>
             <th style="width: 95px; text-align: center;">فون نمبر</th>
             <th style="width: 60px; text-align: center;">سودے</th>
-            <th style="width: 65px; text-align: center;">کل نگ</th>
+            <th style="width: 75px; text-align: center;">کل تعداد / پیکنگ</th>
             <th style="width: 90px; text-align: right;">کل خریداری</th>
             <th style="width: 80px; text-align: right;">نقد وصول</th>
             <th style="width: 90px; text-align: right;">بقایا ادھار</th>
@@ -1519,12 +1595,6 @@ export function printDetailedReportDocument(previewData: PDFPreviewData, preview
           padding-bottom: 12px;
           margin-bottom: 14px;
         }
-        .bismillah {
-          font-size: 14px;
-          font-weight: bold;
-          color: #0f172a;
-          margin-bottom: 3px;
-        }
         .shop-name {
           font-size: 24px;
           font-weight: 800;
@@ -1629,7 +1699,6 @@ export function printDetailedReportDocument(previewData: PDFPreviewData, preview
       <div class="report-container">
         <!-- Header -->
         <div class="header">
-          <div class="bismillah">بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ</div>
           <div class="shop-name">${isUrdu ? settings.shopNameUrdu : settings.shopNameEn}</div>
           <div class="arhti-info">پروپرائٹر: ${isUrdu ? settings.arhtiNameUrdu : settings.arhtiNameEn}</div>
           <div class="contact-info">📍 ${isUrdu ? settings.shopAddressUrdu : settings.shopAddressEn}  •  📞 فون: ${settings.shopPhone}</div>

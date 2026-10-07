@@ -1,5 +1,5 @@
 import { VendorLot, AppSettings } from '../types';
-import { unitLabels, formatFullRealDate } from './localization';
+import { unitLabels, formatFullRealDate, getUnitDisplayLabel } from './localization';
 import { formatPKR } from './currency';
 import { printHtmlViaIframe } from './printHelper';
 
@@ -40,7 +40,7 @@ export async function generateMandiInvoiceCanvasAsync(lot: VendorLot, settings: 
 export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings): HTMLCanvasElement {
   const width = 540; // Clean, standard 80mm POS slip canvas width
   const isUrdu = settings.language === 'ur';
-  const unitLabel = unitLabels[lot.unitType]?.[settings.language] || lot.unitType;
+  const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
   // Active Katote / Deductions
   const activeExpensesList: { label: string; amount: number }[] = [];
@@ -118,24 +118,20 @@ export function generateMandiInvoiceCanvas(lot: VendorLot, settings: AppSettings
   ctx.strokeRect(10, 10, width - 20, totalHeight - 20);
 
   // 2. POS Shop Header
-  // Bismillah
+  // Shop Name (Main Display - Bismillah removed)
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 14px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
   ctx.textAlign = 'center';
-  ctx.fillText('بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ', width / 2, 32);
-
-  // Shop Name (Main Display)
-  ctx.font = 'bold 21px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-  ctx.fillText(settings.shopNameUrdu || settings.shopNameEn || 'سبزی و پھل کمیشن شاپ', width / 2, 62);
+  ctx.font = 'bold 22px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+  ctx.fillText(settings.shopNameUrdu || settings.shopNameEn || 'سبزی و پھل کمیشن شاپ', width / 2, 48);
 
   // Proprietor & Contact Info
   ctx.fillStyle = '#1e293b';
-  ctx.font = 'bold 11.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText(`پروپرائٹر: ${settings.arhtiNameUrdu || settings.arhtiNameEn || 'آڑھتی صاحب'}`, width / 2, 82);
+  ctx.font = 'bold 12px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText(`پروپرائٹر: ${settings.arhtiNameUrdu || settings.arhtiNameEn || 'آڑھتی صاحب'}`, width / 2, 72);
 
   ctx.fillStyle = '#475569';
-  ctx.font = '10.5px "Noto Sans Arabic", system-ui, sans-serif';
-  ctx.fillText(`📍 ${settings.shopAddressUrdu || settings.shopAddressEn || 'غلہ منڈی'}  •  📞 فون: ${settings.shopPhone || ''}`, width / 2, 98);
+  ctx.font = '11px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.fillText(`📍 ${settings.shopAddressUrdu || settings.shopAddressEn || 'غلہ منڈی'}  •  📞 فون: ${settings.shopPhone || ''}`, width / 2, 92);
 
   // POS Invoice Badge
   ctx.fillStyle = '#f8fafc';
@@ -477,7 +473,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   if (!isAveraged) {
     // Detailed list: each sale or lot in separate rows
     lots.forEach((lot) => {
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
       if (lot.sales && lot.sales.length > 0) {
         lot.sales.forEach((s) => {
           allItems.push({
@@ -515,7 +511,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
 
     lots.forEach((lot) => {
       const prodKey = (lot.productUrdu || lot.productName || 'جنس').trim();
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
       if (!productGroups.has(prodKey)) {
         productGroups.set(prodKey, {
@@ -687,14 +683,14 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.font = 'bold 11.5px system-ui, monospace';
   ctx.fillText(lots[0]?.lotNumber || '101', headerX + headerW - 40, subY + 16);
 
-  // Center: Vendor Name
+  // Center: Vendor Name (Big and Bold)
   ctx.textAlign = 'center';
   ctx.fillStyle = '#b91c1c';
-  ctx.font = 'bold 11.5px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('بل بنام: ', headerX + headerW / 2 + 60, subY + 16);
-  ctx.fillStyle = '#020617';
   ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
-  ctx.fillText(`${vendorName} ${vendorCity ? `(${vendorCity})` : ''}`, headerX + headerW / 2 - 15, subY + 16);
+  ctx.fillText('بل بنام: ', headerX + headerW / 2 + 75, subY + 17);
+  ctx.fillStyle = '#020617';
+  ctx.font = 'bold 18px "Noto Nastaliq Urdu", serif';
+  ctx.fillText(`${vendorName} ${vendorCity ? `(${vendorCity})` : ''}`, headerX + headerW / 2 - 15, subY + 17);
 
   // Left: Real Calendar Date (NEVER today's day phrase)
   const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
@@ -861,49 +857,71 @@ export function generateVendorConsolidatedInvoiceCanvas(
   const sumY2 = tableY + tableH - summaryBarH * 2;
   const sumY3 = tableY + tableH - summaryBarH;
 
-  // 1. خام بکری (Mauve Bar)
-  ctx.fillStyle = '#831843';
+  // 1. خام بکری (Clean White Background, Crisp Red Border - Colored Background Removed)
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(headerX + leftColW, sumY1, rightColW, summaryBarH);
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = '#b91c1c';
+  ctx.lineWidth = 1.2;
   ctx.strokeRect(headerX + leftColW, sumY1, rightColW, summaryBarH);
 
-  ctx.fillStyle = '#fef08a';
-  ctx.font = 'bold 12px monospace';
+  // Vertical divider between amount and label
+  ctx.beginPath();
+  ctx.moveTo(headerX + leftColW + totalSubColW, sumY1);
+  ctx.lineTo(headerX + leftColW + totalSubColW, sumY1 + summaryBarH);
+  ctx.stroke();
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 13px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(Math.round(totalGross).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY1 + 17);
+  ctx.fillText(Math.round(totalGross).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY1 + 18);
 
+  ctx.fillStyle = '#991b1b';
+  ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('خام بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY1 + 18);
+
+  // 2. جملہ اخراجات (Clean White Background, Crisp Red Border - Colored Background Removed)
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 12px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('خام بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY1 + 17);
-
-  // 2. جملہ اخراجات (Navy Blue Bar)
-  ctx.fillStyle = '#1e3a8a';
   ctx.fillRect(headerX + leftColW, sumY2, rightColW, summaryBarH);
+  ctx.strokeStyle = '#b91c1c';
+  ctx.lineWidth = 1.2;
   ctx.strokeRect(headerX + leftColW, sumY2, rightColW, summaryBarH);
 
-  ctx.fillStyle = '#fecdd3';
-  ctx.font = 'bold 12px monospace';
+  // Vertical divider between amount and label
+  ctx.beginPath();
+  ctx.moveTo(headerX + leftColW + totalSubColW, sumY2);
+  ctx.lineTo(headerX + leftColW + totalSubColW, sumY2 + summaryBarH);
+  ctx.stroke();
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 13px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(Math.round(meezanExpenses).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY2 + 17);
+  ctx.fillText(Math.round(meezanExpenses).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY2 + 18);
 
+  ctx.fillStyle = '#991b1b';
+  ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('جملہ اخراجات', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY2 + 18);
+
+  // 3. پختہ بکری (Clean White Background, Crisp Red Border - Colored Background Removed)
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 12px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('جملہ اخراجات', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY2 + 17);
-
-  // 3. پختہ بکری (Vibrant Green Bar)
-  ctx.fillStyle = '#15803d';
   ctx.fillRect(headerX + leftColW, sumY3, rightColW, summaryBarH);
+  ctx.strokeStyle = '#b91c1c';
+  ctx.lineWidth = 1.5;
   ctx.strokeRect(headerX + leftColW, sumY3, rightColW, summaryBarH);
 
-  ctx.fillStyle = '#fef08a';
-  ctx.font = 'bold 13.5px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText(Math.round(totalNetPayable).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY3 + 17);
+  // Vertical divider between amount and label
+  ctx.beginPath();
+  ctx.moveTo(headerX + leftColW + totalSubColW, sumY3);
+  ctx.lineTo(headerX + leftColW + totalSubColW, sumY3 + summaryBarH);
+  ctx.stroke();
 
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('پختہ بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY3 + 17);
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(Math.round(totalNetPayable).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY3 + 18);
+
+  ctx.fillStyle = '#991b1b';
+  ctx.font = 'bold 14px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('پختہ بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY3 + 18);
 
   // 6. FOOTER ROW
   const footY = tableY + tableH + 6;
@@ -959,7 +977,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
  * Prints an authentic, compact 80mm POS Thermal Receipt for a single lot.
  */
 export function printThermalPOSReceipt(lot: VendorLot, settings: AppSettings): void {
-  const unitLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+  const unitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
   const isPaid = lot.vendorPaymentStatus === 'paid';
 
   const salesRowsHtml = lot.sales.map((sale, idx) => `
@@ -1056,7 +1074,6 @@ export function printThermalPOSReceipt(lot: VendorLot, settings: AppSettings): v
     </head>
     <body>
       <div class="text-center" style="margin-bottom: 4px;">
-        <div style="font-size: 11px; font-weight: bold;">بِسْمِ اللَّهِ الرَّحْمٰنِ الرَّحِيمِ</div>
         <div style="font-size: 16px; font-weight: bold; margin: 1px 0;">${settings.shopNameUrdu || settings.shopNameEn}</div>
         <div style="font-size: 11px;">پروپرائٹر: <b>${settings.arhtiNameUrdu || settings.arhtiNameEn}</b></div>
         <div style="font-size: 9.5px;">📍 ${settings.shopAddressUrdu || settings.shopAddressEn} | 📞 ${settings.shopPhone}</div>
@@ -1178,7 +1195,7 @@ export function printConsolidatedThermalPOSReceipt(
 
   const totals = lots.reduce(
     (acc, lot) => {
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
       acc.grossSales += lot.summary.grossSales;
       acc.totalExpenses += lot.summary.totalExpenses;
       acc.netPayable += lot.summary.netPayableToVendor;
@@ -1202,7 +1219,7 @@ export function printConsolidatedThermalPOSReceipt(
 
   if (!isAveraged) {
     lots.forEach((lot) => {
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
       if (lot.sales && lot.sales.length > 0) {
         lot.sales.forEach((s) => {
           allItems.push({
@@ -1240,7 +1257,7 @@ export function printConsolidatedThermalPOSReceipt(
 
     lots.forEach((lot) => {
       const prodKey = (lot.productUrdu || lot.productName || 'جنس').trim();
-      const uLabel = unitLabels[lot.unitType]?.[settings.language] || unitLabels[lot.unitType]?.ur || 'نگ';
+      const uLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
       if (!productGroups.has(prodKey)) {
         productGroups.set(prodKey, {

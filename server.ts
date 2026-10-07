@@ -81,8 +81,8 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  app.use(express.json({ limit: '1000mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1000mb' }));
 
   // --- API Routes ---
 
@@ -216,11 +216,14 @@ async function startServer() {
         }
       }
 
+      const payloadJson = JSON.stringify(uploadEnvelope, null, 2);
+      const sizeBytes = Buffer.byteLength(payloadJson, 'utf-8');
+
       await client.send(
         new PutObjectCommand({
           Bucket: bucketName,
           Key: objectKey,
-          Body: JSON.stringify(uploadEnvelope, null, 2),
+          Body: payloadJson,
           ContentType: 'application/json; charset=utf-8',
           Metadata: {
             shop_id: cleanShopId,
@@ -228,6 +231,7 @@ async function startServer() {
             lots_count: String(lots.length),
             customers_count: String(customers.length),
             vendors_count: String(vendors.length),
+            size_bytes: String(sizeBytes),
           },
         })
       );
@@ -236,6 +240,8 @@ async function startServer() {
         success: true,
         message: `Data successfully uploaded to S3 Object Storage! (${objectKey})`,
         lastUploadedAt: timestamp,
+        sizeBytes,
+        sizeMb: Number((sizeBytes / (1024 * 1024)).toFixed(2)),
         lotsCount: lots.length,
         customersCount: customers.length,
         vendorsCount: vendors.length,
@@ -325,8 +331,7 @@ async function startServer() {
       }
 
       const payload = parsedEnvelope.payload || parsedEnvelope;
-
-      res.json({
+      const downloadResponse = {
         success: true,
         message: 'Data successfully downloaded from S3 Object Storage!',
         lastUploadedAt: parsedEnvelope.uploadedAt || getRes.LastModified?.toISOString() || timestamp,
@@ -341,7 +346,13 @@ async function startServer() {
         storageEngine: 'S3-Compatible Object Storage (Neon)',
         bucketName,
         objectKey,
-      });
+      };
+
+      const jsonStr = JSON.stringify(downloadResponse);
+      const byteLen = Buffer.byteLength(jsonStr, 'utf-8');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Length', byteLen);
+      res.status(200).send(jsonStr);
     } catch (err: any) {
       console.error('S3 Download Error:', err);
       res.status(500).json({
@@ -418,9 +429,12 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Sabzi Mandi server running on http://0.0.0.0:${PORT} with S3 Object Storage`);
   });
+  // Handle transfers of hundreds of MBs without socket disconnect
+  server.setTimeout(600000); // 10 minutes
+  server.keepAliveTimeout = 65000;
 }
 
 startServer();

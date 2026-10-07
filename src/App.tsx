@@ -620,6 +620,7 @@ export default function App() {
           paymentStatus: saleData.paymentStatus,
           paidAmount: saleData.paymentStatus === 'cash' ? saleData.quantity * saleData.ratePerUnit : 0,
           notes: saleData.notes,
+          date: new Date().toISOString().slice(0, 10),
           timestamp: new Date().toISOString(),
         };
 
@@ -1285,6 +1286,7 @@ export default function App() {
             customers={customers}
             expenses={expenses}
             drawerAdjustments={drawerAdjustments}
+            vendors={vendors}
             onAddDrawerAdjustment={handleAddDrawerAdjustment}
             onDeleteDrawerAdjustment={handleDeleteDrawerAdjustment}
             onBatchUpdateLots={handleBatchUpdateLots}
