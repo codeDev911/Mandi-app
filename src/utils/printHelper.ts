@@ -159,11 +159,20 @@ export function generateInsafMandiBillHtmlSingle(
   settings: AppSettings,
   dateLabel?: string,
   isAveraged: boolean = false,
-  billNumber?: string
+  billNumber?: string,
+  pageSize: 'a4' | 'a5' = 'a5'
 ): string {
   const isUrdu = settings.language === 'ur';
   const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
-  const displayBillNo = billNumber || lots[0]?.lotNumber || '101';
+  const rawLotNumbers = lots
+    .map((l) => (l.lotNumber || '').trim().replace(/^LOT-/i, ''))
+    .filter(Boolean);
+  const uniqueLotNumbers = Array.from(new Set(rawLotNumbers));
+  const displayLotNo =
+    uniqueLotNumbers.length > 0
+      ? uniqueLotNumbers.join(', ')
+      : (billNumber || lots[0]?.lotNumber || '101').replace(/^LOT-/i, '');
+  const displayBillNo = billNumber || displayLotNo;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const shopName = settings.shopNameUrdu || settings.shopNameEn || 'کمیشن شاپ';
   const shopAddress = settings.shopAddressUrdu || settings.shopAddressEn || '';
@@ -364,8 +373,13 @@ export function generateInsafMandiBillHtmlSingle(
     )
     .join('');
 
+  const wrapperDimensions =
+    pageSize === 'a4'
+      ? 'width: 196mm; height: 280mm; min-height: 280mm; max-height: 280mm;'
+      : 'width: 148.8mm; height: 210mm; min-height: 210mm; max-height: 210mm;';
+
   return `
-    <div dir="rtl" class="insaf-mandi-bill-wrapper" style="width: 148.8mm; height: 210mm; min-height: 210mm; max-height: 210mm; margin: 0 auto; background: #ffffff; color: #0f172a; box-sizing: border-box; font-family: 'Noto Sans Arabic', 'Plus Jakarta Sans', system-ui, sans-serif; display: flex; border: 1.5px solid #cbd5e1; overflow: hidden;">
+    <div dir="rtl" class="insaf-mandi-bill-wrapper" style="${wrapperDimensions} margin: 0 auto; background: #ffffff; color: #0f172a; box-sizing: border-box; font-family: 'Noto Sans Arabic', 'Plus Jakarta Sans', system-ui, sans-serif; display: flex; border: 1.5px solid #cbd5e1; overflow: hidden;">
       <!-- Right Produce Border -->
       <div style="width: 7mm; background-image: url('${origin}/bill_produce_border.jpg'); background-size: 100% auto; background-repeat: repeat-y; flex-shrink: 0; border-left: 1px solid #e2e8f0;"></div>
 
@@ -414,19 +428,25 @@ export function generateInsafMandiBillHtmlSingle(
           }
         </div>
 
-        <!-- Subheader Metadata Row -->
-        <div style="margin: 2px 0; border-top: 2px solid #b91c1c; border-bottom: 2px solid #b91c1c; padding: 2px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: bold; background: #ffffff;">
-          <div style="flex-shrink: 0;">
-            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold;">نمبر:</span>
-            <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 11.5px;">${displayBillNo}</span>
+        <!-- Subheader Metadata Rows - Bill Baname under Lot Number -->
+        <div style="margin: 2px 0; border-top: 2px solid #b91c1c; border-bottom: 2px solid #b91c1c; padding: 2.5px 6px; background: #ffffff; display: flex; flex-direction: column; gap: 2px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: bold;">
+            <div style="flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
+              <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 12px; font-weight: 900;">لاٹ نمبر:</span>
+              <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 12px; color: #0f172a;">${displayLotNo}</span>
+              ${billNumber && billNumber !== displayLotNo ? `<span style="font-size: 9.5px; color: #64748b; font-family: monospace;">(بل #${billNumber})</span>` : ''}
+            </div>
+            <div style="flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
+              <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold;">السلام علیکم تاریخ:</span>
+              <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 11.5px; color: #0f172a;">${displayDate}</span>
+            </div>
           </div>
-          <div style="flex: 1; text-align: center; padding: 0 6px; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px;">
-            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 14px; font-weight: 900; flex-shrink: 0;">بل بنام:</span>
-            <span style="text-decoration: underline; text-decoration-color: #b91c1c; font-size: 21px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif; padding: 0 4px; color: #020617; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">${vendorName} ${vendorCity ? `(${vendorCity})` : ''}</span>
-          </div>
-          <div style="flex-shrink: 0;">
-            <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold;">السلام علیکم تاریخ:</span>
-            <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 11.5px;">${displayDate}</span>
+          <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #fee2e2; padding-top: 2px;">
+            <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+              <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 14px; font-weight: 900; flex-shrink: 0;">بل بنام:</span>
+              <span style="text-decoration: underline; text-decoration-color: #b91c1c; font-size: 19px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif; padding: 0 4px; color: #020617; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">${vendorName} ${vendorCity ? `(${vendorCity})` : ''}</span>
+            </div>
+            ${vendorPhone ? `<span style="font-family: monospace; font-size: 11px; font-weight: bold; color: #475569; flex-shrink: 0;">${vendorPhone}</span>` : ''}
           </div>
         </div>
 
@@ -611,14 +631,15 @@ export function generateInsafMandiBillHtmlSingle(
 /**
  * Prints a single Vendor Bill Slip in the authentic Insaf Mandi Commission Shop design
  */
-export function printVendorBillSlipA4(
+export function printVendorBillSlip(
   vendorName: string,
   vendorPhone: string | undefined,
   vendorCity: string | undefined,
   lots: VendorLot[],
   settings: AppSettings,
   dateLabel?: string,
-  isAveraged: boolean = false
+  isAveraged: boolean = false,
+  pageSize: 'a4' | 'a5' = 'a4'
 ): void {
   const billHtml = generateInsafMandiBillHtmlSingle(
     vendorName,
@@ -627,47 +648,85 @@ export function printVendorBillSlipA4(
     lots,
     settings,
     dateLabel,
-    isAveraged
+    isAveraged,
+    undefined,
+    pageSize
   );
+
+  const isA4 = pageSize === 'a4';
+  const pageCss = isA4
+    ? `
+      @page {
+        size: A4 portrait;
+        margin: 6mm auto;
+      }
+      @media print {
+        @page {
+          size: A4 portrait;
+          margin: 6mm auto;
+        }
+        html, body {
+          width: 210mm !important;
+          height: 297mm !important;
+          margin: 0 auto !important;
+          padding: 0 !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .insaf-mandi-bill-wrapper {
+          width: 196mm !important;
+          height: 280mm !important;
+          min-height: 280mm !important;
+          max-height: 280mm !important;
+          box-sizing: border-box !important;
+          overflow: hidden !important;
+          margin: 0 auto !important;
+        }
+        .no-print { display: none !important; }
+      }
+    `
+    : `
+      @page {
+        size: 148.8mm 210mm;
+        margin: 0;
+      }
+      @media print {
+        @page {
+          size: 148.8mm 210mm;
+          margin: 0;
+        }
+        html, body {
+          width: 148.8mm !important;
+          height: 210mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .insaf-mandi-bill-wrapper {
+          width: 148.8mm !important;
+          height: 210mm !important;
+          min-height: 210mm !important;
+          max-height: 210mm !important;
+          box-sizing: border-box !important;
+          overflow: hidden !important;
+          margin: 0 !important;
+        }
+        .no-print { display: none !important; }
+      }
+    `;
 
   const fullHtml = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ur">
     <head>
       <meta charset="utf-8" />
-      <title>بل رسید - ${vendorName}</title>
+      <title>بل رسید (${isA4 ? 'A4' : 'A5'}) - ${vendorName}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;600;700;900&family=Noto+Sans+Arabic:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
       <style>
-        @page {
-          size: 148.8mm 210mm;
-          margin: 0;
-        }
-        @media print {
-          @page {
-            size: 148.8mm 210mm;
-            margin: 0;
-          }
-          html, body {
-            width: 148.8mm !important;
-            height: 210mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          .insaf-mandi-bill-wrapper {
-            width: 148.8mm !important;
-            height: 210mm !important;
-            min-height: 210mm !important;
-            max-height: 210mm !important;
-            box-sizing: border-box !important;
-            overflow: hidden !important;
-            margin: 0 !important;
-          }
-          .no-print { display: none !important; }
-        }
+        ${pageCss}
         * {
           box-sizing: border-box;
           margin: 0;
@@ -688,13 +747,37 @@ export function printVendorBillSlipA4(
     </html>
   `;
 
-  printHtmlViaIframe(fullHtml, `Vendor_Bill_${vendorName}`);
+  printHtmlViaIframe(fullHtml, `Vendor_Bill_${vendorName}_${isA4 ? 'A4' : 'A5'}`);
+}
+
+export function printVendorBillSlipA4(
+  vendorName: string,
+  vendorPhone: string | undefined,
+  vendorCity: string | undefined,
+  lots: VendorLot[],
+  settings: AppSettings,
+  dateLabel?: string,
+  isAveraged: boolean = false
+): void {
+  printVendorBillSlip(vendorName, vendorPhone, vendorCity, lots, settings, dateLabel, isAveraged, 'a4');
+}
+
+export function printVendorBillSlipA5(
+  vendorName: string,
+  vendorPhone: string | undefined,
+  vendorCity: string | undefined,
+  lots: VendorLot[],
+  settings: AppSettings,
+  dateLabel?: string,
+  isAveraged: boolean = false
+): void {
+  printVendorBillSlip(vendorName, vendorPhone, vendorCity, lots, settings, dateLabel, isAveraged, 'a5');
 }
 
 /**
- * Batch Prints multiple selected Vendor Bills in one unified print operation with clean page breaks
+ * Batch Prints multiple selected Vendor Bills in either A4 or A5 format
  */
-export function printBatchVendorBillsA4(
+export function printBatchVendorBills(
   vendorDataList: Array<{
     vendorName: string;
     vendorPhone?: string;
@@ -704,14 +787,20 @@ export function printBatchVendorBillsA4(
   }>,
   settings: AppSettings,
   dateLabel?: string,
-  isAveraged: boolean = false
+  isAveraged: boolean = false,
+  pageSize: 'a4' | 'a5' = 'a4'
 ): void {
   if (vendorDataList.length === 0) return;
+
+  const isA4 = pageSize === 'a4';
+  const pageDimensions = isA4
+    ? 'width: 196mm; height: 280mm; min-height: 280mm; max-height: 280mm;'
+    : 'width: 148.8mm; height: 210mm; min-height: 210mm; max-height: 210mm;';
 
   const billsPagesHtml = vendorDataList
     .map(
       (v) => `
-    <div class="bill-page" style="page-break-after: always; break-after: page; width: 148.8mm; height: 210mm; min-height: 210mm; max-height: 210mm; overflow: hidden; display: flex; justify-content: center; box-sizing: border-box; margin: 0 auto;">
+    <div class="bill-page" style="page-break-after: always; break-after: page; ${pageDimensions} overflow: hidden; display: flex; justify-content: center; box-sizing: border-box; margin: 0 auto;">
       ${generateInsafMandiBillHtmlSingle(
         v.vendorName,
         v.vendorPhone,
@@ -720,54 +809,93 @@ export function printBatchVendorBillsA4(
         settings,
         dateLabel,
         isAveraged,
-        v.billNumber
+        v.billNumber,
+        pageSize
       )}
     </div>
   `
     )
     .join('');
 
+  const pageCss = isA4
+    ? `
+      @page {
+        size: A4 portrait;
+        margin: 6mm auto;
+      }
+      @media print {
+        @page {
+          size: A4 portrait;
+          margin: 6mm auto;
+        }
+        html, body {
+          width: 210mm !important;
+          height: 297mm !important;
+          margin: 0 auto !important;
+          padding: 0 !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .bill-page, .insaf-mandi-bill-wrapper {
+          page-break-after: always !important;
+          break-after: page !important;
+          width: 196mm !important;
+          height: 280mm !important;
+          min-height: 280mm !important;
+          max-height: 280mm !important;
+          margin: 0 auto !important;
+          padding: 0 !important;
+          box-sizing: border-box !important;
+          overflow: hidden !important;
+        }
+        .no-print { display: none !important; }
+      }
+    `
+    : `
+      @page {
+        size: 148.8mm 210mm;
+        margin: 0;
+      }
+      @media print {
+        @page {
+          size: 148.8mm 210mm;
+          margin: 0;
+        }
+        html, body {
+          width: 148.8mm !important;
+          height: 210mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .bill-page, .insaf-mandi-bill-wrapper {
+          page-break-after: always !important;
+          break-after: page !important;
+          width: 148.8mm !important;
+          height: 210mm !important;
+          min-height: 210mm !important;
+          max-height: 210mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          box-sizing: border-box !important;
+          overflow: hidden !important;
+        }
+        .no-print { display: none !important; }
+      }
+    `;
+
   const fullHtml = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ur">
     <head>
       <meta charset="utf-8" />
-      <title>زمیندار بل بک - مجموعی پرنٹ (${vendorDataList.length} بل)</title>
+      <title>زمیندار بل بک (${isA4 ? 'A4' : 'A5'}) - (${vendorDataList.length} بل)</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;600;700;900&family=Noto+Sans+Arabic:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
       <style>
-        @page {
-          size: 148.8mm 210mm;
-          margin: 0;
-        }
-        @media print {
-          @page {
-            size: 148.8mm 210mm;
-            margin: 0;
-          }
-          html, body {
-            width: 148.8mm !important;
-            height: 210mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          .bill-page, .insaf-mandi-bill-wrapper {
-            page-break-after: always !important;
-            break-after: page !important;
-            width: 148.8mm !important;
-            height: 210mm !important;
-            min-height: 210mm !important;
-            max-height: 210mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            box-sizing: border-box !important;
-            overflow: hidden !important;
-          }
-          .no-print { display: none !important; }
-        }
+        ${pageCss}
         * {
           box-sizing: border-box;
           margin: 0;
@@ -786,7 +914,37 @@ export function printBatchVendorBillsA4(
     </html>
   `;
 
-  printHtmlViaIframe(fullHtml, `Batch_Vendor_Bills_${vendorDataList.length}`);
+  printHtmlViaIframe(fullHtml, `Batch_Vendor_Bills_${vendorDataList.length}_${isA4 ? 'A4' : 'A5'}`);
+}
+
+export function printBatchVendorBillsA4(
+  vendorDataList: Array<{
+    vendorName: string;
+    vendorPhone?: string;
+    vendorCity?: string;
+    lots: VendorLot[];
+    billNumber?: string;
+  }>,
+  settings: AppSettings,
+  dateLabel?: string,
+  isAveraged: boolean = false
+): void {
+  printBatchVendorBills(vendorDataList, settings, dateLabel, isAveraged, 'a4');
+}
+
+export function printBatchVendorBillsA5(
+  vendorDataList: Array<{
+    vendorName: string;
+    vendorPhone?: string;
+    vendorCity?: string;
+    lots: VendorLot[];
+    billNumber?: string;
+  }>,
+  settings: AppSettings,
+  dateLabel?: string,
+  isAveraged: boolean = false
+): void {
+  printBatchVendorBills(vendorDataList, settings, dateLabel, isAveraged, 'a5');
 }
 
 /**
@@ -1084,9 +1242,18 @@ export function printSingleLotReceiptA4(lot: VendorLot, settings: AppSettings): 
 /**
  * Prints Detailed PDF / HTML Report in Clean Urdu Layout
  */
-export function printDetailedReportDocument(previewData: PDFPreviewData, previewImageUrls?: string | string[]): void {
+export function printDetailedReportDocument(
+  previewData: PDFPreviewData,
+  previewImageUrls?: string | string[],
+  pageSize: 'a4' | 'a5' = 'a4'
+): void {
   const { settings, title, dateFilterLabel, dateRangeStr, generatedDate, summary, dateRows, customerRows, vendorRows, productRows, expenseRows } = previewData;
   const isUrdu = settings.language === 'ur';
+
+  const isA4 = pageSize === 'a4';
+  const pageW = isA4 ? '210mm' : '148.8mm';
+  const pageH = isA4 ? '297mm' : '210mm';
+  const pageSizeStr = isA4 ? 'A4 portrait' : '148.8mm 210mm';
 
   // If exact rendered PDF Canvas image(s) are available, print that pixel-perfect multi-page layout
   if (previewImageUrls) {
@@ -1100,10 +1267,10 @@ export function printDetailedReportDocument(previewData: PDFPreviewData, preview
       <html dir="rtl" lang="ur">
       <head>
         <meta charset="utf-8" />
-        <title>${title}</title>
+        <title>${title} (${isA4 ? 'A4' : 'A5'})</title>
         <style>
           @page {
-            size: A4 portrait;
+            size: ${pageSizeStr};
             margin: 0;
           }
           * {
@@ -1122,10 +1289,10 @@ export function printDetailedReportDocument(previewData: PDFPreviewData, preview
           }
           .pdf-preview-page {
             width: 100%;
-            max-width: 210mm;
-            height: 297mm;
-            min-height: 297mm;
-            max-height: 297mm;
+            max-width: ${pageW};
+            height: ${pageH};
+            min-height: ${pageH};
+            max-height: ${pageH};
             margin: 0 auto;
             padding: 0;
             display: flex;
@@ -1157,8 +1324,8 @@ export function printDetailedReportDocument(previewData: PDFPreviewData, preview
               padding: 0 !important;
             }
             .pdf-preview-page {
-              width: 210mm !important;
-              height: 297mm !important;
+              width: ${pageW} !important;
+              height: ${pageH} !important;
               max-width: none !important;
               margin: 0 !important;
               page-break-after: always !important;

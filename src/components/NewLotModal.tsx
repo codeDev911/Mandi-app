@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { UnitType, AppSettings, VendorLot, SavedVendor, MazdooriRateItem } from '../types';
 import { translations, commonMandiProducts, unitLabels, ProductPreset, getAvailableProducts, getUnitDisplayLabel, resolveUnitType } from '../utils/localization';
-import { generateLotNumber, calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
+import { generateLotNumber, getLotReceiptNumber, calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import {
@@ -28,6 +28,7 @@ interface NewLotModalProps {
   onClose: () => void;
   onSaveLot: (lot: VendorLot) => void;
   existingLotsCount: number;
+  existingLots?: VendorLot[];
   savedVendors?: SavedVendor[];
   onSaveVendor?: (vendor: SavedVendor) => void;
   onUpdateSettings?: (settings: AppSettings) => void;
@@ -39,6 +40,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   onClose,
   onSaveLot,
   existingLotsCount,
+  existingLots,
   savedVendors = [],
   onSaveVendor,
 }) => {
@@ -48,6 +50,11 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const availableProducts = useMemo(() => getAvailableProducts(settings), [settings.products]);
   const mazdooriItems = useMemo(() => getMazdooriItems(settings), [settings.mazdooriItems]);
   const defaultMazdoori = mazdooriItems[0];
+
+  const upcomingLotNumber = useMemo(
+    () => generateLotNumber(existingLots || existingLotsCount),
+    [existingLots, existingLotsCount, isOpen]
+  );
 
   const [vendorName, setVendorName] = useState('');
   const [vendorPhone, setVendorPhone] = useState('');
@@ -154,7 +161,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       return;
     }
 
-    const lotNumber = generateLotNumber(existingLotsCount);
+    const lotNumber = generateLotNumber(existingLots || existingLotsCount);
     
     let prodName: string;
     let prodUrdu: string;
@@ -291,7 +298,15 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
               <Package className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-bold text-sm sm:text-base font-urdu-nastaliq text-white">{t.newLot}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm sm:text-base font-urdu-nastaliq text-white">{t.newLot}</h3>
+                <span
+                  className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-numbers text-xs font-bold"
+                  title={`لاٹ ID: ${upcomingLotNumber}`}
+                >
+                  رسید #{getLotReceiptNumber(upcomingLotNumber)}
+                </span>
+              </div>
               <p className="text-[11px] sm:text-xs text-slate-300 font-urdu-sans">
                 {t.arrivalDate}: {new Date().toLocaleDateString('en-PK')}
               </p>

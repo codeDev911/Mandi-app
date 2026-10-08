@@ -3,6 +3,7 @@ import { VendorLot, AppSettings } from '../types';
 import { translations, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
+import { getLotReceiptNumber } from '../utils/calculations';
 import { PaginationControls } from './PaginationControls';
 import { PinPromptModal } from './PinPromptModal';
 import {
@@ -105,7 +106,8 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
         const q = searchQuery.toLowerCase().trim();
         const matchesName = lot.vendorName.toLowerCase().includes(q);
         const matchesPhone = lot.vendorPhone ? lot.vendorPhone.includes(q) : false;
-        const matchesLotNum = lot.lotNumber.toLowerCase().includes(q);
+        const receiptNo = getLotReceiptNumber(lot.lotNumber);
+        const matchesLotNum = lot.lotNumber.toLowerCase().includes(q) || receiptNo.includes(q);
         const matchesProductUrdu = lot.productUrdu.toLowerCase().includes(q);
         const matchesProductName = lot.productName.toLowerCase().includes(q);
         const matchesCity = lot.vendorCity ? lot.vendorCity.toLowerCase().includes(q) : false;
@@ -627,8 +629,11 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
                                 <h4 className="text-sm font-bold text-slate-900 font-urdu-nastaliq truncate">
                                   {lot.productUrdu}
                                 </h4>
-                                <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-numbers flex-shrink-0">
-                                  #{lot.lotNumber}
+                                <span
+                                  className="font-mono text-[11px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-numbers font-bold flex-shrink-0"
+                                  title={`لاٹ ID: ${lot.lotNumber}`}
+                                >
+                                  #{getLotReceiptNumber(lot.lotNumber)}
                                 </span>
                               </div>
                               <p className="text-xs text-emerald-800 font-semibold font-urdu-sans">
@@ -1054,8 +1059,11 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
                                   <h4 className="text-sm font-bold text-slate-900 font-urdu-nastaliq truncate">
                                     {lot.vendorName}
                                   </h4>
-                                  <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 font-numbers flex-shrink-0">
-                                    #{lot.lotNumber}
+                                  <span
+                                    className="font-mono text-[11px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-numbers font-bold flex-shrink-0"
+                                    title={`لاٹ ID: ${lot.lotNumber}`}
+                                  >
+                                    #{getLotReceiptNumber(lot.lotNumber)}
                                   </span>
                                 </div>
                                 <p className="text-xs text-emerald-800 font-semibold font-urdu-sans">

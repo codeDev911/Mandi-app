@@ -3,7 +3,7 @@ import { VendorLot, AppSettings, LotExpenses, CustomExpense } from '../types';
 import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
-import { calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
+import { calculateLotSummary, getUnitMazdooriRate, getMazdooriItems, getLotReceiptNumber } from '../utils/calculations';
 import { printThermalPOSReceipt } from '../utils/receiptGenerator';
 import { printSingleLotReceiptA4 } from '../utils/printHelper';
 import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
@@ -422,8 +422,11 @@ export const LotExpenseSlipView: React.FC<LotExpenseSlipViewProps> = ({
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-stone-100 pb-3.5">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold font-numbers px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
-                {lot.lotNumber}
+              <span
+                className="text-xs font-bold font-numbers px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200"
+                title={`لاٹ ID: ${lot.lotNumber}`}
+              >
+                رسید #{getLotReceiptNumber(lot.lotNumber)}
               </span>
               <h2 className="text-base sm:text-lg font-black text-stone-900 font-urdu-sans">
                 {lot.vendorName} ({lot.productUrdu})

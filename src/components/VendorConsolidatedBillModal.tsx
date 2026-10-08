@@ -5,7 +5,7 @@ import { translations, unitLabels, formatFullRealDate, getUnitDisplayLabel } fro
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt, generateVendorConsolidatedInvoiceCanvas } from '../utils/receiptGenerator';
-import { printVendorBillSlipA4 } from '../utils/printHelper';
+import { printVendorBillSlipA4, printVendorBillSlipA5 } from '../utils/printHelper';
 import { saveBlobFile, downloadBlobFile } from '../utils/fileDownloader';
 import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
 import { InsafMandiBillView } from './InsafMandiBillView';
@@ -303,8 +303,8 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     }
   };
 
-  // Build Half Landscape A4 PDF (148.5mm x 210mm) from High-Res 2D Canvas with exact Urdu calligraphy
-  const buildVendorBillPDF = async (): Promise<{ pdf: jsPDF; blob: Blob }> => {
+  // Build Half Landscape A4 (or A5 / A4) PDF from High-Res 2D Canvas with exact Urdu calligraphy
+  const buildVendorBillPDF = async (targetPageSize: 'a4' | 'a5' = 'a5'): Promise<{ pdf: jsPDF; blob: Blob }> => {
     if (document.fonts && document.fonts.ready) {
       try {
         await document.fonts.ready;
@@ -323,14 +323,15 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       isAveraged
     );
 
-    // Half of A4 in Portrait: 148.8mm wide x 210mm high
+    const isA4 = targetPageSize === 'a4';
+    // A4 (210mm x 297mm) or A5 (148.8mm x 210mm)
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
-      format: [148.8, 210],
+      format: isA4 ? 'a4' : [148.8, 210],
     });
-    const pdfPageWidth = pdf.internal.pageSize.getWidth(); // 148.8mm
-    const pdfPageHeight = pdf.internal.pageSize.getHeight(); // 210mm
+    const pdfPageWidth = pdf.internal.pageSize.getWidth();
+    const pdfPageHeight = pdf.internal.pageSize.getHeight();
     const pxPageHeight = Math.floor((canvas.width * pdfPageHeight) / pdfPageWidth);
     const totalCanvasHeight = canvas.height;
     let renderedHeight = 0;
@@ -353,7 +354,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       }
       const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.95);
       if (pageIndex > 0) {
-        pdf.addPage([148.8, 210], 'portrait');
+        pdf.addPage(isA4 ? 'a4' : [148.8, 210], 'portrait');
       }
       const renderedSliceMmHeight = (sliceHeight * pdfPageWidth) / canvas.width;
       pdf.addImage(pageImgData, 'JPEG', 0, 0, pdfPageWidth, renderedSliceMmHeight, undefined, 'FAST');
@@ -365,8 +366,8 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     return { pdf, blob };
   };
 
-  // 1. Direct PDF Download
-  const handleDownloadPDF = async (e?: React.MouseEvent) => {
+  // 1. Direct PDF Download with page size support
+  const handleDownloadPDF = async (targetPageSize: 'a4' | 'a5' = 'a5', e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -375,20 +376,32 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
     setIsExportingPDF(true);
 
     const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
-    const finalPdfName = `Vendor_Bill_${sanitizedName}_${displayDate}.pdf`;
+    const finalPdfName = `Vendor_Bill_${sanitizedName}_${displayDate}_${targetPageSize.toUpperCase()}.pdf`;
 
     try {
-      const { pdf, blob } = await buildVendorBillPDF();
+      const { pdf, blob } = await buildVendorBillPDF(targetPageSize);
       const downloadRes = await downloadBlobFile(blob, finalPdfName);
       if (downloadRes.success) {
-        showToast(isUrdu ? 'پی ڈی ایف بل پرچی کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill PDF downloaded successfully!');
+        showToast(
+          isUrdu
+            ? `پی ڈی ایف (${targetPageSize.toUpperCase()}) بل پرچی کامیابی سے محفوظ ہو گئی!`
+            : `Vendor Bill (${targetPageSize.toUpperCase()}) PDF downloaded successfully!`
+        );
       } else {
         try {
           pdf.save(finalPdfName);
-          showToast(isUrdu ? 'پی ڈی ایف بل پرچی کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill PDF downloaded successfully!');
+          showToast(
+            isUrdu
+              ? `پی ڈی ایف (${targetPageSize.toUpperCase()}) بل پرچی کامیابی سے محفوظ ہو گئی!`
+              : `Vendor Bill (${targetPageSize.toUpperCase()}) PDF downloaded successfully!`
+          );
         } catch (saveErr) {
           triggerSafeDownload(blob, finalPdfName);
-          showToast(isUrdu ? 'پی ڈی ایف بل پرچی کامیابی سے محفوظ ہو گئی!' : 'Vendor Bill PDF downloaded successfully!');
+          showToast(
+            isUrdu
+              ? `پی ڈی ایف (${targetPageSize.toUpperCase()}) بل پرچی کامیابی سے محفوظ ہو گئی!`
+              : `Vendor Bill (${targetPageSize.toUpperCase()}) PDF downloaded successfully!`
+          );
         }
       }
     } catch (err) {
@@ -546,14 +559,25 @@ ${itemsText}
     showToast(isUrdu ? 'متن کاپی ہو گیا!' : 'Text summary copied!');
   };
 
-  // 5. Clean Universal Half Landscape A4 Print
-  const handlePrint = (e?: React.MouseEvent) => {
+  // 5. Direct A4 and A5 Print Actions (no modal)
+  const handlePrintA4 = (e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
     sound.playTick();
     printVendorBillSlipA4(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged);
+    showToast(isUrdu ? 'A4 سائز پرنٹ تیار ہے' : 'A4 print triggered');
+  };
+
+  const handlePrintA5 = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    sound.playTick();
+    printVendorBillSlipA5(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged);
+    showToast(isUrdu ? 'A5 سائز پرنٹ تیار ہے' : 'A5 print triggered');
   };
 
   // 6. 80mm POS Thermal Print
@@ -665,18 +689,31 @@ ${itemsText}
             </button>
           </div>
 
-          {/* 1. Print A4 Button */}
+          {/* 1. Direct A4 Print Button */}
           <button
             type="button"
-            onClick={handlePrint}
-            className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center transition active:scale-90 shadow-md"
-            title="پرنٹ کریں (Print Half Landscape A4 Slip)"
+            onClick={handlePrintA4}
+            className="h-8 sm:h-10 px-2 sm:px-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center gap-1 transition active:scale-90 shadow-md font-bold font-numbers text-xs"
+            title="A4 سائز پرنٹ کریں (Direct Print A4 Slip)"
             aria-label="Print A4"
           >
-            <Printer className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.2]" />
+            <Printer className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.2]" />
+            <span className="font-bold">A4</span>
           </button>
 
-          {/* 2. 80mm POS Thermal Print */}
+          {/* 2. Direct A5 Print Button */}
+          <button
+            type="button"
+            onClick={handlePrintA5}
+            className="h-8 sm:h-10 px-2 sm:px-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-cyan-400 flex items-center justify-center gap-1 transition active:scale-90 shadow-md font-bold font-numbers text-xs"
+            title="A5 سائز پرنٹ کریں (Direct Print A5 Slip)"
+            aria-label="Print A5"
+          >
+            <Printer className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.2]" />
+            <span className="font-bold">A5</span>
+          </button>
+
+          {/* 3. 80mm POS Thermal Print */}
           <button
             type="button"
             onClick={handleThermalPrint}
@@ -687,13 +724,13 @@ ${itemsText}
             <FileText className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
           </button>
 
-          {/* 3. Save PDF Button */}
+          {/* 4. Save PDF Button */}
           <button
             type="button"
-            onClick={handleDownloadPDF}
+            onClick={() => handleDownloadPDF('a5')}
             disabled={isExportingPDF}
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 border border-emerald-400 text-white flex items-center justify-center transition active:scale-90 shadow-md disabled:opacity-50"
-            title="پی ڈی ایف محفوظ کریں (Save PDF Slip)"
+            title="A5 پی ڈی ایف محفوظ کریں (Save A5 PDF Slip)"
             aria-label="Save PDF"
           >
             {isExportingPDF ? (
@@ -703,7 +740,7 @@ ${itemsText}
             )}
           </button>
 
-          {/* 4. Share PDF / WhatsApp Button */}
+          {/* 5. Share PDF / WhatsApp Button */}
           <button
             type="button"
             onClick={handleShare}
@@ -802,25 +839,35 @@ ${itemsText}
         </button>
 
         <button
-          onClick={handlePrint}
-          className="flex-1 py-2 px-2 rounded-xl bg-slate-950 border border-slate-700 text-emerald-400 font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs"
+          onClick={handlePrintA4}
+          className="flex-1 py-2 px-1.5 rounded-xl bg-slate-950 border border-slate-700 text-emerald-400 font-bold text-xs flex items-center justify-center gap-1 active:scale-95 shadow-xs font-numbers"
+          title="A4 پرنٹ"
         >
           <Printer className="w-3.5 h-3.5" />
-          <span>{isUrdu ? 'پرنٹ' : 'Print'}</span>
+          <span>A4</span>
+        </button>
+
+        <button
+          onClick={handlePrintA5}
+          className="flex-1 py-2 px-1.5 rounded-xl bg-slate-950 border border-slate-700 text-cyan-400 font-bold text-xs flex items-center justify-center gap-1 active:scale-95 shadow-xs font-numbers"
+          title="A5 پرنٹ"
+        >
+          <Printer className="w-3.5 h-3.5" />
+          <span>A5</span>
         </button>
 
         <button
           onClick={handleThermalPrint}
-          className="flex-1 py-2 px-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs"
+          className="flex-1 py-2 px-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs"
         >
           <FileText className="w-3.5 h-3.5" />
           <span>{isUrdu ? 'تھرمل' : 'POS'}</span>
         </button>
 
         <button
-          onClick={handleDownloadPDF}
+          onClick={() => handleDownloadPDF('a5')}
           disabled={isExportingPDF}
-          className="flex-1 py-2 px-2 rounded-xl bg-emerald-600 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs disabled:opacity-50"
+          className="flex-1 py-2 px-1.5 rounded-xl bg-emerald-600 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs disabled:opacity-50"
         >
           {isExportingPDF ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
           <span>{isUrdu ? 'محفوظ' : 'Save'}</span>
@@ -829,7 +876,7 @@ ${itemsText}
         <button
           onClick={handleShare}
           disabled={isExportingPDF}
-          className="flex-1 py-2 px-2 rounded-xl bg-teal-600 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs disabled:opacity-50"
+          className="flex-1 py-2 px-1.5 rounded-xl bg-teal-600 text-white font-bold text-xs font-urdu-sans flex items-center justify-center gap-1 active:scale-95 shadow-xs disabled:opacity-50"
         >
           <Share2 className="w-3.5 h-3.5" />
           <span>{isUrdu ? 'شیئر' : 'Share'}</span>

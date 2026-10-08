@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { VendorLot, AppSettings } from '../types';
 import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
+import { getLotReceiptNumber } from '../utils/calculations';
 import { AllLotsModal } from './AllLotsModal';
 import { PaginationControls } from './PaginationControls';
 import {
@@ -369,8 +370,11 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
                       <h4 className="font-bold text-sm text-stone-900 font-urdu-nastaliq truncate">
                         {lot.vendorName}
                       </h4>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600">
-                        {lot.lotNumber}
+                      <span
+                        className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold font-numbers"
+                        title={`لاٹ ID: ${lot.lotNumber}`}
+                      >
+                        #{getLotReceiptNumber(lot.lotNumber)}
                       </span>
                       <span
                         className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-urdu-sans ${

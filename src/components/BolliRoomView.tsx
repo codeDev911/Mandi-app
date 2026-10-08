@@ -3,6 +3,7 @@ import { VendorLot, BolliSale, AppSettings, PaymentStatus, CustomerBuyer } from 
 import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
+import { getLotReceiptNumber } from '../utils/calculations';
 import confetti from 'canvas-confetti';
 import { AddBidSaleModal } from './AddBidSaleModal';
 import { AllLotsModal } from './AllLotsModal';
@@ -232,7 +233,15 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-base">{lot.productEmoji}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base">{lot.productEmoji}</span>
+                    <span
+                      className="text-[10px] font-mono px-1 py-0.2 rounded bg-white text-slate-700 border border-slate-200 font-numbers font-bold"
+                      title={`لاٹ ID: ${lot.lotNumber}`}
+                    >
+                      #{getLotReceiptNumber(lot.lotNumber)}
+                    </span>
+                  </div>
                   <span
                     className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-numbers ${
                       isCompleted
@@ -301,8 +310,11 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                     <h2 className="text-base sm:text-lg font-bold text-slate-900 font-urdu-nastaliq">
                       {selectedLot.vendorName}
                     </h2>
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
-                      {selectedLot.lotNumber}
+                    <span
+                      className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-numbers"
+                      title={`لاٹ ID: ${selectedLot.lotNumber}`}
+                    >
+                      رسید #{getLotReceiptNumber(selectedLot.lotNumber)}
                     </span>
                   </div>
                   <p className="text-xs text-slate-600 font-urdu-sans flex items-center flex-wrap gap-2 mt-0.5">
@@ -380,8 +392,8 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                       setPendingDeleteLot({
                         lotId: selectedLot.id,
                         description: isUrdu
-                          ? `لاٹ ریکارڈ حذف کریں: #${selectedLot.lotNumber} - ${selectedLot.vendorName} (${selectedLot.productUrdu})`
-                          : `Delete Lot Record: #${selectedLot.lotNumber} - ${selectedLot.vendorName}`,
+                          ? `لاٹ ریکارڈ حذف کریں: #${getLotReceiptNumber(selectedLot.lotNumber)} - ${selectedLot.vendorName} (${selectedLot.productUrdu})`
+                          : `Delete Lot Record: #${getLotReceiptNumber(selectedLot.lotNumber)} - ${selectedLot.vendorName}`,
                       });
                     }}
                     className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition flex items-center gap-1.5 border border-rose-200 font-urdu-sans active:scale-95 cursor-pointer"

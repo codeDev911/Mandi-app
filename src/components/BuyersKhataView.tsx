@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
+import { getLotReceiptNumber } from '../utils/calculations';
 import { sound } from '../utils/sound';
 import { printConsolidatedThermalPOSReceipt } from '../utils/receiptGenerator';
 import { PaginationControls } from './PaginationControls';
@@ -2424,7 +2425,12 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
 
                                     return (
                                       <tr key={lot.id} className="hover:bg-slate-50/80">
-                                        <td className="py-2 px-2.5 font-mono font-bold text-slate-700">#{lot.lotNumber}</td>
+                                        <td
+                                          className="py-2 px-2.5 font-mono font-bold text-slate-700"
+                                          title={`لاٹ ID: ${lot.lotNumber}`}
+                                        >
+                                          #{getLotReceiptNumber(lot.lotNumber)}
+                                        </td>
                                         <td className="py-2 px-2.5 text-slate-500 font-numbers">{lot.arrivalDate}</td>
                                         <td className="py-2 px-2.5 font-bold text-slate-900">{lot.productUrdu}</td>
                                         <td className="py-2 px-2.5 text-center font-numbers">{lot.totalQuantity} {lotUnitLabel}</td>

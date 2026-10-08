@@ -1338,6 +1338,7 @@ export default function App() {
         onClose={() => setIsNewLotOpen(false)}
         onSaveLot={handleSaveNewLot}
         existingLotsCount={lots.length}
+        existingLots={lots}
         savedVendors={vendors}
         onSaveVendor={handleSaveVendor}
         onUpdateSettings={handleUpdateSettings}

@@ -29,7 +29,15 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
 }) => {
   const isUrdu = settings.language === 'ur';
   const realDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
-  const displayBillNo = billNumber || lots[0]?.lotNumber || '101';
+  const rawLotNumbers = lots
+    .map((l) => (l.lotNumber || '').trim().replace(/^LOT-/i, ''))
+    .filter(Boolean);
+  const uniqueLotNumbers = Array.from(new Set(rawLotNumbers));
+  const displayLotNo =
+    uniqueLotNumbers.length > 0
+      ? uniqueLotNumbers.join(', ')
+      : (billNumber || lots[0]?.lotNumber || '101').replace(/^LOT-/i, '');
+  const displayBillNo = billNumber || displayLotNo;
 
   // Aggregate Deductions & Totals
   const aggregatedExpenses = {
@@ -281,27 +289,46 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
             ) : null}
           </div>
 
-          {/* 2. SUBHEADER METADATA ROW */}
-          <div className="my-1 border-y-2 border-red-700 py-0.5 sm:py-1 px-2 flex items-center justify-between text-[11px] sm:text-xs font-bold text-slate-900 bg-white">
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-bold">نمبر:</span>
-              <span className="font-numbers underline font-bold px-1 text-slate-950 text-xs sm:text-sm">
-                {displayBillNo}
-              </span>
+          {/* 2. SUBHEADER METADATA ROWS - Bill Baname placed under Lot Number */}
+          <div className="my-1 border-y-2 border-red-700 py-1 px-2 sm:px-2.5 bg-white flex flex-col gap-1 text-slate-900">
+            {/* Top Row: Lot Number on Right, Date on Left */}
+            <div className="flex items-center justify-between text-[11px] sm:text-xs font-bold">
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-black">لاٹ نمبر:</span>
+                <span className="font-numbers underline decoration-red-500 font-black px-1 text-slate-950 text-xs sm:text-sm tracking-wide">
+                  {displayLotNo}
+                </span>
+                {billNumber && billNumber !== displayLotNo && (
+                  <span className="text-[10px] text-slate-500 font-numbers mr-1">
+                    (بل #{billNumber})
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-bold">السلام علیکم تاریخ:</span>
+                <span className="font-numbers underline font-bold px-1 text-slate-950 text-xs sm:text-sm">
+                  {realDate}
+                </span>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-1 justify-center px-2 min-w-0">
-              <span className="text-red-700 font-urdu-nastaliq text-sm sm:text-base font-black flex-shrink-0">بل بنام:</span>
-              <span className="underline decoration-red-600 decoration-2 font-black text-slate-950 font-urdu-nastaliq text-lg sm:text-xl md:text-2xl px-1.5 truncate tracking-wide leading-tight drop-shadow-2xs">
-                {vendorName} {vendorCity ? `(${vendorCity})` : ''}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-bold">السلام علیکم تاریخ:</span>
-              <span className="font-numbers underline font-bold px-1 text-slate-950 text-xs sm:text-sm">
-                {realDate}
-              </span>
+            {/* Bottom Row: Directly UNDER the Lot Number -> Bill Baname */}
+            <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-red-100 min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <span className="text-red-700 font-urdu-nastaliq text-sm sm:text-base font-black flex-shrink-0">بل بنام:</span>
+                <span className="underline decoration-red-600 decoration-2 font-black text-slate-950 font-urdu-nastaliq text-base sm:text-lg md:text-xl px-1 truncate tracking-wide leading-tight drop-shadow-2xs">
+                  {vendorName} {vendorCity ? `(${vendorCity})` : ''}
+                </span>
+              </div>
+              {vendorPhone && (
+                <div className="flex items-center gap-1 flex-shrink-0 text-slate-600">
+                  <span className="text-[10px] text-slate-400 font-urdu-sans">فون:</span>
+                  <span className="font-numbers font-bold text-[10px] sm:text-[11px] text-slate-700">
+                    {vendorPhone}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -166,10 +166,64 @@ export function distributeMunshianaToLots(totalAmount: number, lotCount: number)
   return Array.from({ length: lotCount }, (_, i) => base + (i < remainder ? 1 : 0));
 }
 
-export function generateLotNumber(existingLotsCount: number): string {
-  const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-  const seq = (existingLotsCount + 1).toString().padStart(3, '0');
-  return `LOT-${dateStr}-${seq}`;
+export function getLotDatePrefix(targetDate?: Date | string): string {
+  const d = targetDate ? new Date(targetDate) : new Date();
+  const validDate = isNaN(d.getTime()) ? new Date() : d;
+  const yy = String(validDate.getFullYear()).slice(-2);
+  const mm = String(validDate.getMonth() + 1).padStart(2, '0');
+  const dd = String(validDate.getDate()).padStart(2, '0');
+  return `${yy}${mm}${dd}`;
+}
+
+export function generateLotNumber(
+  existingLots?: VendorLot[] | number,
+  targetDate?: Date | string
+): string {
+  const dateStr = getLotDatePrefix(targetDate);
+
+  if (Array.isArray(existingLots)) {
+    // Find highest sequence number among existing lots for this specific date
+    let maxSeq = 0;
+    for (const lot of existingLots) {
+      if (!lot || !lot.lotNumber) continue;
+      const numStr = String(lot.lotNumber).trim();
+      // Match `${dateStr}-(\\d+)` or legacy `LOT-${dateStr}-(\\d+)`
+      const pattern = new RegExp(`^(?:LOT-)?${dateStr}-(\\d+)$`, 'i');
+      const match = numStr.match(pattern);
+      if (match) {
+        const seq = parseInt(match[1], 10);
+        if (!isNaN(seq) && seq > maxSeq) {
+          maxSeq = seq;
+        }
+      }
+    }
+    const nextSeq = maxSeq + 1;
+    return `${dateStr}-${nextSeq}`;
+  }
+
+  // Fallback if existingLotsCount number is passed
+  const count = typeof existingLots === 'number' ? existingLots : 0;
+  return `${dateStr}-${count + 1}`;
+}
+
+/**
+ * Extracts the daily receipt own number from a lot number.
+ * E.g.: "261010-1" -> "1", "261010-12" -> "12", "LOT-260810-122" -> "122"
+ * Increments by 1 and resets to 1 each day.
+ */
+export function getLotReceiptNumber(lotNumber?: string): string {
+  if (!lotNumber) return '1';
+  const clean = String(lotNumber).trim();
+  // Match trailing sequence number after dash, stripping leading zeros
+  const dashMatch = clean.match(/-0*(\d+)$/);
+  if (dashMatch) {
+    return dashMatch[1];
+  }
+  const plainMatch = clean.match(/^0*(\d+)$/);
+  if (plainMatch) {
+    return plainMatch[1];
+  }
+  return clean.replace(/^LOT-/i, '');
 }
 
 export function calculateCashDrawerSummary(

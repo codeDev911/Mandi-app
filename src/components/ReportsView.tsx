@@ -14,7 +14,7 @@ import {
 } from '../types';
 import { translations, unitLabels, commonMandiProducts, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
-import { calculateCashDrawerSummary, calculateLotSummary, distributeMunshianaToLots } from '../utils/calculations';
+import { calculateCashDrawerSummary, calculateLotSummary, distributeMunshianaToLots, getLotReceiptNumber } from '../utils/calculations';
 import { sound } from '../utils/sound';
 import { VendorConsolidatedBillModal } from './VendorConsolidatedBillModal';
 import { AllVendorBillsModal } from './AllVendorBillsModal';
@@ -1746,8 +1746,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           <h4 className="font-bold text-xs sm:text-sm text-slate-900 font-urdu-nastaliq truncate">
                             {lot.vendorName}
                           </h4>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
-                            {lot.lotNumber}
+                          <span
+                            className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold font-numbers"
+                            title={`لاٹ ID: ${lot.lotNumber}`}
+                          >
+                            #{getLotReceiptNumber(lot.lotNumber)}
                           </span>
                           <span className="text-[10px] text-slate-400 font-numbers">
                             {lot.arrivalDate}
@@ -2365,7 +2368,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                                     {lot.productEmoji} {lot.productUrdu}
                                   </span>
                                   <span className="text-[11px] text-slate-400 font-numbers block">
-                                    {lot.lotNumber} • {lot.arrivalDate} ({lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)})
+                                    رسید #{getLotReceiptNumber(lot.lotNumber)} • {lot.arrivalDate} ({lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)})
                                   </span>
                                 </div>
 

@@ -105,7 +105,7 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
 
   // High-Resolution Multi-Page PDF Generator with HTML5 Canvas 2D Engine
   // Perfectly renders Urdu Nastaliq calligraphy without CSS parsing or row-clipping issues
-  const buildReportPDF = async (): Promise<{ pdf: jsPDF; blob: Blob }> => {
+  const buildReportPDF = async (targetFormat: 'a4' | 'a5' = 'a4'): Promise<{ pdf: jsPDF; blob: Blob }> => {
     if (document.fonts && document.fonts.ready) {
       try {
         await document.fonts.ready;
@@ -117,13 +117,14 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
     // Generate high-res 2D canvases for every page
     const canvases = pageCanvases.length > 0 ? pageCanvases : generateReportCanvas2DPages(previewData);
 
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfPageWidth = 210;
-    const pdfPageHeight = 297;
+    const isA4 = targetFormat === 'a4';
+    const pdf = new jsPDF('p', 'mm', isA4 ? 'a4' : 'a5');
+    const pdfPageWidth = isA4 ? 210 : 148.5;
+    const pdfPageHeight = isA4 ? 297 : 210;
 
     canvases.forEach((canvas, idx) => {
       if (idx > 0) {
-        pdf.addPage('a4', 'p');
+        pdf.addPage(isA4 ? 'a4' : 'a5', 'p');
       }
       const pageImgData = canvas.toDataURL('image/jpeg', 0.96);
       pdf.addImage(pageImgData, 'JPEG', 0, 0, pdfPageWidth, pdfPageHeight, undefined, 'FAST');
@@ -133,8 +134,8 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
     return { pdf, blob };
   };
 
-  // 1. SAVE PDF (File System Access API / Universal File Saver)
-  const handleSavePDF = async (e?: React.MouseEvent) => {
+  // 1. SAVE PDF (File System Access API / Universal File Saver) with format support
+  const handleSavePDF = async (targetFormat: 'a4' | 'a5' = 'a4', e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -142,21 +143,26 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
     sound.playCashChime();
     setIsExportingPDF(true);
 
-    const finalPdfName = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+    const baseName = filename.endsWith('.pdf') ? filename.slice(0, -4) : filename;
+    const finalPdfName = `${baseName}_${targetFormat.toUpperCase()}.pdf`;
 
     try {
-      const { pdf, blob } = await buildReportPDF();
+      const { pdf, blob } = await buildReportPDF(targetFormat);
       const saveRes = await saveBlobFile(blob, finalPdfName, 'Mandi PDF Report');
       if (saveRes.success) {
         showToast(
           isUrdu
-            ? `پی ڈی ایف رپورٹ محفوظ ہو گئی! (${totalPages} صفحات)`
-            : `PDF report saved successfully! (${totalPages} pages)`
+            ? `پی ڈی ایف (${targetFormat.toUpperCase()}) رپورٹ محفوظ ہو گئی! (${totalPages} صفحات)`
+            : `PDF (${targetFormat.toUpperCase()}) report saved successfully! (${totalPages} pages)`
         );
       } else {
         try {
           pdf.save(finalPdfName);
-          showToast(isUrdu ? 'پی ڈی ایف رپورٹ محفوظ ہو گئی!' : 'PDF report saved successfully!');
+          showToast(
+            isUrdu
+              ? `پی ڈی ایف (${targetFormat.toUpperCase()}) رپورٹ محفوظ ہو گئی!`
+              : `PDF (${targetFormat.toUpperCase()}) report saved successfully!`
+          );
         } catch {
           showToast(isUrdu ? 'فائل محفوظ کرنے میں مسئلہ پیش آیا' : 'Failed to save PDF file');
         }
@@ -183,7 +189,7 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
     const messageText = `*${shopTitle}*\n📄 *${title}*\n📅 دورانیہ: ${dateFilterLabel || 'تمام ریکارڈ'}\n📑 صفحات: ${totalPages}\n\nپی ڈی ایف رپورٹ دستاویز منسلک ہے۔`;
 
     try {
-      const { blob } = await buildReportPDF();
+      const { blob } = await buildReportPDF('a4');
 
       setShareModalItem({
         title: title,
@@ -209,16 +215,24 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
     }
   };
 
-  // 3. CLEAN DIRECT BROWSER PRINT
-  const handlePrint = (e?: React.MouseEvent) => {
+  const handleExecutePrintA4 = (e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
     sound.playTick();
-
     const allImages = pageImages.length > 0 ? pageImages : undefined;
-    printDetailedReportDocument(previewData, allImages);
+    printDetailedReportDocument(previewData, allImages, 'a4');
+  };
+
+  const handleExecutePrintA5 = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    sound.playTick();
+    const allImages = pageImages.length > 0 ? pageImages : undefined;
+    printDetailedReportDocument(previewData, allImages, 'a5');
   };
 
   return (
@@ -378,15 +392,27 @@ export const ReportPDFPreviewModal: React.FC<ReportPDFPreviewModalProps> = ({
               <span>{isUrdu ? 'شیئر کریں' : 'Share'}</span>
             </button>
 
-            {/* 3. Print Icon Button */}
+            {/* 3. Direct A4 and A5 Print Buttons */}
             <button
               type="button"
-              onClick={(e) => handlePrint(e)}
-              className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-200 border border-slate-700 flex items-center justify-center transition shadow-sm"
-              title="پی ڈی ایف پرنٹ کریں (Print PDF Report)"
-              aria-label="Print PDF Report"
+              onClick={handleExecutePrintA4}
+              className="h-10 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-90 text-emerald-400 border border-slate-700 flex items-center justify-center gap-1 transition shadow-sm font-numbers text-xs font-bold"
+              title="A4 سائز پرنٹ کریں (Direct Print A4)"
+              aria-label="Print A4"
             >
-              <Printer className="w-4 h-4 stroke-[2.2] text-amber-400" />
+              <Printer className="w-4 h-4 stroke-[2.2]" />
+              <span>A4</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExecutePrintA5}
+              className="h-10 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-90 text-cyan-400 border border-slate-700 flex items-center justify-center gap-1 transition shadow-sm font-numbers text-xs font-bold"
+              title="A5 سائز پرنٹ کریں (Direct Print A5)"
+              aria-label="Print A5"
+            >
+              <Printer className="w-4 h-4 stroke-[2.2]" />
+              <span>A5</span>
             </button>
 
             {/* 4. Close Button */}

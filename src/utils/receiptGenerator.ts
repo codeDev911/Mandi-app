@@ -665,46 +665,69 @@ export function generateVendorConsolidatedInvoiceCanvas(
     ctx.fillText(propText, headerX + headerW / 2, headerY + 82);
   }
 
-  // 4. SUBHEADER METADATA ROW
+  // 4. SUBHEADER METADATA ROWS (Bill Baname placed under Lot Number)
   const subY = headerY + headerH + 4;
-  const subH = 24;
+  const subH = 46;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(headerX, subY, headerW, subH);
   ctx.strokeStyle = '#b91c1c';
   ctx.lineWidth = 1.8;
   ctx.strokeRect(headerX, subY, headerW, subH);
 
-  // Right: Number
+  // Top row: Lot Number on Right, Date on Left
+  const rawLotNumbers = lots
+    .map((l) => (l.lotNumber || '').trim().replace(/^LOT-/i, ''))
+    .filter(Boolean);
+  const uniqueLotNumbers = Array.from(new Set(rawLotNumbers));
+  const displayLotNo =
+    uniqueLotNumbers.length > 0
+      ? uniqueLotNumbers.join(', ')
+      : (lots[0]?.lotNumber || '101').replace(/^LOT-/i, '');
+
   ctx.textAlign = 'right';
   ctx.fillStyle = '#b91c1c';
-  ctx.font = 'bold 11.5px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('نمبر: ', headerX + headerW - 10, subY + 16);
+  ctx.font = 'bold 12px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('لاٹ نمبر: ', headerX + headerW - 10, subY + 16);
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 11.5px system-ui, monospace';
-  ctx.fillText(lots[0]?.lotNumber || '101', headerX + headerW - 40, subY + 16);
+  ctx.font = 'bold 12px system-ui, monospace';
+  ctx.fillText(displayLotNo, headerX + headerW - 68, subY + 16);
 
-  // Center: Vendor Name (Big and Bold)
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#b91c1c';
-  ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('بل بنام: ', headerX + headerW / 2 + 75, subY + 17);
-  ctx.fillStyle = '#020617';
-  ctx.font = 'bold 18px "Noto Nastaliq Urdu", serif';
-  ctx.fillText(`${vendorName} ${vendorCity ? `(${vendorCity})` : ''}`, headerX + headerW / 2 - 15, subY + 17);
-
-  // Left: Real Calendar Date (NEVER today's day phrase)
   const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
   ctx.textAlign = 'left';
   ctx.fillStyle = '#b91c1c';
-  ctx.font = 'bold 11.5px "Noto Nastaliq Urdu", serif';
+  ctx.font = 'bold 11px "Noto Nastaliq Urdu", serif';
   ctx.fillText('السلام علیکم تاریخ: ', headerX + 10, subY + 16);
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 11.5px system-ui, monospace';
+  ctx.font = 'bold 11px system-ui, monospace';
   ctx.fillText(displayDate, headerX + 115, subY + 16);
+
+  // Divider
+  ctx.strokeStyle = '#fee2e2';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(headerX + 4, subY + 23);
+  ctx.lineTo(headerX + headerW - 4, subY + 23);
+  ctx.stroke();
+
+  // Bottom row: Bill Baname placed under Lot Number
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#b91c1c';
+  ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
+  ctx.fillText('بل بنام: ', headerX + headerW - 10, subY + 39);
+  ctx.fillStyle = '#020617';
+  ctx.font = 'bold 16px "Noto Nastaliq Urdu", serif';
+  ctx.fillText(`${vendorName} ${vendorCity ? `(${vendorCity})` : ''}`, headerX + headerW - 65, subY + 39);
+
+  if (vendorPhone) {
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold 11px system-ui, monospace';
+    ctx.fillText(`فون: ${vendorPhone}`, headerX + 10, subY + 39);
+  }
 
   // 5. MAIN RED-RULED TABLE
   const tableY = subY + subH + 4;
-  const tableH = 820;
+  const tableH = 798;
   const leftColW = Math.round(headerW * 0.30);
   const rightColW = headerW - leftColW;
   const totalSubColW = 80;

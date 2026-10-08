@@ -3,7 +3,12 @@ import { VendorLot, AppSettings } from '../types';
 import { translations, formatFullRealDate, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
-import { printBatchVendorBillsA4, printVendorBillSlipA4 } from '../utils/printHelper';
+import {
+  printBatchVendorBillsA4,
+  printBatchVendorBillsA5,
+  printVendorBillSlipA4,
+  printVendorBillSlipA5,
+} from '../utils/printHelper';
 import { InsafMandiBillView } from './InsafMandiBillView';
 import {
   Printer,
@@ -156,15 +161,43 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
     setSelectedVendors(new Set(unpaid));
   };
 
-  // Batch Print Action
-  const handlePrintBatch = (onlySelected: boolean = true) => {
-    sound.playCashChime();
-    const targetVendors = vendorGroups.filter((vg) =>
-      onlySelected ? selectedVendors.has(vg.vendorName) : true
+  // Direct single bill print handlers
+  const handlePrintSingleA4 = (vg: VendorGroupedData, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    sound.playTick();
+    printVendorBillSlipA4(
+      vg.vendorName,
+      vg.vendorPhone,
+      vg.vendorCity,
+      vg.lots,
+      settings,
+      dateLabel,
+      isAveraged
     );
+  };
 
-    if (targetVendors.length === 0) return;
+  const handlePrintSingleA5 = (vg: VendorGroupedData, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    sound.playTick();
+    printVendorBillSlipA5(
+      vg.vendorName,
+      vg.vendorPhone,
+      vg.vendorCity,
+      vg.lots,
+      settings,
+      dateLabel,
+      isAveraged
+    );
+  };
 
+  // Direct batch bill print handlers
+  const handlePrintBatchA4 = (onlySelected: boolean = true) => {
+    sound.playTick();
+    let targetVendors = vendorGroups;
+    if (onlySelected) {
+      targetVendors = vendorGroups.filter((vg) => selectedVendors.has(vg.vendorName));
+      if (targetVendors.length === 0) return;
+    }
     printBatchVendorBillsA4(
       targetVendors.map((vg, idx) => ({
         vendorName: vg.vendorName,
@@ -179,14 +212,21 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
     );
   };
 
-  // Single Bill Print Action
-  const handlePrintSingle = (vGroup: VendorGroupedData) => {
-    sound.playCashChime();
-    printVendorBillSlipA4(
-      vGroup.vendorName,
-      vGroup.vendorPhone,
-      vGroup.vendorCity,
-      vGroup.lots,
+  const handlePrintBatchA5 = (onlySelected: boolean = true) => {
+    sound.playTick();
+    let targetVendors = vendorGroups;
+    if (onlySelected) {
+      targetVendors = vendorGroups.filter((vg) => selectedVendors.has(vg.vendorName));
+      if (targetVendors.length === 0) return;
+    }
+    printBatchVendorBillsA5(
+      targetVendors.map((vg, idx) => ({
+        vendorName: vg.vendorName,
+        vendorPhone: vg.vendorPhone,
+        vendorCity: vg.vendorCity,
+        lots: vg.lots,
+        billNumber: `${101 + idx}`,
+      })),
       settings,
       dateLabel,
       isAveraged
@@ -256,18 +296,30 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
               <span>{isAveraged ? 'اوسط بل ✓' : 'اوسط ریٹ بل'}</span>
             </button>
 
-            {/* Print Selected Bills Primary Button */}
-            <button
-              type="button"
-              onClick={() => handlePrintBatch(true)}
-              disabled={selectedCount === 0}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none text-white font-bold text-xs sm:text-sm font-urdu-sans flex items-center gap-1.5 shadow-lg active:scale-95 transition"
-            >
-              <Printer className="w-4 h-4 stroke-[2.2]" />
-              <span>
-                منتخب بل پرنٹ کریں ({selectedCount})
-              </span>
-            </button>
+            {/* Direct A4 and A5 Print Selected Bills */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => handlePrintBatchA4(true)}
+                disabled={selectedCount === 0}
+                className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none text-white font-bold text-xs sm:text-sm font-numbers flex items-center gap-1 shadow-md active:scale-95 transition"
+                title="منتخب A4 پرنٹ کریں"
+              >
+                <Printer className="w-4 h-4 stroke-[2.2]" />
+                <span>A4 ({selectedCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handlePrintBatchA5(true)}
+                disabled={selectedCount === 0}
+                className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 disabled:pointer-events-none text-white font-bold text-xs sm:text-sm font-numbers flex items-center gap-1 shadow-md active:scale-95 transition"
+                title="منتخب A5 پرنٹ کریں"
+              >
+                <Printer className="w-4 h-4 stroke-[2.2]" />
+                <span>A5 ({selectedCount})</span>
+              </button>
+            </div>
 
             {/* Close Button */}
             <button
@@ -431,15 +483,27 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Single Bill Print Button */}
-                      <button
-                        type="button"
-                        onClick={() => handlePrintSingle(vg)}
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 font-bold text-xs font-urdu-sans flex items-center gap-1.5 transition active:scale-95 shadow-xs"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        <span>پرنٹ کریں</span>
-                      </button>
+                      {/* Direct Single Bill Print Buttons (A4 and A5) */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handlePrintSingleA4(vg)}
+                          className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 font-bold text-xs flex items-center gap-1 transition active:scale-95 shadow-xs font-numbers"
+                          title="A4 پرنٹ کریں"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>A4</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintSingleA5(vg)}
+                          className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-400 font-bold text-xs flex items-center gap-1 transition active:scale-95 shadow-xs font-numbers"
+                          title="A5 پرنٹ کریں"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>A5</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Exact Authentic Bill Component */}
@@ -534,17 +598,26 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
                       <span className="text-[11px] text-slate-500 font-numbers">
                         بل نمبر #{101 + idx}
                       </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handlePrintSingle(vg);
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold font-urdu-sans flex items-center gap-1 active:scale-95 transition"
-                      >
-                        <Printer className="w-3 h-3" />
-                        <span>پرنٹ</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => handlePrintSingleA4(vg, e)}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold font-numbers flex items-center gap-1 active:scale-95 transition"
+                          title="A4 سائز پرنٹ"
+                        >
+                          <Printer className="w-3 h-3" />
+                          <span>A4</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handlePrintSingleA5(vg, e)}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs font-bold font-numbers flex items-center gap-1 active:scale-95 transition"
+                          title="A5 سائز پرنٹ"
+                        >
+                          <Printer className="w-3 h-3" />
+                          <span>A5</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -554,31 +627,59 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
         </div>
 
         {/* 4. FOOTER SUMMARY BAR */}
-        <div className="bg-slate-950 border-t border-slate-800 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-3 flex-shrink-0">
+        <div className="bg-slate-950 border-t border-slate-800 px-3 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
           <div className="text-xs text-slate-300 font-urdu-sans">
             <span>منتخب: </span>
             <strong className="text-emerald-400 font-numbers font-bold">{selectedCount}</strong>
             <span className="text-slate-500"> / {vendorGroups.length} زمیندار</span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handlePrintBatch(false)}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs font-urdu-sans transition active:scale-95"
-            >
-              سب پرنٹ کریں ({vendorGroups.length})
-            </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* All Vendors Direct Batch Print */}
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-0.5 rounded-xl">
+              <span className="text-[11px] text-slate-400 font-urdu-sans px-2">سب:</span>
+              <button
+                type="button"
+                onClick={() => handlePrintBatchA4(false)}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-xs font-numbers transition active:scale-95"
+                title="تمام زمینداروں کے A4 بل پرنٹ کریں"
+              >
+                A4
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePrintBatchA5(false)}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-xs font-numbers transition active:scale-95"
+                title="تمام زمینداروں کے A5 بل پرنٹ کریں"
+              >
+                A5
+              </button>
+            </div>
 
-            <button
-              type="button"
-              onClick={() => handlePrintBatch(true)}
-              disabled={selectedCount === 0}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold text-xs sm:text-sm font-urdu-sans flex items-center gap-1.5 shadow-md active:scale-95 transition"
-            >
-              <Printer className="w-4 h-4 stroke-[2.2]" />
-              <span>منتخب پرنٹ کریں ({selectedCount})</span>
-            </button>
+            {/* Selected Vendors Direct Batch Print */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => handlePrintBatchA4(true)}
+                disabled={selectedCount === 0}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold text-xs sm:text-sm font-urdu-sans flex items-center gap-1.5 shadow-md active:scale-95 transition"
+                title="منتخب زمینداروں کے A4 بل پرنٹ کریں"
+              >
+                <Printer className="w-4 h-4 stroke-[2.2]" />
+                <span>A4 منتخب ({selectedCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handlePrintBatchA5(true)}
+                disabled={selectedCount === 0}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 text-white font-bold text-xs sm:text-sm font-urdu-sans flex items-center gap-1.5 shadow-md active:scale-95 transition"
+                title="منتخب زمینداروں کے A5 بل پرنٹ کریں"
+              >
+                <Printer className="w-4 h-4 stroke-[2.2]" />
+                <span>A5 منتخب ({selectedCount})</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
