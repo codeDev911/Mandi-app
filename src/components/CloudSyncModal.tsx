@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment } from '../types';
+import { AppSettings, VendorLot, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment, SyncProgressState } from '../types';
+import { SyncProgressModal } from './SyncProgressModal';
 import {
   CloudSyncMetadata,
   getStoredCloudConfig,
@@ -96,6 +97,13 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [copiedId, setCopiedId] = useState(false);
 
+  // Progressive Sync Modal State
+  const [syncProgress, setSyncProgress] = useState<SyncProgressState | null>(null);
+  const [showProgressModal, setShowProgressModal] = useState<boolean>(false);
+  const [showDownloadConfirmModal, setShowDownloadConfirmModal] = useState<boolean>(false);
+  const [credentialsNotice, setCredentialsNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+
   // S3 Connection Test State
   const [isTestingS3, setIsTestingS3] = useState(false);
   const [s3TestResult, setS3TestResult] = useState<{
@@ -148,6 +156,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       setBucketName(stored.bucketName || 'mandi-data');
       setSyncResult(null);
       setS3TestResult(null);
+      setCredentialsNotice(null);
+      setSaveNotice(null);
     }
   }, [isOpen]);
 
@@ -164,23 +174,40 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
   const hasConfiguredS3 = Boolean(endpointUrl.trim() && accessKeyId.trim() && secretAccessKey.trim());
 
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpload = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setIsSyncing(true);
     setSyncResult(null);
+    setSyncProgress({
+      stage: 'preparing',
+      direction: 'upload',
+      loadedBytes: 0,
+      totalBytes: 0,
+      percentage: 5,
+      speedBytesPerSec: 0,
+      estimatedSecondsLeft: 0,
+      message: 'Preparing data package...',
+    });
+    setShowProgressModal(true);
     sound.playPop();
 
     const systemLogs = getSystemLogs();
 
-    const result = await uploadDataToCloud(currentS3Config, {
-      settings,
-      lots,
-      customers,
-      vendors,
-      expenses,
-      drawerAdjustments,
-      systemLogs,
-    });
+    const result = await uploadDataToCloud(
+      currentS3Config,
+      {
+        settings,
+        lots,
+        customers,
+        vendors,
+        expenses,
+        drawerAdjustments,
+        systemLogs,
+      },
+      (progress) => {
+        setSyncProgress(progress);
+      }
+    );
 
     setIsSyncing(false);
     setSyncResult(result);
@@ -192,23 +219,38 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     }
   };
 
-  const handleDownload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (
-      !confirm(
-        isUrdu
-          ? 'کیا آپ S3 کلاؤڈ اسٹوریج سے تمام ڈیٹا ڈاؤن لوڈ کر کے اس ڈیوائس کے ریکارڈ سے ملا کر بحال کرنا چاہتے ہیں؟'
-          : 'Download & sync all S3 cloud storage data to this device?'
-      )
-    ) {
-      return;
-    }
+  const handleRequestDownload = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!downloadShopId.trim()) return;
+    sound.playPop();
+    setShowDownloadConfirmModal(true);
+  };
 
+  const executeDownload = async () => {
+    setShowDownloadConfirmModal(false);
     setIsSyncing(true);
     setSyncResult(null);
+    setSyncProgress({
+      stage: 'preparing',
+      direction: 'download',
+      loadedBytes: 0,
+      totalBytes: 0,
+      percentage: 5,
+      speedBytesPerSec: 0,
+      estimatedSecondsLeft: 0,
+      message: 'Connecting to S3 Cloud...',
+    });
+    setShowProgressModal(true);
     sound.playPop();
 
-    const result = await downloadDataFromCloud(downloadShopId, downloadPin, currentS3Config);
+    const result = await downloadDataFromCloud(
+      downloadShopId,
+      downloadPin,
+      currentS3Config,
+      (progress) => {
+        setSyncProgress(progress);
+      }
+    );
 
     setIsSyncing(false);
     setSyncResult(result);
@@ -223,7 +265,10 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
   const handleParseCredentialsBlock = () => {
     if (!credentialsBlock.trim()) {
-      alert(isUrdu ? 'براہ کرم کریڈنشلز بلاک پیسٹ کریں' : 'Please paste the S3 credentials block first');
+      setCredentialsNotice({
+        type: 'error',
+        message: isUrdu ? 'براہ کرم کریڈنشلز بلاک پیسٹ کریں' : 'Please paste the S3 credentials block first',
+      });
       return;
     }
 
@@ -235,11 +280,13 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     if (parsed.bucketName) setBucketName(parsed.bucketName);
 
     sound.playCashChime();
-    alert(
-      isUrdu
+    setCredentialsNotice({
+      type: 'success',
+      message: isUrdu
         ? 'S3 کریڈنشلز کامیابی سے نکال لیے گئے اور فارم میں درج ہو گئے ہیں!'
-        : 'S3 Credentials extracted and filled into the form successfully!'
-    );
+        : 'S3 Credentials extracted and filled into the form successfully!',
+    });
+    setTimeout(() => setCredentialsNotice(null), 5000);
   };
 
   const handleTestS3 = async () => {
@@ -263,7 +310,8 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     sound.playTick();
     saveStoredCloudConfig(currentS3Config);
     setConfig(currentS3Config);
-    alert(isUrdu ? 'S3 آبجیکٹ اسٹوریج کی تفصیلات محفوظ ہو گئیں!' : 'S3 Object Storage settings saved!');
+    setSaveNotice(isUrdu ? 'S3 آبجیکٹ اسٹوریج کی تفصیلات محفوظ ہو گئیں!' : 'S3 Object Storage settings saved!');
+    setTimeout(() => setSaveNotice(null), 4000);
   };
 
   const handleCopyShopId = () => {
@@ -582,7 +630,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
 
           {/* TAB 2: DOWNLOAD */}
           {activeTab === 'download' && (
-            <form onSubmit={handleDownload} className="space-y-4">
+            <form onSubmit={handleRequestDownload} className="space-y-4">
               <div className="bg-blue-50/90 p-4 rounded-2xl border border-blue-200 text-xs font-urdu-sans text-blue-950 space-y-1.5">
                 <p className="font-bold flex items-center gap-1.5 text-blue-900">
                   <Smartphone className="w-4 h-4" />
@@ -692,6 +740,23 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                     <span>{isUrdu ? 'فارم میں خودکار بھریں (Auto-Fill Form)' : 'Extract & Fill Form'}</span>
                   </button>
                 </div>
+
+                {credentialsNotice && (
+                  <div
+                    className={`p-2.5 rounded-xl border text-xs font-urdu-sans flex items-center gap-2 ${
+                      credentialsNotice.type === 'success'
+                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600'
+                        : 'bg-rose-950/80 text-rose-300 border-rose-600'
+                    }`}
+                  >
+                    {credentialsNotice.type === 'success' ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                    )}
+                    <span>{credentialsNotice.message}</span>
+                  </div>
+                )}
               </div>
 
               {/* S3 Credentials Form */}
@@ -815,6 +880,13 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                     <span>{isUrdu ? 'محفوظ کریں' : 'Save'}</span>
                   </button>
                 </div>
+
+                {saveNotice && (
+                  <div className="p-2.5 rounded-xl border bg-emerald-50 text-emerald-900 border-emerald-300 text-xs font-urdu-sans flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <span className="font-bold">{saveNotice}</span>
+                  </div>
+                )}
               </form>
 
               {/* S3 Test Result Banner */}
@@ -869,6 +941,98 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Progressive Download Confirmation Modal - Zero browser alert/confirm */}
+      {showDownloadConfirmModal && (
+        <div
+          dir="ltr"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
+        >
+          <div className="bg-slate-900 border border-slate-700 text-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 font-sans">
+            {/* Header */}
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-blue-950 via-slate-900 to-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center flex-shrink-0">
+                  <CloudDownload className="w-5 h-5 animate-bounce" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-base text-white">
+                    Confirm Cloud Data Restore
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    S3 Object Storage Backup
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDownloadConfirmModal(false)}
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-4 sm:p-5 space-y-4">
+              <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800 space-y-2 text-xs">
+                <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
+                  <span className="text-slate-400">Shop ID:</span>
+                  <span className="font-mono font-bold text-blue-400">{downloadShopId || config.shopCloudId}</span>
+                </div>
+                <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
+                  <span className="text-slate-400">S3 Bucket:</span>
+                  <span className="font-mono text-emerald-400">{bucketName || 'mandi-data'}</span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-slate-400">Action:</span>
+                  <span className="text-amber-300 font-bold">Sync & Restore Data</span>
+                </div>
+              </div>
+
+              <div className="bg-blue-950/40 border border-blue-800/40 p-3 rounded-2xl text-xs text-blue-200 flex items-start gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  Safe restore: Data is transferred with progressive byte-level verification and automatic local snapshot safety before applying to the database.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDownloadConfirmModal(false)}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={executeDownload}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs sm:text-sm transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-blue-900/30 active:scale-95"
+                >
+                  <CloudDownload className="w-4 h-4" />
+                  <span>Start Download</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live Progressive Sync Modal */}
+      <SyncProgressModal
+        isOpen={showProgressModal}
+        progress={syncProgress}
+        onClose={() => setShowProgressModal(false)}
+        onRetry={() => {
+          if (syncProgress?.direction === 'upload') {
+            handleUpload();
+          } else {
+            executeDownload();
+          }
+        }}
+      />
     </div>
   );
 };

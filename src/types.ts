@@ -321,3 +321,22 @@ export const logCategoryMeta: Record<
   VP: { short: 'VP', labelUrdu: 'زمیندار ادائیگی', labelEn: 'Vendor Payment', icon: '🤝', color: 'teal' },
   ST: { short: 'ST', labelUrdu: 'سسٹم ترتیبات', labelEn: 'Settings Update', icon: '⚙️', color: 'slate' },
 };
+
+export interface SyncProgressState {
+  stage: 'idle' | 'preparing' | 'transferring' | 'verifying' | 'completed' | 'error';
+  direction: 'upload' | 'download';
+  loadedBytes: number;
+  totalBytes: number;
+  percentage: number;
+  speedBytesPerSec: number;
+  estimatedSecondsLeft: number;
+  message?: string;
+  error?: string;
+  resultSummary?: {
+    lotsCount?: number;
+    customersCount?: number;
+    vendorsCount?: number;
+    expensesCount?: number;
+    drawerCount?: number;
+  };
+}

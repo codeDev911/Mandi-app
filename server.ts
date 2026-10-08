@@ -9,6 +9,7 @@ import {
   ListBucketsCommand,
   HeadBucketCommand,
   CreateBucketCommand,
+  DeleteObjectCommand,
   HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 
@@ -43,6 +44,11 @@ function getS3ClientAndConfig(customConfig?: S3ConfigInput) {
     secretAccessKey = secretAccessKey.slice(1, -1).trim();
   }
 
+  // Remove trailing slashes from endpoint
+  while (endpoint.endsWith('/')) {
+    endpoint = endpoint.slice(0, -1);
+  }
+
   if (!endpoint || !accessKeyId || !secretAccessKey) {
     return null;
   }
@@ -51,6 +57,8 @@ function getS3ClientAndConfig(customConfig?: S3ConfigInput) {
     endpoint = 'https://' + endpoint;
   }
 
+  const isAws = endpoint.includes('amazonaws.com') && !endpoint.includes('neon.tech');
+
   const client = new S3Client({
     endpoint,
     region,
@@ -58,10 +66,56 @@ function getS3ClientAndConfig(customConfig?: S3ConfigInput) {
       accessKeyId,
       secretAccessKey,
     },
-    forcePathStyle: true, // Crucial for Neon and custom S3 endpoints
+    forcePathStyle: !isAws, // Crucial: true for Neon/MinIO/custom S3, false for AWS S3
+    maxAttempts: 2,
   });
 
-  return { client, endpoint, accessKeyId, region, bucketName };
+  return { client, endpoint, accessKeyId, secretAccessKey, region, bucketName, isAws };
+}
+
+function formatS3ErrorServer(err: any, bucketName?: string): { message: string; code?: string } {
+  const code = err?.name || err?.Code || err?.code || '';
+  const rawMsg = err?.message || String(err || '');
+
+  if (code === 'InvalidAccessKeyId' || rawMsg.includes('InvalidAccessKeyId') || rawMsg.includes('Access Key Id you provided does not exist')) {
+    return {
+      code,
+      message: 'غلط AWS_ACCESS_KEY_ID: فراہم کردہ ایکسس کی درست نہیں ہے یا منسوخ ہو چکی ہے۔ (Invalid AWS Access Key ID)',
+    };
+  }
+
+  if (code === 'SignatureDoesNotMatch' || rawMsg.includes('SignatureDoesNotMatch')) {
+    return {
+      code,
+      message: 'غلط AWS_SECRET_ACCESS_KEY: سیکریٹ کی میل نہیں کھا رہی۔ براہ کرم خفیہ کی دوبارہ چیک کریں۔ (Secret Access Key signature mismatch)',
+    };
+  }
+
+  if (code === 'NoSuchBucket' || code === 'NotFound' || rawMsg.includes('NoSuchBucket') || err?.$metadata?.httpStatusCode === 404) {
+    return {
+      code,
+      message: `بکٹ "${bucketName || ''}" موجود نہیں ہے یا اس نام کا بکٹ کلاؤڈ پر نہیں ملا۔ (Bucket "${bucketName || ''}" not found)`,
+    };
+  }
+
+  if (code === 'AccessDenied' || rawMsg.includes('AccessDenied') || err?.$metadata?.httpStatusCode === 403) {
+    return {
+      code,
+      message: `اجازت نہیں ہے (Access Denied): بکٹ "${bucketName || ''}" میں ڈیٹا لکھنے یا پڑھنے کی اجازت نہیں ہے۔ (Access Denied / Insufficient permissions for bucket)`,
+    };
+  }
+
+  if (rawMsg.includes('ENOTFOUND') || rawMsg.includes('ECONNREFUSED') || rawMsg.includes('fetch failed')) {
+    return {
+      code,
+      message: 'اینڈپوائنٹ سرور سے رابطہ نہیں ہو رہا۔ براہ کرم انٹرنیٹ یا S3 Endpoint URL درست کریں۔ (Network error: cannot reach S3 Endpoint)',
+    };
+  }
+
+  return {
+    code,
+    message: `S3 کنکشن خرابی: ${rawMsg}`,
+  };
 }
 
 async function startServer() {
@@ -109,14 +163,16 @@ async function startServer() {
       });
     }
 
-    const { client, endpoint, bucketName, region } = s3Info;
+    const { client, endpoint, bucketName, region, isAws } = s3Info;
 
     try {
       let buckets: string[] = [];
+      let listSuccess = false;
       try {
         const listRes = await client.send(new ListBucketsCommand({}));
         buckets = (listRes.Buckets || []).map((b) => b.Name || '');
-      } catch {
+        listSuccess = true;
+      } catch (listErr: any) {
         // Some scoped credentials only allow access to specific bucket
       }
 
@@ -130,24 +186,65 @@ async function startServer() {
           } catch {
             // Ignore if creation is not permitted; PutObject will verify
           }
+        } else if (!listSuccess) {
+          // If both ListBuckets and HeadBucket failed with auth error, reject immediately
+          const formatted = formatS3ErrorServer(headErr, bucketName);
+          return res.status(400).json({
+            success: false,
+            message: formatted.message,
+            code: formatted.code,
+          });
         }
+      }
+
+      // GENUINE PROBE TEST: Try writing and deleting a temporary probe file to verify real write & read permissions
+      const probeKey = `backups/.probe_${Date.now()}.tmp`;
+      try {
+        await client.send(
+          new PutObjectCommand({
+            Bucket: bucketName,
+            Key: probeKey,
+            Body: JSON.stringify({ probe: true, timestamp: new Date().toISOString() }),
+            ContentType: 'application/json',
+          })
+        );
+
+        // Delete probe file cleanly
+        try {
+          await client.send(
+            new DeleteObjectCommand({
+              Bucket: bucketName,
+              Key: probeKey,
+            })
+          );
+        } catch {
+          // Clean up failure does not break probe confirmation
+        }
+      } catch (probeErr: any) {
+        const formatted = formatS3ErrorServer(probeErr, bucketName);
+        return res.status(400).json({
+          success: false,
+          message: formatted.message,
+          code: formatted.code,
+        });
       }
 
       res.json({
         success: true,
-        message: 'S3 Object Storage connection successful! Bucket and credentials verified.',
+        message: 'S3 آبجیکٹ اسٹوریج کنکشن اور اپ لوڈ/ڈاؤن لوڈ حقوق کامیابی سے تصدیق شدہ ہیں! (Connection verified successfully)',
         endpoint,
         bucketName,
         region,
         availableBuckets: buckets,
-        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        storageEngine: isAws ? 'AWS S3 Storage' : 'S3-Compatible Object Storage (Neon)',
       });
     } catch (err: any) {
       console.error('S3 Connection Test Failed:', err);
-      res.status(500).json({
+      const formatted = formatS3ErrorServer(err, bucketName);
+      res.status(400).json({
         success: false,
-        message: `S3 Object Storage connection error: ${err?.message || 'Failed to authenticate'}`,
-        code: err?.name || err?.Code,
+        message: formatted.message,
+        code: formatted.code,
       });
     }
   };
@@ -174,7 +271,7 @@ async function startServer() {
       });
     }
 
-    const { client, bucketName, endpoint } = s3Info;
+    const { client, bucketName, endpoint, isAws } = s3Info;
     const cleanShopId = String(shopId).trim().toUpperCase();
     const cleanPin = String(pin || '1234').trim();
     const objectKey = `backups/${cleanShopId}.json`;
@@ -238,7 +335,7 @@ async function startServer() {
 
       res.json({
         success: true,
-        message: `Data successfully uploaded to S3 Object Storage! (${objectKey})`,
+        message: `ڈیٹا کامیابی سے S3 آبجیکٹ اسٹوریج پر اپ لوڈ ہو گیا! (${objectKey})`,
         lastUploadedAt: timestamp,
         sizeBytes,
         sizeMb: Number((sizeBytes / (1024 * 1024)).toFixed(2)),
@@ -248,17 +345,18 @@ async function startServer() {
         expensesCount: expenses.length,
         drawerCount: drawerAdjustments.length,
         logsCount: (payload.systemLogs || []).length,
-        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        storageEngine: isAws ? 'AWS S3 Storage' : 'S3-Compatible Object Storage (Neon)',
         bucketName,
         objectKey,
         endpoint,
       });
     } catch (err: any) {
       console.error('S3 Upload Error:', err);
-      res.status(500).json({
+      const formatted = formatS3ErrorServer(err, bucketName);
+      res.status(400).json({
         success: false,
-        message: `S3 Upload Error: ${err?.message || 'Failed to upload to S3 storage'}`,
-        code: err?.name,
+        message: formatted.message,
+        code: formatted.code,
       });
     }
   };
@@ -286,7 +384,7 @@ async function startServer() {
       });
     }
 
-    const { client, bucketName } = s3Info;
+    const { client, bucketName, isAws } = s3Info;
     const cleanShopId = String(shopId).trim().toUpperCase();
     const cleanPin = String(pin || '').trim();
     const objectKey = `backups/${cleanShopId}.json`;
@@ -305,7 +403,7 @@ async function startServer() {
         if (err?.name === 'NoSuchKey' || err?.$metadata?.httpStatusCode === 404) {
           return res.status(404).json({
             success: false,
-            message: `No backup data found in S3 bucket "${bucketName}" for Shop ID: "${cleanShopId}". Please upload data first from your primary device.`,
+            message: `شاپ آئی ڈی "${cleanShopId}" کے لیے بکٹ "${bucketName}" میں کوئی بیک اپ فائل نہیں ملی۔ پہلے پرائمری ڈیوائس سے اپ لوڈ کریں۔ (No backup found for this Shop ID)`,
           });
         }
         throw err;
@@ -333,7 +431,7 @@ async function startServer() {
       const payload = parsedEnvelope.payload || parsedEnvelope;
       const downloadResponse = {
         success: true,
-        message: 'Data successfully downloaded from S3 Object Storage!',
+        message: `ڈیٹا کامیابی سے S3 آبجیکٹ اسٹوریج سے ڈاؤن لوڈ ہو گیا!`,
         lastUploadedAt: parsedEnvelope.uploadedAt || getRes.LastModified?.toISOString() || timestamp,
         lastDownloadedAt: timestamp,
         lotsCount: payload.lots?.length || 0,
@@ -343,7 +441,7 @@ async function startServer() {
         drawerCount: payload.drawerAdjustments?.length || 0,
         logsCount: payload.systemLogs?.length || 0,
         data: payload,
-        storageEngine: 'S3-Compatible Object Storage (Neon)',
+        storageEngine: isAws ? 'AWS S3 Storage' : 'S3-Compatible Object Storage (Neon)',
         bucketName,
         objectKey,
       };
@@ -355,10 +453,11 @@ async function startServer() {
       res.status(200).send(jsonStr);
     } catch (err: any) {
       console.error('S3 Download Error:', err);
-      res.status(500).json({
+      const formatted = formatS3ErrorServer(err, bucketName);
+      res.status(400).json({
         success: false,
-        message: `S3 Download Error: ${err?.message || 'Failed to download from S3 object storage'}`,
-        code: err?.name,
+        message: formatted.message,
+        code: formatted.code,
       });
     }
   };
