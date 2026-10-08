@@ -2,6 +2,7 @@ import React from 'react';
 import { VendorLot, AppSettings } from '../types';
 import { unitLabels, formatFullRealDate, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
+import { getOrAssignBillNumber } from '../utils/billSequenceManager';
 
 export interface InsafMandiBillViewProps {
   vendorName: string;
@@ -36,8 +37,9 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
   const displayLotNo =
     uniqueLotNumbers.length > 0
       ? uniqueLotNumbers.join(', ')
-      : (billNumber || lots[0]?.lotNumber || '101').replace(/^LOT-/i, '');
-  const displayBillNo = billNumber || displayLotNo;
+      : (lots[0]?.lotNumber || '').replace(/^LOT-/i, '');
+  const fallbackDailyBillNo = String(getOrAssignBillNumber(vendorName, dateLabel || lots[0]?.arrivalDate));
+  const displayBillNo = billNumber || lots[0]?.billNumber || fallbackDailyBillNo;
 
   // Aggregate Deductions & Totals
   const aggregatedExpenses = {
@@ -291,18 +293,13 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
 
           {/* 2. SUBHEADER METADATA ROWS - Bill Baname placed under Lot Number */}
           <div className="my-1 border-y-2 border-red-700 py-1 px-2 sm:px-2.5 bg-white flex flex-col gap-1 text-slate-900">
-            {/* Top Row: Lot Number on Right, Date on Left */}
+            {/* Top Row: Bill Number on Right, Date on Left */}
             <div className="flex items-center justify-between text-[11px] sm:text-xs font-bold">
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-black">لاٹ نمبر:</span>
+                <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-black">بل نمبر:</span>
                 <span className="font-numbers underline decoration-red-500 font-black px-1 text-slate-950 text-xs sm:text-sm tracking-wide">
-                  {displayLotNo}
+                  {displayBillNo}
                 </span>
-                {billNumber && billNumber !== displayLotNo && (
-                  <span className="text-[10px] text-slate-500 font-numbers mr-1">
-                    (بل #{billNumber})
-                  </span>
-                )}
               </div>
 
               <div className="flex items-center gap-1 flex-shrink-0">

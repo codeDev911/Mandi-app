@@ -89,6 +89,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [secretAccessKey, setSecretAccessKey] = useState(config.secretAccessKey || '');
   const [region, setRegion] = useState(config.region || 'us-east-2');
   const [bucketName, setBucketName] = useState(config.bucketName || 'mandi-data');
+  const [apiProxyUrl, setApiProxyUrl] = useState(config.apiProxyUrl || '');
   const [credentialsBlock, setCredentialsBlock] = useState('');
   const [showSecretKey, setShowSecretKey] = useState(false);
 
@@ -154,6 +155,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       setSecretAccessKey(stored.secretAccessKey || '');
       setRegion(stored.region || 'us-east-2');
       setBucketName(stored.bucketName || 'mandi-data');
+      setApiProxyUrl(stored.apiProxyUrl || '');
       setSyncResult(null);
       setS3TestResult(null);
       setCredentialsNotice(null);
@@ -170,6 +172,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     secretAccessKey: secretAccessKey.trim(),
     region: region.trim() || 'us-east-2',
     bucketName: bucketName.trim() || 'mandi-data',
+    apiProxyUrl: apiProxyUrl.trim(),
   };
 
   const hasConfiguredS3 = Boolean(endpointUrl.trim() && accessKeyId.trim() && secretAccessKey.trim());
@@ -278,6 +281,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     if (parsed.secretAccessKey) setSecretAccessKey(parsed.secretAccessKey);
     if (parsed.region) setRegion(parsed.region);
     if (parsed.bucketName) setBucketName(parsed.bucketName);
+    if (parsed.apiProxyUrl) setApiProxyUrl(parsed.apiProxyUrl);
 
     sound.playCashChime();
     setCredentialsNotice({
@@ -850,6 +854,27 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-mono text-stone-900 focus:ring-2 focus:ring-amber-600 focus:outline-none"
                     />
                   </div>
+                </div>
+
+                {/* 5. Optional Backend Proxy URL for standalone production/Capacitor builds */}
+                <div>
+                  <label className="block text-xs font-bold text-stone-800 mb-1 font-urdu-sans flex items-center justify-between">
+                    <span>{isUrdu ? 'پراکسی سرور URL (اختیاری):' : 'Backend Server / Proxy URL (Optional):'}</span>
+                    <span className="text-[10px] text-stone-400 font-sans">خالی چھوڑیں اگر ایپ خود ہوسٹ ہے</span>
+                  </label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={apiProxyUrl}
+                    onChange={(e) => setApiProxyUrl(e.target.value)}
+                    placeholder="https://your-app.com (خالی چھوڑیں اگر مقامی سرور چل رہا ہے)"
+                    className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-mono text-stone-900 focus:ring-2 focus:ring-amber-600 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-stone-500 mt-1 font-urdu-sans">
+                    {isUrdu
+                      ? 'نوٹ: پروڈکشن میں براہ راست S3 اپ لوڈ کیلئے بکٹ پر CORS خودکار ترتیب دیا جاتا ہے۔ اگر آپ الگ سرور استعمال کرتے ہیں تو پتہ یہاں درج کر سکتے ہیں۔'
+                      : 'Note: S3 uploads work directly or via server proxy. Bucket CORS is auto-configured to allow seamless production builds.'}
+                  </p>
                 </div>
 
                 <div className="flex gap-2 pt-2">

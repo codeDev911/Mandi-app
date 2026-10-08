@@ -400,7 +400,8 @@ export function generateVendorConsolidatedInvoiceCanvas(
   lots: VendorLot[],
   settings: AppSettings,
   dateLabel: string,
-  isAveraged: boolean = false
+  isAveraged: boolean = false,
+  billNumber?: string
 ): HTMLCanvasElement {
   // Width: 744px and Height: 1050px matches Portrait half-A4 paper (148.8mm x 210mm, Ratio 148.8 / 210 = 0.70857)
   const width = 744;
@@ -682,15 +683,16 @@ export function generateVendorConsolidatedInvoiceCanvas(
   const displayLotNo =
     uniqueLotNumbers.length > 0
       ? uniqueLotNumbers.join(', ')
-      : (lots[0]?.lotNumber || '101').replace(/^LOT-/i, '');
+      : (billNumber || lots[0]?.lotNumber || '1').replace(/^LOT-/i, '');
+  const displayBillNo = billNumber || displayLotNo;
 
   ctx.textAlign = 'right';
   ctx.fillStyle = '#b91c1c';
   ctx.font = 'bold 12px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('لاٹ نمبر: ', headerX + headerW - 10, subY + 16);
+  ctx.fillText('بل نمبر: ', headerX + headerW - 10, subY + 16);
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 12px system-ui, monospace';
-  ctx.fillText(displayLotNo, headerX + headerW - 68, subY + 16);
+  ctx.fillText(displayBillNo, headerX + headerW - 65, subY + 16);
 
   const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
   ctx.textAlign = 'left';
@@ -1194,7 +1196,8 @@ export function printConsolidatedThermalPOSReceipt(
   lots: VendorLot[],
   settings: AppSettings,
   dateLabel?: string,
-  isAveraged: boolean = false
+  isAveraged: boolean = false,
+  billNumber?: string
 ): void {
   // Items list: either detailed or averaged by product
   const allItems: Array<{
@@ -1398,7 +1401,10 @@ export function printConsolidatedThermalPOSReceipt(
       <div class="dashed"></div>
 
       <div style="font-size: 10px; line-height: 1.4;">
-        <div>زمیندار: <b style="font-size: 12px;">${vendorName}</b> ${vendorCity ? `(${vendorCity})` : ''}</div>
+        <div style="display:flex; justify-content:space-between;">
+          <div>زمیندار: <b style="font-size: 12px;">${vendorName}</b> ${vendorCity ? `(${vendorCity})` : ''}</div>
+          ${billNumber ? `<div>بل نمبر: <b style="font-size: 12px; font-family: monospace;">#${billNumber}</b></div>` : ''}
+        </div>
         <div style="display:flex; justify-content:space-between;">
           <span>تاریخ: <b>${displayDate}</b></span>
           <span>کل اجناس: <b>${lots.length} آئٹم</b></span>

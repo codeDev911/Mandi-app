@@ -428,13 +428,12 @@ export function generateInsafMandiBillHtmlSingle(
           }
         </div>
 
-        <!-- Subheader Metadata Rows - Bill Baname under Lot Number -->
+        <!-- Subheader Metadata Rows - Bill Baname -->
         <div style="margin: 2px 0; border-top: 2px solid #b91c1c; border-bottom: 2px solid #b91c1c; padding: 2.5px 6px; background: #ffffff; display: flex; flex-direction: column; gap: 2px;">
           <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: bold;">
             <div style="flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
-              <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 12px; font-weight: 900;">لاٹ نمبر:</span>
-              <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 12px; color: #0f172a;">${displayLotNo}</span>
-              ${billNumber && billNumber !== displayLotNo ? `<span style="font-size: 9.5px; color: #64748b; font-family: monospace;">(بل #${billNumber})</span>` : ''}
+              <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 12px; font-weight: 900;">بل نمبر:</span>
+              <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 12px; color: #0f172a;">${displayBillNo}</span>
             </div>
             <div style="flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
               <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold;">السلام علیکم تاریخ:</span>
@@ -639,7 +638,8 @@ export function printVendorBillSlip(
   settings: AppSettings,
   dateLabel?: string,
   isAveraged: boolean = false,
-  pageSize: 'a4' | 'a5' = 'a4'
+  pageSize: 'a4' | 'a5' = 'a4',
+  billNumber?: string
 ): void {
   const billHtml = generateInsafMandiBillHtmlSingle(
     vendorName,
@@ -649,7 +649,7 @@ export function printVendorBillSlip(
     settings,
     dateLabel,
     isAveraged,
-    undefined,
+    billNumber,
     pageSize
   );
 
@@ -757,9 +757,10 @@ export function printVendorBillSlipA4(
   lots: VendorLot[],
   settings: AppSettings,
   dateLabel?: string,
-  isAveraged: boolean = false
+  isAveraged: boolean = false,
+  billNumber?: string
 ): void {
-  printVendorBillSlip(vendorName, vendorPhone, vendorCity, lots, settings, dateLabel, isAveraged, 'a4');
+  printVendorBillSlip(vendorName, vendorPhone, vendorCity, lots, settings, dateLabel, isAveraged, 'a4', billNumber);
 }
 
 export function printVendorBillSlipA5(
@@ -769,9 +770,10 @@ export function printVendorBillSlipA5(
   lots: VendorLot[],
   settings: AppSettings,
   dateLabel?: string,
-  isAveraged: boolean = false
+  isAveraged: boolean = false,
+  billNumber?: string
 ): void {
-  printVendorBillSlip(vendorName, vendorPhone, vendorCity, lots, settings, dateLabel, isAveraged, 'a5');
+  printVendorBillSlip(vendorName, vendorPhone, vendorCity, lots, settings, dateLabel, isAveraged, 'a5', billNumber);
 }
 
 /**

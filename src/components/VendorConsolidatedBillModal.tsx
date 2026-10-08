@@ -10,6 +10,12 @@ import { saveBlobFile, downloadBlobFile } from '../utils/fileDownloader';
 import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
 import { InsafMandiBillView } from './InsafMandiBillView';
 import {
+  getOrAssignBillNumber,
+  getNextDailyBillNumber,
+  commitBillGeneration,
+  advanceToNextBillNumber,
+} from '../utils/billSequenceManager';
+import {
   Printer,
   Copy,
   Check,
@@ -59,8 +65,27 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [shareModalItem, setShareModalItem] = useState<UniversalShareItem | null>(null);
   const [isAveraged, setIsAveraged] = useState<boolean>(false);
+  const [billNumber, setBillNumber] = useState<number>(() => {
+    const existingBill = lots.find((l) => l.billNumber)?.billNumber;
+    if (existingBill && !isNaN(Number(existingBill))) {
+      return Number(existingBill);
+    }
+    return getOrAssignBillNumber(vendorName, dateLabel || lots[0]?.arrivalDate);
+  });
 
   const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
+
+  // Sync bill number when modal opens or vendor changes
+  useEffect(() => {
+    if (isOpen) {
+      const existingBill = lots.find((l) => l.billNumber)?.billNumber;
+      if (existingBill && !isNaN(Number(existingBill))) {
+        setBillNumber(Number(existingBill));
+      } else {
+        setBillNumber(getOrAssignBillNumber(vendorName, dateLabel || lots[0]?.arrivalDate));
+      }
+    }
+  }, [isOpen, vendorName, lots, dateLabel]);
 
   // Close on Escape key
   useEffect(() => {
@@ -258,7 +283,8 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
           lots,
           settings,
           displayDate,
-          isAveraged
+          isAveraged,
+          String(billNumber)
         );
         const dataUrl = canvas.toDataURL('image/png', 0.98);
         setPreviewImageUrl(dataUrl);
@@ -271,7 +297,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
 
     const timer = setTimeout(generatePreview, 60);
     return () => clearTimeout(timer);
-  }, [isOpen, vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged]);
+  }, [isOpen, vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged, billNumber]);
 
   if (!isOpen || lots.length === 0) return null;
 
@@ -320,7 +346,8 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       lots,
       settings,
       displayDate,
-      isAveraged
+      isAveraged,
+      String(billNumber)
     );
 
     const isA4 = targetPageSize === 'a4';
@@ -373,6 +400,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       e.stopPropagation();
     }
     sound.playCashChime();
+    commitBillGeneration(billNumber, vendorName, dateLabel || lots[0]?.arrivalDate);
     setIsExportingPDF(true);
 
     const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
@@ -433,6 +461,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   // 2. Direct PNG Image Download
   const handleSaveImage = () => {
     sound.playCashChime();
+    commitBillGeneration(billNumber, vendorName, dateLabel || lots[0]?.arrivalDate);
     const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
     const filename = `Vendor_Bill_${sanitizedName}_${displayDate}.png`;
 
@@ -444,7 +473,8 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
         lots,
         settings,
         displayDate,
-        isAveraged
+        isAveraged,
+        String(billNumber)
       );
       canvas.toBlob((blob) => {
         if (blob) {
@@ -465,6 +495,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
       e.stopPropagation();
     }
     sound.playCashChime();
+    commitBillGeneration(billNumber, vendorName, dateLabel || lots[0]?.arrivalDate);
     setIsExportingPDF(true);
 
     const sanitizedName = vendorName.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
@@ -566,8 +597,9 @@ ${itemsText}
       e.stopPropagation();
     }
     sound.playTick();
-    printVendorBillSlipA4(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged);
-    showToast(isUrdu ? 'A4 سائز پرنٹ تیار ہے' : 'A4 print triggered');
+    commitBillGeneration(billNumber, vendorName, dateLabel || lots[0]?.arrivalDate);
+    printVendorBillSlipA4(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged, String(billNumber));
+    showToast(isUrdu ? `بل #${billNumber} (A4 سائز) پرنٹ تیار ہے` : `Bill #${billNumber} (A4) print triggered`);
   };
 
   const handlePrintA5 = (e?: React.MouseEvent) => {
@@ -576,8 +608,9 @@ ${itemsText}
       e.stopPropagation();
     }
     sound.playTick();
-    printVendorBillSlipA5(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged);
-    showToast(isUrdu ? 'A5 سائز پرنٹ تیار ہے' : 'A5 print triggered');
+    commitBillGeneration(billNumber, vendorName, dateLabel || lots[0]?.arrivalDate);
+    printVendorBillSlipA5(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged, String(billNumber));
+    showToast(isUrdu ? `بل #${billNumber} (A5 سائز) پرنٹ تیار ہے` : `Bill #${billNumber} (A5) print triggered`);
   };
 
   // 6. 80mm POS Thermal Print
@@ -587,7 +620,8 @@ ${itemsText}
       e.stopPropagation();
     }
     sound.playTick();
-    printConsolidatedThermalPOSReceipt(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged);
+    commitBillGeneration(billNumber, vendorName, dateLabel || lots[0]?.arrivalDate);
+    printConsolidatedThermalPOSReceipt(vendorName, vendorPhone, vendorCity, lots, settings, displayDate, isAveraged, String(billNumber));
   };
 
   return (
@@ -628,7 +662,40 @@ ${itemsText}
         </div>
 
         {/* Action Controls & Close */}
-        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0 flex-wrap justify-end">
+          {/* Daily Bill Number Sequential Control */}
+          <div className="flex items-center gap-1 bg-slate-950 border border-amber-500/50 rounded-xl px-2 py-1 shadow-xs">
+            <span className="text-[11px] font-bold text-amber-400 font-urdu-sans whitespace-nowrap">
+              بل نمبر:
+            </span>
+            <input
+              type="number"
+              min="1"
+              value={billNumber}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                if (!isNaN(val) && val > 0) {
+                  setBillNumber(val);
+                }
+              }}
+              className="w-12 bg-slate-900 border border-amber-400/30 rounded-md px-1 py-0.5 text-center font-numbers font-black text-amber-300 text-xs focus:ring-1 focus:ring-amber-400 outline-none"
+              title="بل نمبر تبدیل کریں"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                sound.playTick();
+                const nextNum = advanceToNextBillNumber(dateLabel || lots[0]?.arrivalDate);
+                setBillNumber(nextNum);
+                showToast(isUrdu ? `اگلا بل نمبر: #${nextNum}` : `Next bill number: #${nextNum}`);
+              }}
+              className="px-1.5 py-0.5 rounded-md bg-amber-500/20 hover:bg-amber-500/30 active:scale-95 text-amber-300 border border-amber-500/40 text-[10px] font-urdu-sans font-bold transition whitespace-nowrap"
+              title="اگلا بل نمبر تیار کریں (Next Bill Number)"
+            >
+              <span>اگلا بل (#{billNumber + 1})</span>
+            </button>
+          </div>
+
           {/* Averaged Bill Toggle Option (بڑی لسٹ کیلئے اجناس وار اوسط بل کا آپشن) */}
           <button
             type="button"
@@ -816,7 +883,7 @@ ${itemsText}
             settings={settings}
             dateLabel={displayDate}
             isAveraged={isAveraged}
-            billNumber="101"
+            billNumber={String(billNumber)}
             className="rounded-xl overflow-hidden shadow-2xl"
           />
         </div>

@@ -129,6 +129,7 @@ export interface VendorLot {
   vehicleNumber?: string;
   arrivalDate: string;
   status: 'active' | 'completed';
+  billNumber?: string;
   vendorPaymentStatus?: VendorPaymentStatus; // 'pending' | 'paid' | 'partial'
   vendorPaymentAmount?: number;
   vendorPaymentDate?: string;

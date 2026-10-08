@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import {
@@ -11,11 +12,44 @@ import {
   CreateBucketCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
 
 dotenv.config();
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+/**
+ * Automatically applies CORS rules on the S3 / Neon Object Storage bucket.
+ * This enables direct client-side (browser, mobile webview, Capacitor, Neutralino)
+ * uploads and downloads without "Failed to fetch" CORS errors.
+ */
+async function ensureBucketCors(client: S3Client, bucketName: string): Promise<boolean> {
+  try {
+    await client.send(
+      new PutBucketCorsCommand({
+        Bucket: bucketName,
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedHeaders: ['*'],
+              AllowedMethods: ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
+              AllowedOrigins: ['*'],
+              ExposeHeaders: ['ETag', 'x-amz-request-id', 'x-amz-id-2'],
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+      })
+    );
+    console.log(`[S3 CORS] Successfully configured CORS on bucket "${bucketName}"`);
+    return true;
+  } catch (err: any) {
+    // If credentials are scoped or provider has custom CORS, log note without crashing
+    console.warn(`[S3 CORS] Notice: Could not auto-apply CORS to bucket "${bucketName}":`, err?.message || err);
+    return false;
+  }
+}
 
 interface S3ConfigInput {
   endpointUrl?: string;
@@ -229,6 +263,9 @@ async function startServer() {
         });
       }
 
+      // Ensure bucket has CORS enabled so browser/Capacitor/Neutralino client builds can upload/download seamlessly
+      await ensureBucketCors(client, bucketName);
+
       res.json({
         success: true,
         message: 'S3 آبجیکٹ اسٹوریج کنکشن اور اپ لوڈ/ڈاؤن لوڈ حقوق کامیابی سے تصدیق شدہ ہیں! (Connection verified successfully)',
@@ -312,6 +349,9 @@ async function startServer() {
           }
         }
       }
+
+      // Automatically configure CORS so future browser client uploads/downloads do not get CORS errors
+      ensureBucketCors(client, bucketName).catch(() => {});
 
       const payloadJson = JSON.stringify(uploadEnvelope, null, 2);
       const sizeBytes = Buffer.byteLength(payloadJson, 'utf-8');
@@ -514,7 +554,12 @@ async function startServer() {
   app.get('/api/db/status', handleS3Status); // Backwards-compatible alias
 
   // --- Vite / Frontend Serving Middleware ---
-  if (process.env.NODE_ENV !== 'production') {
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    process.env.NODE_ENV === 'preview' ||
+    (!process.env.NODE_ENV && fs.existsSync(path.join(process.cwd(), 'dist', 'index.html')));
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -528,8 +573,14 @@ async function startServer() {
     });
   }
 
+  // Attempt initial CORS setup on default S3 bucket if configured in environment
+  const defaultS3 = getS3ClientAndConfig();
+  if (defaultS3) {
+    ensureBucketCors(defaultS3.client, defaultS3.bucketName).catch(() => {});
+  }
+
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Sabzi Mandi server running on http://0.0.0.0:${PORT} with S3 Object Storage`);
+    console.log(`Sabzi Mandi server running on http://0.0.0.0:${PORT} (${isProduction ? 'Production' : 'Development'}) with S3 Object Storage`);
   });
   // Handle transfers of hundreds of MBs without socket disconnect
   server.setTimeout(600000); // 10 minutes

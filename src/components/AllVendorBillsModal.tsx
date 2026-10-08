@@ -11,6 +11,11 @@ import {
 } from '../utils/printHelper';
 import { InsafMandiBillView } from './InsafMandiBillView';
 import {
+  getOrAssignBillNumber,
+  getNextDailyBillNumber,
+  commitBillGeneration,
+} from '../utils/billSequenceManager';
+import {
   Printer,
   X,
   Search,
@@ -64,6 +69,15 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
   const [isAveraged, setIsAveraged] = useState<boolean>(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'paid'>('all');
   const [activeVendorSlip, setActiveVendorSlip] = useState<string | null>(null);
+  const [startBillNumber, setStartBillNumber] = useState<number>(() => {
+    return getNextDailyBillNumber(dateLabel);
+  });
+
+  useEffect(() => {
+    if (isOpen) {
+      setStartBillNumber(getNextDailyBillNumber(dateLabel));
+    }
+  }, [isOpen, dateLabel]);
 
   // Group lots by vendor
   const vendorGroups = useMemo<VendorGroupedData[]>(() => {
@@ -162,9 +176,11 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
   };
 
   // Direct single bill print handlers
-  const handlePrintSingleA4 = (vg: VendorGroupedData, e?: React.MouseEvent) => {
+  const handlePrintSingleA4 = (vg: VendorGroupedData, idx: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     sound.playTick();
+    const bNum = startBillNumber + idx;
+    commitBillGeneration(bNum, vg.vendorName, dateLabel);
     printVendorBillSlipA4(
       vg.vendorName,
       vg.vendorPhone,
@@ -172,13 +188,16 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
       vg.lots,
       settings,
       dateLabel,
-      isAveraged
+      isAveraged,
+      String(bNum)
     );
   };
 
-  const handlePrintSingleA5 = (vg: VendorGroupedData, e?: React.MouseEvent) => {
+  const handlePrintSingleA5 = (vg: VendorGroupedData, idx: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     sound.playTick();
+    const bNum = startBillNumber + idx;
+    commitBillGeneration(bNum, vg.vendorName, dateLabel);
     printVendorBillSlipA5(
       vg.vendorName,
       vg.vendorPhone,
@@ -186,7 +205,8 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
       vg.lots,
       settings,
       dateLabel,
-      isAveraged
+      isAveraged,
+      String(bNum)
     );
   };
 
@@ -198,13 +218,15 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
       targetVendors = vendorGroups.filter((vg) => selectedVendors.has(vg.vendorName));
       if (targetVendors.length === 0) return;
     }
+    const maxNum = startBillNumber + targetVendors.length - 1;
+    commitBillGeneration(maxNum, undefined, dateLabel);
     printBatchVendorBillsA4(
       targetVendors.map((vg, idx) => ({
         vendorName: vg.vendorName,
         vendorPhone: vg.vendorPhone,
         vendorCity: vg.vendorCity,
         lots: vg.lots,
-        billNumber: `${101 + idx}`,
+        billNumber: String(startBillNumber + idx),
       })),
       settings,
       dateLabel,
@@ -219,13 +241,15 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
       targetVendors = vendorGroups.filter((vg) => selectedVendors.has(vg.vendorName));
       if (targetVendors.length === 0) return;
     }
+    const maxNum = startBillNumber + targetVendors.length - 1;
+    commitBillGeneration(maxNum, undefined, dateLabel);
     printBatchVendorBillsA5(
       targetVendors.map((vg, idx) => ({
         vendorName: vg.vendorName,
         vendorPhone: vg.vendorPhone,
         vendorCity: vg.vendorCity,
         lots: vg.lots,
-        billNumber: `${101 + idx}`,
+        billNumber: String(startBillNumber + idx),
       })),
       settings,
       dateLabel,
@@ -278,7 +302,25 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
           </div>
 
           {/* Action Buttons in Header */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 flex-wrap justify-end">
+            {/* Sequential Start Bill Number Badge */}
+            <div className="flex items-center gap-1 bg-slate-950 border border-amber-500/50 rounded-xl px-2 py-1 shadow-xs">
+              <span className="text-[11px] font-bold text-amber-400 font-urdu-sans whitespace-nowrap">
+                شروع بل #:
+              </span>
+              <input
+                type="number"
+                min="1"
+                value={startBillNumber}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (!isNaN(val) && val > 0) setStartBillNumber(val);
+                }}
+                className="w-12 bg-slate-900 border border-amber-400/30 rounded-md px-1 py-0.5 text-center font-numbers font-black text-amber-300 text-xs focus:ring-1 focus:ring-amber-400 outline-none"
+                title="شروع بل نمبر تبدیل کریں"
+              />
+            </div>
+
             {/* Averaged Bill Toggle */}
             <button
               type="button"
@@ -487,7 +529,7 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => handlePrintSingleA4(vg)}
+                          onClick={() => handlePrintSingleA4(vg, idx)}
                           className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 font-bold text-xs flex items-center gap-1 transition active:scale-95 shadow-xs font-numbers"
                           title="A4 پرنٹ کریں"
                         >
@@ -496,7 +538,7 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => handlePrintSingleA5(vg)}
+                          onClick={() => handlePrintSingleA5(vg, idx)}
                           className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-400 font-bold text-xs flex items-center gap-1 transition active:scale-95 shadow-xs font-numbers"
                           title="A5 پرنٹ کریں"
                         >
@@ -516,7 +558,7 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
                         settings={settings}
                         dateLabel={dateLabel}
                         isAveraged={isAveraged}
-                        billNumber={`${101 + idx}`}
+                        billNumber={String(startBillNumber + idx)}
                       />
                     </div>
                   </div>

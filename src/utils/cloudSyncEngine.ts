@@ -7,6 +7,7 @@ import {
   HeadBucketCommand,
   CreateBucketCommand,
   DeleteObjectCommand,
+  PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
 
 export interface CloudSyncMetadata {
@@ -17,6 +18,7 @@ export interface CloudSyncMetadata {
   secretAccessKey?: string; // AWS_SECRET_ACCESS_KEY e.g. "nsk_live_..."
   region?: string; // AWS_REGION e.g. "us-east-2"
   bucketName?: string; // e.g. "mandi-data"
+  apiProxyUrl?: string; // Optional custom backend server URL (e.g. for standalone Android / external deployment)
   autoSync?: boolean;
   lastUploadedAt?: string; // ISO String
   lastDownloadedAt?: string; // ISO String
@@ -100,6 +102,8 @@ export function parseS3CredentialsBlock(text: string): Partial<CloudSyncMetadata
         result.region = value;
       } else if (key === 'AWS_S3_BUCKET' || key === 'BUCKET_NAME' || key === 'BUCKET') {
         result.bucketName = value;
+      } else if (key === 'API_PROXY_URL' || key === 'BACKEND_URL' || key === 'PROXY_URL') {
+        result.apiProxyUrl = value;
       }
     }
   }
@@ -120,6 +124,7 @@ export function getStoredCloudConfig(): CloudSyncMetadata {
         secretAccessKey: sanitizeS3String(parsed.secretAccessKey || ''),
         region: sanitizeS3String(parsed.region || 'us-east-2'),
         bucketName: sanitizeS3String(parsed.bucketName || 'mandi-data'),
+        apiProxyUrl: sanitizeS3String(parsed.apiProxyUrl || ''),
         autoSync: parsed.autoSync || false,
         lastUploadedAt: parsed.lastUploadedAt || undefined,
         lastDownloadedAt: parsed.lastDownloadedAt || undefined,
@@ -139,6 +144,7 @@ export function getStoredCloudConfig(): CloudSyncMetadata {
     secretAccessKey: '',
     region: 'us-east-2',
     bucketName: 'mandi-data',
+    apiProxyUrl: '',
     autoSync: false,
     lastUploadedAt: undefined,
     lastDownloadedAt: undefined,
@@ -154,11 +160,27 @@ export function saveStoredCloudConfig(config: CloudSyncMetadata): void {
       secretAccessKey: sanitizeS3String(config.secretAccessKey),
       region: sanitizeS3String(config.region || 'us-east-2'),
       bucketName: sanitizeS3String(config.bucketName || 'mandi-data'),
+      apiProxyUrl: sanitizeS3String(config.apiProxyUrl || ''),
     };
     localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cleanedConfig));
   } catch {
     // ignore
   }
+}
+
+/**
+ * Resolves an API URL using relative path or optional custom backend proxy
+ */
+export function resolveApiUrl(path: string, customProxyUrl?: string): string {
+  if (customProxyUrl && customProxyUrl.trim()) {
+    let base = customProxyUrl.trim();
+    while (base.endsWith('/')) {
+      base = base.slice(0, -1);
+    }
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    return `${base}${cleanPath}`;
+  }
+  return path;
 }
 
 /**
@@ -199,6 +221,7 @@ export function formatSyncDateTime(isoString?: string | null, isUrdu = false): s
 export function formatS3Error(err: any, bucketName?: string): string {
   const code = err?.name || err?.Code || err?.code || '';
   const rawMsg = err?.message || String(err || '');
+  const lowerMsg = rawMsg.toLowerCase();
 
   if (code === 'InvalidAccessKeyId' || rawMsg.includes('InvalidAccessKeyId') || rawMsg.includes('Access Key Id you provided does not exist')) {
     return 'غلط AWS_ACCESS_KEY_ID: فراہم کردہ ایکسس کی درست نہیں ہے یا منسوخ ہو چکی ہے۔ (Invalid Access Key ID)';
@@ -216,8 +239,16 @@ export function formatS3Error(err: any, bucketName?: string): string {
     return `اجازت نہیں ہے (Access Denied): بکٹ "${bucketName || ''}" میں ڈیٹا لکھنے یا پڑھنے کے حقوق نہیں ہیں۔`;
   }
 
-  if (rawMsg.includes('ENOTFOUND') || rawMsg.includes('ECONNREFUSED') || rawMsg.includes('fetch failed')) {
-    return 'اینڈپوائنٹ سرور سے رابطہ نہیں ہو رہا۔ براہ کرم انٹرنیٹ یا S3 Endpoint URL درست کریں۔';
+  if (
+    lowerMsg.includes('failed to fetch') ||
+    lowerMsg.includes('fetch failed') ||
+    lowerMsg.includes('networkerror') ||
+    lowerMsg.includes('network request failed') ||
+    lowerMsg.includes('cors') ||
+    lowerMsg.includes('enotfound') ||
+    lowerMsg.includes('econnrefused')
+  ) {
+    return 'کلاؤڈ سرور سے نیٹ ورک رابطہ قائم نہیں ہو سکا (Network/CORS: Failed to fetch)۔ براہ کرم انٹرنیٹ یا S3 Endpoint URL چیک کریں۔ پروڈکشن میں اگر سرور الگ ہے تو Proxy URL دیں یا S3 بکٹ پر CORS فعال کریں۔';
   }
 
   return rawMsg || 'S3 کنکشن میں نامعلوم مسئلہ پیش آیا';
@@ -269,29 +300,32 @@ export async function testS3Connection(config: Partial<CloudSyncMetadata>): Prom
   availableBuckets?: string[];
   storageEngine?: string;
 }> {
-  // 1. Try Express backend proxy route (/api/s3/test)
+  // 1. Try Express backend proxy route (/api/s3/test or custom apiProxyUrl)
+  const testApiUrl = resolveApiUrl('/api/s3/test', config.apiProxyUrl);
   try {
-    const res = await fetch('/api/s3/test', {
+    const res = await fetch(testApiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
     });
 
-    const data = await res.json();
-    if (res.ok && data.success) {
-      return {
-        success: true,
-        message: data.message || 'S3 Object Storage connection verified successfully!',
-        endpoint: data.endpoint,
-        bucketName: data.bucketName,
-        availableBuckets: data.availableBuckets,
-        storageEngine: data.storageEngine || 'S3-Compatible Object Storage (Neon)',
-      };
-    } else {
-      return {
-        success: false,
-        message: data.message || 'Failed to authenticate with S3 credentials',
-      };
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data && data.success) {
+        return {
+          success: true,
+          message: data.message || 'S3 Object Storage connection verified successfully!',
+          endpoint: data.endpoint,
+          bucketName: data.bucketName,
+          availableBuckets: data.availableBuckets,
+          storageEngine: data.storageEngine || 'S3-Compatible Object Storage (Neon)',
+        };
+      } else if (data && !data.success && data.message) {
+        return {
+          success: false,
+          message: data.message,
+        };
+      }
     }
   } catch {
     // If proxy is not reachable, fallback to direct client-side S3 call below
@@ -309,6 +343,28 @@ export async function testS3Connection(config: Partial<CloudSyncMetadata>): Prom
   const { client, bucketName, isAws } = s3Instance;
 
   try {
+    // Attempt to auto-configure CORS on the bucket if credentials permit
+    try {
+      await client.send(
+        new PutBucketCorsCommand({
+          Bucket: bucketName,
+          CORSConfiguration: {
+            CORSRules: [
+              {
+                AllowedHeaders: ['*'],
+                AllowedMethods: ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
+                AllowedOrigins: ['*'],
+                ExposeHeaders: ['ETag', 'x-amz-request-id', 'x-amz-id-2'],
+                MaxAgeSeconds: 3600,
+              },
+            ],
+          },
+        })
+      );
+    } catch {
+      // Ignore if user credentials do not allow PutBucketCors
+    }
+
     let buckets: string[] = [];
     let listSuccess = false;
     try {
@@ -399,6 +455,28 @@ async function uploadDirectS3Client(
   }
   const { client, bucketName } = s3;
   const objectKey = `backups/${cleanShopId}.json`;
+
+  // Auto-attempt CORS enablement on the bucket so other clients/browsers can also read/write directly
+  try {
+    await client.send(
+      new PutBucketCorsCommand({
+        Bucket: bucketName,
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedHeaders: ['*'],
+              AllowedMethods: ['GET', 'PUT', 'POST', 'DELETE', 'HEAD'],
+              AllowedOrigins: ['*'],
+              ExposeHeaders: ['ETag', 'x-amz-request-id', 'x-amz-id-2'],
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+      })
+    );
+  } catch {
+    // Ignore if not allowed or already enabled
+  }
 
   onProgress?.({
     stage: 'transferring',
@@ -667,8 +745,9 @@ export async function uploadDataToCloud(
   });
 
   return new Promise<CloudSyncResult>((resolve) => {
+    const uploadApiUrl = resolveApiUrl('/api/s3/upload', config.apiProxyUrl);
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/s3/upload');
+    xhr.open('POST', uploadApiUrl);
     xhr.setRequestHeader('Content-Type', 'application/json');
 
     const startTime = Date.now();
@@ -895,8 +974,9 @@ export async function downloadDataFromCloud(
   });
 
   return new Promise<CloudSyncResult>((resolve) => {
+    const downloadApiUrl = resolveApiUrl('/api/s3/download', mergedConfig.apiProxyUrl);
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/s3/download');
+    xhr.open('POST', downloadApiUrl);
     xhr.setRequestHeader('Content-Type', 'application/json');
 
     const startTime = Date.now();
