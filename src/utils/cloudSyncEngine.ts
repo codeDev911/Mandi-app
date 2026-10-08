@@ -9,6 +9,7 @@ import {
   DeleteObjectCommand,
   PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
+import { Capacitor } from '@capacitor/core';
 
 export interface CloudSyncMetadata {
   shopCloudId: string;
@@ -184,6 +185,77 @@ export function resolveApiUrl(path: string, customProxyUrl?: string): string {
 }
 
 /**
+ * Detects whether the app is running in a standalone mobile/desktop environment
+ * without an active local Node.js Express server on the current origin (e.g. Capacitor Android APK).
+ */
+export function isStandaloneApp(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (Capacitor.isNativePlatform()) return true;
+  } catch {
+    // ignore
+  }
+  const origin = window.location.origin || '';
+  const protocol = window.location.protocol || '';
+  if (protocol === 'capacitor:' || protocol === 'file:') return true;
+  if (origin.includes('localhost') && !origin.includes(':3000') && !origin.includes(':8080')) return true;
+  return false;
+}
+
+/**
+ * Safely converts an S3 GetObject response body into a string across
+ * Browser, Capacitor Native, and Node environments without hanging.
+ */
+async function extractBodyString(body: any): Promise<string> {
+  if (!body) return '';
+  if (typeof body === 'string') return body;
+  if (typeof body.transformToString === 'function') {
+    try {
+      return await body.transformToString();
+    } catch {
+      // Fallback below
+    }
+  }
+  if (typeof body.text === 'function') {
+    try {
+      return await body.text();
+    } catch {
+      // ignore
+    }
+  }
+  if (typeof Blob !== 'undefined' && body instanceof Blob) {
+    return await body.text();
+  }
+  if (body instanceof ArrayBuffer) {
+    return new TextDecoder('utf-8').decode(body);
+  }
+  if (body instanceof Uint8Array) {
+    return new TextDecoder('utf-8').decode(body);
+  }
+  if (typeof (body as any)[Symbol.asyncIterator] === 'function') {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of body) {
+      if (typeof chunk === 'string') {
+        chunks.push(new TextEncoder().encode(chunk));
+      } else if (chunk instanceof Uint8Array) {
+        chunks.push(chunk);
+      } else if (chunk instanceof ArrayBuffer) {
+        chunks.push(new Uint8Array(chunk));
+      }
+    }
+    const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+    const merged = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const c of chunks) {
+      merged.set(c, offset);
+      offset += c.length;
+    }
+    return new TextDecoder('utf-8').decode(merged);
+  }
+  return String(body);
+}
+
+/**
  * Format timestamp nicely for Urdu & English with Date & Time
  */
 export function formatSyncDateTime(isoString?: string | null, isUrdu = false): string {
@@ -300,35 +372,41 @@ export async function testS3Connection(config: Partial<CloudSyncMetadata>): Prom
   availableBuckets?: string[];
   storageEngine?: string;
 }> {
-  // 1. Try Express backend proxy route (/api/s3/test or custom apiProxyUrl)
-  const testApiUrl = resolveApiUrl('/api/s3/test', config.apiProxyUrl);
-  try {
-    const res = await fetch(testApiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    });
+  // 1. Try Express backend proxy route if not in standalone mode or if custom proxy is set
+  if (!isStandaloneApp() || config.apiProxyUrl?.trim()) {
+    const testApiUrl = resolveApiUrl('/api/s3/test', config.apiProxyUrl);
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(testApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
 
-    if (res.ok) {
-      const data = await res.json().catch(() => null);
-      if (data && data.success) {
-        return {
-          success: true,
-          message: data.message || 'S3 Object Storage connection verified successfully!',
-          endpoint: data.endpoint,
-          bucketName: data.bucketName,
-          availableBuckets: data.availableBuckets,
-          storageEngine: data.storageEngine || 'S3-Compatible Object Storage (Neon)',
-        };
-      } else if (data && !data.success && data.message) {
-        return {
-          success: false,
-          message: data.message,
-        };
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success) {
+          return {
+            success: true,
+            message: data.message || 'S3 Object Storage connection verified successfully!',
+            endpoint: data.endpoint,
+            bucketName: data.bucketName,
+            availableBuckets: data.availableBuckets,
+            storageEngine: data.storageEngine || 'S3-Compatible Object Storage (Neon)',
+          };
+        } else if (data && !data.success && data.message) {
+          return {
+            success: false,
+            message: data.message,
+          };
+        }
       }
+    } catch {
+      // If proxy is not reachable, fallback to direct client-side S3 call below
     }
-  } catch {
-    // If proxy is not reachable, fallback to direct client-side S3 call below
   }
 
   // 2. Direct client-side S3 connection test
@@ -513,7 +591,8 @@ async function uploadDirectS3Client(
       Key: objectKey,
       Body: payloadJson,
       ContentType: 'application/json; charset=utf-8',
-    })
+    }),
+    { abortSignal: AbortSignal.timeout(20000) }
   );
 
   const updatedConfig: CloudSyncMetadata = {
@@ -594,7 +673,8 @@ async function downloadDirectS3Client(
       new GetObjectCommand({
         Bucket: bucketName,
         Key: objectKey,
-      })
+      }),
+      { abortSignal: AbortSignal.timeout(15000) }
     );
   } catch (err: any) {
     if (err?.name === 'NoSuchKey' || err?.$metadata?.httpStatusCode === 404) {
@@ -603,7 +683,7 @@ async function downloadDirectS3Client(
     throw err;
   }
 
-  const bodyStr = await getRes.Body?.transformToString();
+  const bodyStr = await extractBodyString(getRes.Body);
   if (!bodyStr) {
     throw new Error('Empty backup file received from cloud.');
   }
@@ -744,9 +824,81 @@ export async function uploadDataToCloud(
     message: 'Connecting to S3 Object Storage...',
   });
 
+  // In standalone mobile/desktop environments (Capacitor Android) without custom proxy,
+  // do NOT attempt requesting /api/s3/upload on localhost. Immediately use direct S3 client!
+  if (isStandaloneApp() && !config.apiProxyUrl?.trim()) {
+    return await uploadDirectS3Client(
+      config,
+      data,
+      cleanShopId,
+      cleanPin,
+      totalPayloadBytes,
+      timestamp,
+      onProgress
+    );
+  }
+
   return new Promise<CloudSyncResult>((resolve) => {
+    let isSettled = false;
     const uploadApiUrl = resolveApiUrl('/api/s3/upload', config.apiProxyUrl);
     const xhr = new XMLHttpRequest();
+    xhr.timeout = 10000; // Strict 10-second timeout
+
+    const safetyTimer = setTimeout(() => {
+      if (!isSettled) {
+        try { xhr.abort(); } catch {}
+        fallbackToDirect();
+      }
+    }, 10500);
+
+    const fallbackToDirect = async (initialErrMsg?: string) => {
+      if (isSettled) return;
+      isSettled = true;
+      clearTimeout(safetyTimer);
+
+      onProgress?.({
+        stage: 'preparing',
+        direction: 'upload',
+        loadedBytes: 0,
+        totalBytes: totalPayloadBytes,
+        percentage: 15,
+        speedBytesPerSec: 0,
+        estimatedSecondsLeft: 0,
+        message: 'Direct Cloud Storage connection in progress...',
+      });
+
+      try {
+        const fallbackResult = await uploadDirectS3Client(
+          config,
+          data,
+          cleanShopId,
+          cleanPin,
+          totalPayloadBytes,
+          timestamp,
+          onProgress
+        );
+        resolve(fallbackResult);
+      } catch (directErr: any) {
+        const errMsg = initialErrMsg || formatS3Error(directErr, config.bucketName);
+        onProgress?.({
+          stage: 'error',
+          direction: 'upload',
+          loadedBytes: 0,
+          totalBytes: totalPayloadBytes,
+          percentage: 0,
+          speedBytesPerSec: 0,
+          estimatedSecondsLeft: 0,
+          error: errMsg,
+        });
+
+        resolve({
+          success: false,
+          message: errMsg,
+          timestamp,
+        });
+      }
+    };
+
     xhr.open('POST', uploadApiUrl);
     xhr.setRequestHeader('Content-Type', 'application/json');
 
@@ -811,6 +963,8 @@ export async function uploadDataToCloud(
             },
           });
 
+          isSettled = true;
+          clearTimeout(safetyTimer);
           resolve({
             success: true,
             message: result.message || 'ڈیٹا کامیابی سے S3 آبجیکٹ اسٹوریج پر اپ لوڈ ہو گیا!',
@@ -827,92 +981,23 @@ export async function uploadDataToCloud(
             objectKey: result.objectKey,
           });
         } else {
-          // If server failed (e.g. backend proxy route unavailable), try client-side direct S3 fallback
-          try {
-            const fallbackResult = await uploadDirectS3Client(
-              config,
-              data,
-              cleanShopId,
-              cleanPin,
-              totalPayloadBytes,
-              timestamp,
-              onProgress
-            );
-            resolve(fallbackResult);
-            return;
-          } catch (directErr: any) {
-            const errMsg = result?.message || formatS3Error(directErr, config.bucketName);
-            onProgress?.({
-              stage: 'error',
-              direction: 'upload',
-              loadedBytes: 0,
-              totalBytes: totalPayloadBytes,
-              percentage: 0,
-              speedBytesPerSec: 0,
-              estimatedSecondsLeft: 0,
-              error: errMsg,
-            });
-
-            resolve({
-              success: false,
-              message: errMsg,
-              timestamp,
-            });
-          }
+          await fallbackToDirect(result?.message);
         }
       } catch (err: any) {
-        const errMsg = formatS3Error(err, config.bucketName);
-        onProgress?.({
-          stage: 'error',
-          direction: 'upload',
-          loadedBytes: 0,
-          totalBytes: totalPayloadBytes,
-          percentage: 0,
-          speedBytesPerSec: 0,
-          estimatedSecondsLeft: 0,
-          error: errMsg,
-        });
-
-        resolve({
-          success: false,
-          message: errMsg,
-          timestamp,
-        });
+        await fallbackToDirect();
       }
     };
 
     xhr.onerror = async () => {
-      // Backend not reachable, try client-side direct S3 fallback
-      try {
-        const fallbackResult = await uploadDirectS3Client(
-          config,
-          data,
-          cleanShopId,
-          cleanPin,
-          totalPayloadBytes,
-          timestamp,
-          onProgress
-        );
-        resolve(fallbackResult);
-      } catch (directErr: any) {
-        const errMsg = formatS3Error(directErr, config.bucketName);
-        onProgress?.({
-          stage: 'error',
-          direction: 'upload',
-          loadedBytes: 0,
-          totalBytes: totalPayloadBytes,
-          percentage: 0,
-          speedBytesPerSec: 0,
-          estimatedSecondsLeft: 0,
-          error: errMsg,
-        });
+      await fallbackToDirect();
+    };
 
-        resolve({
-          success: false,
-          message: errMsg,
-          timestamp,
-        });
-      }
+    xhr.ontimeout = async () => {
+      await fallbackToDirect();
+    };
+
+    xhr.onabort = async () => {
+      await fallbackToDirect();
     };
 
     xhr.send(payloadString);
@@ -967,21 +1052,90 @@ export async function downloadDataFromCloud(
     direction: 'download',
     loadedBytes: 0,
     totalBytes: 0,
-    percentage: 5,
+    percentage: 10,
     speedBytesPerSec: 0,
     estimatedSecondsLeft: 0,
     message: 'Connecting to S3 Object Storage...',
   });
 
+  // In standalone mobile/desktop environments (Capacitor Android) without custom proxy,
+  // do NOT attempt requesting /api/s3/download on localhost. Immediately use direct S3 client!
+  if (isStandaloneApp() && !mergedConfig.apiProxyUrl?.trim()) {
+    return await downloadDirectS3Client(
+      mergedConfig,
+      cleanShopId,
+      cleanPin,
+      timestamp,
+      onProgress
+    );
+  }
+
   return new Promise<CloudSyncResult>((resolve) => {
+    let isSettled = false;
     const downloadApiUrl = resolveApiUrl('/api/s3/download', mergedConfig.apiProxyUrl);
     const xhr = new XMLHttpRequest();
+    xhr.timeout = 8000; // Strict 8-second timeout so it never sticks indefinitely
+
+    const safetyTimer = setTimeout(() => {
+      if (!isSettled) {
+        try { xhr.abort(); } catch {}
+        fallbackToDirect();
+      }
+    }, 8500);
+
+    const fallbackToDirect = async (initialErrMsg?: string) => {
+      if (isSettled) return;
+      isSettled = true;
+      clearTimeout(safetyTimer);
+
+      onProgress?.({
+        stage: 'preparing',
+        direction: 'download',
+        loadedBytes: 0,
+        totalBytes: 0,
+        percentage: 20,
+        speedBytesPerSec: 0,
+        estimatedSecondsLeft: 0,
+        message: 'Direct Cloud Storage connection in progress...',
+      });
+
+      try {
+        const fallbackResult = await downloadDirectS3Client(
+          mergedConfig,
+          cleanShopId,
+          cleanPin,
+          timestamp,
+          onProgress
+        );
+        resolve(fallbackResult);
+      } catch (directErr: any) {
+        const errMsg = initialErrMsg || formatS3Error(directErr, mergedConfig.bucketName);
+        onProgress?.({
+          stage: 'error',
+          direction: 'download',
+          loadedBytes: 0,
+          totalBytes: 0,
+          percentage: 0,
+          speedBytesPerSec: 0,
+          estimatedSecondsLeft: 0,
+          error: errMsg,
+        });
+
+        resolve({
+          success: false,
+          message: errMsg,
+          timestamp,
+        });
+      }
+    };
+
     xhr.open('POST', downloadApiUrl);
     xhr.setRequestHeader('Content-Type', 'application/json');
 
     const startTime = Date.now();
 
     xhr.onprogress = (evt) => {
+      if (isSettled) return;
       const loaded = evt.loaded;
       const total = evt.lengthComputable && evt.total > 0 ? evt.total : 0;
       const elapsed = (Date.now() - startTime) / 1000;
@@ -1005,6 +1159,7 @@ export async function downloadDataFromCloud(
     };
 
     xhr.onload = async () => {
+      if (isSettled) return;
       try {
         let result: any = null;
         try {
@@ -1014,6 +1169,8 @@ export async function downloadDataFromCloud(
         }
 
         if (xhr.status >= 200 && xhr.status < 300 && result?.success && result?.data) {
+          isSettled = true;
+          clearTimeout(safetyTimer);
           const totalBytesReceived = xhr.responseText.length;
           const updatedConfig: CloudSyncMetadata = {
             ...mergedConfig,
@@ -1061,88 +1218,23 @@ export async function downloadDataFromCloud(
             objectKey: result.objectKey,
           });
         } else {
-          // If server failed or not found, try client-side direct S3 download
-          try {
-            const fallbackResult = await downloadDirectS3Client(
-              mergedConfig,
-              cleanShopId,
-              cleanPin,
-              timestamp,
-              onProgress
-            );
-            resolve(fallbackResult);
-            return;
-          } catch (directErr: any) {
-            const errMsg = result?.message || formatS3Error(directErr, mergedConfig.bucketName);
-            onProgress?.({
-              stage: 'error',
-              direction: 'download',
-              loadedBytes: 0,
-              totalBytes: 0,
-              percentage: 0,
-              speedBytesPerSec: 0,
-              estimatedSecondsLeft: 0,
-              error: errMsg,
-            });
-
-            resolve({
-              success: false,
-              message: errMsg,
-              timestamp,
-            });
-          }
+          await fallbackToDirect(result?.message);
         }
       } catch (err: any) {
-        const errMsg = formatS3Error(err, mergedConfig.bucketName);
-        onProgress?.({
-          stage: 'error',
-          direction: 'download',
-          loadedBytes: 0,
-          totalBytes: 0,
-          percentage: 0,
-          speedBytesPerSec: 0,
-          estimatedSecondsLeft: 0,
-          error: errMsg,
-        });
-
-        resolve({
-          success: false,
-          message: errMsg,
-          timestamp,
-        });
+        await fallbackToDirect();
       }
     };
 
     xhr.onerror = async () => {
-      // Backend not reachable, try direct S3 fallback
-      try {
-        const fallbackResult = await downloadDirectS3Client(
-          mergedConfig,
-          cleanShopId,
-          cleanPin,
-          timestamp,
-          onProgress
-        );
-        resolve(fallbackResult);
-      } catch (directErr: any) {
-        const errMsg = formatS3Error(directErr, mergedConfig.bucketName);
-        onProgress?.({
-          stage: 'error',
-          direction: 'download',
-          loadedBytes: 0,
-          totalBytes: 0,
-          percentage: 0,
-          speedBytesPerSec: 0,
-          estimatedSecondsLeft: 0,
-          error: errMsg,
-        });
+      await fallbackToDirect();
+    };
 
-        resolve({
-          success: false,
-          message: errMsg,
-          timestamp,
-        });
-      }
+    xhr.ontimeout = async () => {
+      await fallbackToDirect();
+    };
+
+    xhr.onabort = async () => {
+      await fallbackToDirect();
     };
 
     const downloadRequestPayload = JSON.stringify({
