@@ -2,7 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { UnitType, AppSettings, VendorLot, SavedVendor, MazdooriRateItem } from '../types';
 import { translations, commonMandiProducts, unitLabels, ProductPreset, getAvailableProducts, getUnitDisplayLabel, resolveUnitType } from '../utils/localization';
 import { generateLotNumber, getLotReceiptNumber, calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
-import { commitBillGeneration, getOrAssignVendorDailyReceiptNumber } from '../utils/billSequenceManager';
+import {
+  previewVendorDailyReceiptNumber,
+  createAndAssignLotRaseedNumber,
+} from '../utils/billSequenceManager';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import {
@@ -62,7 +65,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   const arrivalDateKey = useMemo(() => new Date().toISOString().slice(0, 10), [isOpen]);
 
   const vendorReceiptNumber = useMemo(() => {
-    return getOrAssignVendorDailyReceiptNumber(vendorName, arrivalDateKey, existingLots);
+    return previewVendorDailyReceiptNumber(vendorName, arrivalDateKey, existingLots);
   }, [vendorName, arrivalDateKey, existingLots, isOpen]);
   const [vendorPhone, setVendorPhone] = useState('');
   const [vendorCity, setVendorCity] = useState('');
@@ -185,7 +188,10 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       prodEmoji = preset.emoji;
     }
 
-    const assignedReceiptNumber = String(vendorReceiptNumber);
+    const todayDateStr = new Date().toISOString().slice(0, 10);
+    const assignedReceiptNumber = String(
+      createAndAssignLotRaseedNumber(vendorName, todayDateStr, existingLots)
+    );
 
     const newLot: VendorLot = {
       id: `lot-${Date.now()}`,
@@ -200,7 +206,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       unitType: (selectedMazdooriTitle || unitType || 'بوری') as UnitType,
       totalQuantity: numTotalQty,
       vehicleNumber: vehicleNumber.trim() || undefined,
-      arrivalDate: new Date().toISOString().slice(0, 10),
+      arrivalDate: todayDateStr,
       status: 'active',
       vendorPaymentStatus: 'pending',
       sales: [],
@@ -266,7 +272,6 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
     }
 
     sound.playBidSound();
-    commitBillGeneration(vendorReceiptNumber, vendorName.trim(), newLot.arrivalDate);
     onSaveLot(newLot);
 
     // If "keep vendor details & don't close" is checked:

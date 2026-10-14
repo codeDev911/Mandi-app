@@ -1,23 +1,39 @@
 import { VendorLot } from '../types';
+import { getLotReceiptNumber } from './calculations';
 
 /**
- * Daily Sequential Bill/Receipt Number Manager for Insaf Mandi
+ * Daily Sequential Bill/Receipt (Raseed) Number Manager for Insaf Mandi
  * 
  * Rules:
- * 1. Each day starts at receipt #1.
+ * 1. Each day starts at receipt #1 if not saved in local storage.
  * 2. All lots belonging to the same vendor on the same day share the EXACT SAME receipt number.
- *    (e.g., Vendor A has 4 lots today -> all 4 lots are under receipt #1.
- *     Vendor B has 2 lots today -> all 2 lots are under receipt #2).
- * 3. When a new day arrives (date changes), the sequence resets to start from #1 again.
+ *    (e.g., Vendor A has 3 lots today -> all 3 lots have raseed #1.
+ *     Vendor B has lots today -> raseed #2 incremented by 1).
+ * 3. When creating a new lot entry:
+ *    a) First check if the lot belongs to a vendor who brought previous something today:
+ *       - If yes: save that existing raseed number in the new lot entry.
+ *    b) If no lot belongs to the vendor for today:
+ *       - Check local storage:
+ *         - If saved date is the same as today's date: increment saved raseed number by 1,
+ *           save resultant raseed in local storage and in this new lot entry.
+ *         - If not saved or saved date is not today: save today's date and raseed number as 1,
+ *           and save 1 in this new lot entry.
  */
+
+export interface DailyLotRaseedState {
+  savedDate: string; // YYYY-MM-DD
+  savedRaseedNumber: number; // Current highest raseed number for the day (1, 2, 3...)
+  vendorRaseeds: Record<string, number>; // normalized vendor name -> assigned daily raseed number
+}
 
 export interface DailyVendorSequenceRecord {
   lastNumber: number;
-  vendors: Record<string, number>; // normalized vendor name -> daily receipt number (1, 2, 3...)
+  vendors: Record<string, number>;
 }
 
-const STORAGE_KEY_VENDOR_SEQ = 'mandi_bolli_daily_vendor_sequence_v2';
-const STORAGE_KEY_LEGACY_BILL_SEQ = 'mandi_bolli_daily_bill_sequence_v1';
+export const STORAGE_KEY_DAILY_RASEED = 'mandi_bolli_daily_lot_raseed_v3';
+export const STORAGE_KEY_VENDOR_SEQ = 'mandi_bolli_daily_vendor_sequence_v2';
+export const STORAGE_KEY_LEGACY_BILL_SEQ = 'mandi_bolli_daily_bill_sequence_v1';
 
 /**
  * Returns today's local date string formatted as YYYY-MM-DD
@@ -36,11 +52,9 @@ export function getTodayDateKey(): string {
 export function normalizeDateKey(dateInput?: string): string {
   if (!dateInput) return getTodayDateKey();
   const trimmed = dateInput.trim();
-  // Check if format is already YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
     return trimmed;
   }
-  // Try parsing date
   const d = new Date(trimmed);
   if (!isNaN(d.getTime())) {
     const year = d.getFullYear();
@@ -52,9 +66,9 @@ export function normalizeDateKey(dateInput?: string): string {
 }
 
 /**
- * Loads all daily vendor sequences from localStorage
+ * Loads all historical daily vendor sequences from localStorage (for multi-date support)
  */
-function loadAllDailySequences(): Record<string, DailyVendorSequenceRecord> {
+export function loadAllDailySequences(): Record<string, DailyVendorSequenceRecord> {
   try {
     if (typeof localStorage !== 'undefined') {
       const raw = localStorage.getItem(STORAGE_KEY_VENDOR_SEQ);
@@ -72,9 +86,9 @@ function loadAllDailySequences(): Record<string, DailyVendorSequenceRecord> {
 }
 
 /**
- * Saves all daily vendor sequences to localStorage
+ * Saves all historical daily vendor sequences to localStorage
  */
-function saveAllDailySequences(data: Record<string, DailyVendorSequenceRecord>): void {
+export function saveAllDailySequences(data: Record<string, DailyVendorSequenceRecord>): void {
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(STORAGE_KEY_VENDOR_SEQ, JSON.stringify(data));
@@ -85,101 +99,274 @@ function saveAllDailySequences(data: Record<string, DailyVendorSequenceRecord>):
 }
 
 /**
- * Gets or assigns a daily receipt number for a specific vendor on a specific date.
- * - Same vendor on same date ALWAYS gets the same receipt number.
- * - If vendor is new for this date, gets next sequential number (starts from 1 each new day).
+ * Loads current daily lot raseed state from localStorage
+ */
+export function loadDailyRaseedState(): DailyLotRaseedState {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEY_DAILY_RASEED);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && parsed.savedDate) {
+          return {
+            savedDate: String(parsed.savedDate),
+            savedRaseedNumber: Math.max(0, parseInt(parsed.savedRaseedNumber, 10) || 0),
+            vendorRaseeds: parsed.vendorRaseeds && typeof parsed.vendorRaseeds === 'object' ? parsed.vendorRaseeds : {},
+          };
+        }
+      }
+
+      // Check legacy sequence storage for today as fallback
+      const legacy = loadAllDailySequences();
+      const today = getTodayDateKey();
+      if (legacy && legacy[today]) {
+        return {
+          savedDate: today,
+          savedRaseedNumber: legacy[today].lastNumber || 0,
+          vendorRaseeds: legacy[today].vendors || {},
+        };
+      }
+    }
+  } catch (err) {
+    console.error('Error loading daily lot raseed state:', err);
+  }
+
+  return {
+    savedDate: '',
+    savedRaseedNumber: 0,
+    vendorRaseeds: {},
+  };
+}
+
+/**
+ * Saves current daily lot raseed state to localStorage and synchronizes legacy stores
+ */
+export function saveDailyRaseedState(state: DailyLotRaseedState): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY_DAILY_RASEED, JSON.stringify(state));
+
+      // Synchronize with historical sequences map
+      if (state.savedDate) {
+        const legacy = loadAllDailySequences();
+        const existingVendors = legacy[state.savedDate]?.vendors || {};
+        legacy[state.savedDate] = {
+          lastNumber: Math.max(legacy[state.savedDate]?.lastNumber || 0, state.savedRaseedNumber),
+          vendors: { ...existingVendors, ...state.vendorRaseeds },
+        };
+        saveAllDailySequences(legacy);
+      }
+    }
+  } catch (err) {
+    console.error('Error saving daily lot raseed state:', err);
+  }
+}
+
+/**
+ * Finds the highest raseed number in existing lots on a given date
+ */
+export function getMaxRaseedInLots(dateKey: string, lots?: VendorLot[]): number {
+  if (!Array.isArray(lots) || lots.length === 0) return 0;
+  let maxNum = 0;
+  for (const lot of lots) {
+    if (!lot) continue;
+    const lotDate = normalizeDateKey(lot.arrivalDate || lot.createdAt);
+    if (lotDate === dateKey) {
+      const numFromBill = parseInt(lot.billNumber || '', 10);
+      if (!isNaN(numFromBill) && numFromBill > maxNum) {
+        maxNum = numFromBill;
+      }
+      const numFromLot = parseInt(getLotReceiptNumber(lot.lotNumber, lot.billNumber), 10);
+      if (!isNaN(numFromLot) && numFromLot > maxNum) {
+        maxNum = numFromLot;
+      }
+    }
+  }
+  return maxNum;
+}
+
+/**
+ * Checks if a vendor already brought something on a given date in existing lots
+ */
+export function findExistingVendorRaseedToday(
+  vendorName: string,
+  dateKey: string,
+  lots?: VendorLot[]
+): number | null {
+  const cleanVendor = (vendorName || '').trim().toLowerCase();
+  if (!cleanVendor || !Array.isArray(lots) || lots.length === 0) return null;
+
+  for (const lot of lots) {
+    if (!lot || !lot.vendorName) continue;
+    const lotVendor = lot.vendorName.trim().toLowerCase();
+    if (lotVendor === cleanVendor) {
+      const lotDate = normalizeDateKey(lot.arrivalDate || lot.createdAt);
+      if (lotDate === dateKey) {
+        if (lot.billNumber) {
+          const parsed = parseInt(lot.billNumber, 10);
+          if (!isNaN(parsed) && parsed > 0) {
+            return parsed;
+          }
+        }
+        const raseedStr = getLotReceiptNumber(lot.lotNumber, lot.billNumber);
+        const parsed = parseInt(raseedStr, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Pure, non-mutating preview of the vendor's daily receipt number.
+ * Used during form input / modal display so typing does not advance the counter.
+ */
+export function previewVendorDailyReceiptNumber(
+  vendorName: string,
+  targetDate?: string,
+  existingLots?: VendorLot[]
+): number {
+  const today = normalizeDateKey(targetDate);
+  const cleanVendor = (vendorName || '').trim().toLowerCase();
+  const state = loadDailyRaseedState();
+
+  // 1. If vendor already brought something today: return that exact same raseed number
+  if (cleanVendor) {
+    const existingFromLots = findExistingVendorRaseedToday(cleanVendor, today, existingLots);
+    if (existingFromLots) return existingFromLots;
+
+    if (state.savedDate === today && state.vendorRaseeds[cleanVendor]) {
+      return state.vendorRaseeds[cleanVendor];
+    }
+  }
+
+  // 2. Vendor has not brought anything today yet:
+  const maxInLots = getMaxRaseedInLots(today, existingLots);
+
+  if (state.savedDate === today && state.savedRaseedNumber > 0) {
+    return Math.max(state.savedRaseedNumber, maxInLots) + 1;
+  }
+
+  return maxInLots > 0 ? maxInLots + 1 : 1;
+}
+
+/**
+ * ATOMIC INCREMENT & COMMIT: Called when creating / saving a new lot entry.
+ * 
+ * Rules:
+ * 1. Checks if the lot belongs to a vendor that brings previous something today:
+ *    - If it has: returns and saves that existing raseed in the new lot entry.
+ * 2. If no lot belongs to the vendor for today:
+ *    - Checks local storage: check saved date with today's date:
+ *      - If same: increment saved raseed number by 1 and save resultant raseed in local storage.
+ *      - If not saved / not same: save today's date and raseed number as 1 in local storage.
+ * 3. Returns the resultant raseed number for this new lot entry.
+ */
+export function createAndAssignLotRaseedNumber(
+  vendorName: string,
+  targetDate?: string,
+  existingLots?: VendorLot[]
+): number {
+  const today = normalizeDateKey(targetDate);
+  const cleanVendor = (vendorName || '').trim().toLowerCase();
+  const state = loadDailyRaseedState();
+
+  // STEP 1: Check if this lot belongs to a vendor that brings previous something today
+  let vendorExistingRaseed: number | null = null;
+
+  if (cleanVendor) {
+    // Check in existing lots for today
+    const fromLots = findExistingVendorRaseedToday(cleanVendor, today, existingLots);
+    if (fromLots) {
+      vendorExistingRaseed = fromLots;
+    } else if (state.savedDate === today && state.vendorRaseeds[cleanVendor]) {
+      // Check in today's saved vendor sequence in local storage
+      vendorExistingRaseed = state.vendorRaseeds[cleanVendor];
+    }
+  }
+
+  if (vendorExistingRaseed && vendorExistingRaseed > 0) {
+    // Vendor already has lots today! Reuse exact same raseed number without incrementing.
+    if (state.savedDate === today) {
+      if (cleanVendor) state.vendorRaseeds[cleanVendor] = vendorExistingRaseed;
+      state.savedRaseedNumber = Math.max(state.savedRaseedNumber, vendorExistingRaseed);
+      saveDailyRaseedState(state);
+    } else {
+      state.savedDate = today;
+      state.savedRaseedNumber = vendorExistingRaseed;
+      state.vendorRaseeds = cleanVendor ? { [cleanVendor]: vendorExistingRaseed } : {};
+      saveDailyRaseedState(state);
+    }
+    return vendorExistingRaseed;
+  }
+
+  // STEP 2: No lot belongs to the vendor for today
+  const maxInLots = getMaxRaseedInLots(today, existingLots);
+
+  if (state.savedDate === today && state.savedRaseedNumber > 0) {
+    // Saved date is the same as today's date: increment saved raseed number by 1
+    const baseNumber = Math.max(state.savedRaseedNumber, maxInLots);
+    const resultantRaseedNumber = baseNumber + 1;
+
+    state.savedDate = today;
+    state.savedRaseedNumber = resultantRaseedNumber;
+    if (cleanVendor) {
+      state.vendorRaseeds[cleanVendor] = resultantRaseedNumber;
+    }
+    saveDailyRaseedState(state);
+    return resultantRaseedNumber;
+  }
+
+  // Not saved in local storage or saved date is not today:
+  // Save today's date and raseed number as 1 (or maxInLots + 1 if lots already exist for today)
+  const resultantRaseedNumber = maxInLots > 0 ? maxInLots + 1 : 1;
+
+  state.savedDate = today;
+  state.savedRaseedNumber = resultantRaseedNumber;
+  state.vendorRaseeds = cleanVendor ? { [cleanVendor]: resultantRaseedNumber } : {};
+  saveDailyRaseedState(state);
+  return resultantRaseedNumber;
+}
+
+/**
+ * Gets or assigns a daily receipt number for a vendor on a specific date.
+ * Reuses existing raseed for the vendor on that date, or previews the next sequential number.
  */
 export function getOrAssignVendorDailyReceiptNumber(
   vendorName: string,
   targetDate?: string,
   existingLots?: VendorLot[]
 ): number {
-  const dateKey = normalizeDateKey(targetDate);
-  const cleanVendor = (vendorName || '').trim().toLowerCase();
-  const allData = loadAllDailySequences();
-  const dayRecord: DailyVendorSequenceRecord = allData[dateKey] || {
-    lastNumber: 0,
-    vendors: {},
-  };
-
-  // 1. If already assigned in persistent storage for this date
-  if (cleanVendor && dayRecord.vendors[cleanVendor]) {
-    return dayRecord.vendors[cleanVendor];
-  }
-
-  // 2. Check if any existing lot on this date for this vendor already has a billNumber
-  if (cleanVendor && Array.isArray(existingLots) && existingLots.length > 0) {
-    const matchingLot = existingLots.find((lot) => {
-      if (!lot || !lot.vendorName) return false;
-      const lotDate = normalizeDateKey(lot.arrivalDate);
-      return lotDate === dateKey && lot.vendorName.trim().toLowerCase() === cleanVendor;
-    });
-
-    if (matchingLot && matchingLot.billNumber) {
-      const parsedNum = parseInt(matchingLot.billNumber, 10);
-      if (!isNaN(parsedNum) && parsedNum > 0) {
-        dayRecord.vendors[cleanVendor] = parsedNum;
-        dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, parsedNum);
-        allData[dateKey] = dayRecord;
-        saveAllDailySequences(allData);
-        return parsedNum;
-      }
-    }
-  }
-
-  // 3. If vendor name is empty, just return next available without permanently assigning empty key
-  if (!cleanVendor) {
-    return (dayRecord.lastNumber || 0) + 1;
-  }
-
-  // 4. Determine next number starting from 1 for this date
-  let maxFound = dayRecord.lastNumber || 0;
-  if (Array.isArray(existingLots)) {
-    for (const lot of existingLots) {
-      if (!lot) continue;
-      const lotDate = normalizeDateKey(lot.arrivalDate);
-      if (lotDate === dateKey && lot.billNumber) {
-        const num = parseInt(lot.billNumber, 10);
-        if (!isNaN(num) && num > maxFound) {
-          maxFound = num;
-        }
-      }
-    }
-  }
-
-  const nextNumber = Math.max(1, maxFound + 1);
-  dayRecord.vendors[cleanVendor] = nextNumber;
-  dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, nextNumber);
-  allData[dateKey] = dayRecord;
-  saveAllDailySequences(allData);
-
-  return nextNumber;
+  return previewVendorDailyReceiptNumber(vendorName, targetDate, existingLots);
 }
 
 /**
  * Synchronizes an array of lots so that every lot of the day for the same vendor
- * shares the exact same receipt number (starting from #1 each day).
+ * shares the EXACT same receipt number (starting from #1 each day).
  */
 export function syncLotsWithDailyVendorSequence(lots: VendorLot[]): VendorLot[] {
   if (!Array.isArray(lots) || lots.length === 0) return lots;
 
   const allData = loadAllDailySequences();
+  const todayKey = getTodayDateKey();
   let hasChanges = false;
 
   // Group lots by arrival date
   const dateGroups = new Map<string, VendorLot[]>();
-  // We process lots in original/chronological order (reversed if lots are prepended [new, ...old])
+  // Process chronological lots (preserve original order)
   const chronologicalLots = [...lots].reverse();
 
   for (const lot of chronologicalLots) {
-    const dateKey = normalizeDateKey(lot.arrivalDate);
+    const dateKey = normalizeDateKey(lot.arrivalDate || lot.createdAt);
     if (!dateGroups.has(dateKey)) {
       dateGroups.set(dateKey, []);
     }
     dateGroups.get(dateKey)!.push(lot);
   }
 
-  // Map to hold target billNumber for each lot id
   const lotBillMap = new Map<string, string>();
 
   dateGroups.forEach((dayLots, dateKey) => {
@@ -189,7 +376,6 @@ export function syncLotsWithDailyVendorSequence(lots: VendorLot[]): VendorLot[] 
     };
 
     let currentDaySeq = 0;
-    // Find highest already established sequence number for this date
     Object.values(dayRecord.vendors).forEach((num) => {
       if (num > currentDaySeq) currentDaySeq = num;
     });
@@ -202,25 +388,45 @@ export function syncLotsWithDailyVendorSequence(lots: VendorLot[]): VendorLot[] 
       if (dayRecord.vendors[cleanVendor]) {
         vendorBillNum = dayRecord.vendors[cleanVendor];
       } else {
-        // Assign next sequence starting from 1 for this day
-        currentDaySeq += 1;
-        vendorBillNum = currentDaySeq;
-        dayRecord.vendors[cleanVendor] = vendorBillNum;
-        dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, vendorBillNum);
-        hasChanges = true;
+        // Check if this lot already has a valid numeric billNumber
+        const existingNum = parseInt(lot.billNumber || '', 10);
+        if (!isNaN(existingNum) && existingNum > 0) {
+          vendorBillNum = existingNum;
+          dayRecord.vendors[cleanVendor] = vendorBillNum;
+          if (vendorBillNum > currentDaySeq) currentDaySeq = vendorBillNum;
+          dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, vendorBillNum);
+          hasChanges = true;
+        } else {
+          // Assign next sequence starting from 1 for this day
+          currentDaySeq += 1;
+          vendorBillNum = currentDaySeq;
+          dayRecord.vendors[cleanVendor] = vendorBillNum;
+          dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, vendorBillNum);
+          hasChanges = true;
+        }
       }
 
       lotBillMap.set(lot.id, String(vendorBillNum));
     }
 
     allData[dateKey] = dayRecord;
+
+    // If synchronizing today, ensure daily lot raseed state reflects it
+    if (dateKey === todayKey) {
+      const currentState = loadDailyRaseedState();
+      saveDailyRaseedState({
+        savedDate: todayKey,
+        savedRaseedNumber: Math.max(currentState.savedRaseedNumber || 0, dayRecord.lastNumber),
+        vendorRaseeds: { ...currentState.vendorRaseeds, ...dayRecord.vendors },
+      });
+    }
   });
 
   if (hasChanges) {
     saveAllDailySequences(allData);
   }
 
-  // Update lots where billNumber doesn't match
+  // Update lots where billNumber does not match the vendor's synchronized daily raseed number
   return lots.map((lot) => {
     const targetBill = lotBillMap.get(lot.id);
     if (targetBill && lot.billNumber !== targetBill) {
@@ -234,45 +440,43 @@ export function syncLotsWithDailyVendorSequence(lots: VendorLot[]): VendorLot[] 
 }
 
 /**
- * Gets the bill number for a specific vendor/lot session.
- * Backward compatible alias for getOrAssignVendorDailyReceiptNumber.
+ * Backward compatibility alias for getOrAssignVendorDailyReceiptNumber
  */
 export function getOrAssignBillNumber(sessionKey?: string, targetDate?: string, existingLots?: VendorLot[]): number {
-  return getOrAssignVendorDailyReceiptNumber(sessionKey || '', targetDate, existingLots);
+  return previewVendorDailyReceiptNumber(sessionKey || '', targetDate, existingLots);
 }
 
 /**
  * Saves and commits bill number generation.
- * Increments the last generated bill counter for the day and maps session key.
  */
 export function commitBillGeneration(billNumber: number, sessionKey?: string, targetDate?: string): number {
-  const dateKey = normalizeDateKey(targetDate);
+  const today = normalizeDateKey(targetDate);
   const num = Math.max(1, Math.round(Number(billNumber) || 1));
-  const allData = loadAllDailySequences();
-  const dayRecord: DailyVendorSequenceRecord = allData[dateKey] || {
-    lastNumber: 0,
-    vendors: {},
-  };
-
   const cleanKey = (sessionKey || '').trim().toLowerCase();
-  if (cleanKey) {
-    dayRecord.vendors[cleanKey] = num;
-  }
-  dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, num);
-  allData[dateKey] = dayRecord;
-  saveAllDailySequences(allData);
 
-  return dayRecord.lastNumber;
+  const state = loadDailyRaseedState();
+  if (state.savedDate === today) {
+    state.savedRaseedNumber = Math.max(state.savedRaseedNumber, num);
+    if (cleanKey) state.vendorRaseeds[cleanKey] = num;
+  } else {
+    state.savedDate = today;
+    state.savedRaseedNumber = num;
+    state.vendorRaseeds = cleanKey ? { [cleanKey]: num } : {};
+  }
+  saveDailyRaseedState(state);
+  return state.savedRaseedNumber;
 }
 
 /**
  * Returns the next available daily bill number for the day
  */
 export function getNextDailyBillNumber(targetDate?: string): number {
-  const dateKey = normalizeDateKey(targetDate);
-  const allData = loadAllDailySequences();
-  const dayRecord = allData[dateKey];
-  return ((dayRecord?.lastNumber) || 0) + 1;
+  const today = normalizeDateKey(targetDate);
+  const state = loadDailyRaseedState();
+  if (state.savedDate === today) {
+    return (state.savedRaseedNumber || 0) + 1;
+  }
+  return 1;
 }
 
 /**
@@ -284,9 +488,6 @@ export function advanceToNextBillNumber(targetDate?: string): number {
   return nextNum;
 }
 
-/**
- * Backward compatibility: DailyBillSequenceState
- */
 export interface DailyBillSequenceState {
   dateKey: string;
   lastBillNumber: number;
@@ -294,22 +495,27 @@ export interface DailyBillSequenceState {
 }
 
 export function getDailyBillSequence(targetDate?: string): DailyBillSequenceState {
-  const dateKey = normalizeDateKey(targetDate);
-  const allData = loadAllDailySequences();
-  const dayRecord = allData[dateKey] || { lastNumber: 0, vendors: {} };
+  const today = normalizeDateKey(targetDate);
+  const state = loadDailyRaseedState();
+  if (state.savedDate === today) {
+    return {
+      dateKey: today,
+      lastBillNumber: state.savedRaseedNumber,
+      assignedBills: state.vendorRaseeds,
+    };
+  }
   return {
-    dateKey,
-    lastBillNumber: dayRecord.lastNumber,
-    assignedBills: dayRecord.vendors,
+    dateKey: today,
+    lastBillNumber: 0,
+    assignedBills: {},
   };
 }
 
 export function setDailyBillNumber(num: number, targetDate?: string): void {
-  const dateKey = normalizeDateKey(targetDate);
+  const today = normalizeDateKey(targetDate);
   const safeNum = Math.max(0, Math.round(Number(num) || 0));
-  const allData = loadAllDailySequences();
-  const dayRecord = allData[dateKey] || { lastNumber: 0, vendors: {} };
-  dayRecord.lastNumber = safeNum;
-  allData[dateKey] = dayRecord;
-  saveAllDailySequences(allData);
+  const state = loadDailyRaseedState();
+  state.savedDate = today;
+  state.savedRaseedNumber = safeNum;
+  saveDailyRaseedState(state);
 }

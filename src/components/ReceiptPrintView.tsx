@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import html2canvas from 'html2canvas';
 import { VendorLot, AppSettings } from '../types';
 import { translations, unitLabels, getUnitDisplayLabel } from '../utils/localization';
+import { getLotReceiptNumber } from '../utils/calculations';
 import { formatPKR } from '../utils/currency';
 import { sound } from '../utils/sound';
 import { generateMandiInvoiceCanvas, printThermalPOSReceipt } from '../utils/receiptGenerator';
@@ -514,11 +515,18 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({
           {/* Bill Metadata */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="space-y-0.5 text-start">
+              <span className="text-[10px] text-slate-500 font-bold block">رسید نمبر:</span>
+              <strong className="font-numbers text-xs text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 inline-block font-bold">
+                #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)}
+              </strong>
+            </div>
+
+            <div className="space-y-0.5 text-start">
               <span className="text-[10px] text-slate-500 font-bold block">تاریخ آمد:</span>
               <strong className="font-numbers text-xs text-slate-900 block font-bold">{lot.arrivalDate}</strong>
             </div>
 
-            <div className="space-y-0.5 text-start">
+            <div className="space-y-0.5 text-start col-span-2 sm:col-span-1">
               <span className="text-[10px] text-slate-500 font-bold block">زمیندار / کاشتکار:</span>
               <strong className="font-urdu-nastaliq text-xs sm:text-sm text-slate-950 block truncate font-bold">
                 {lot.vendorName} {lot.vendorCity ? `(${lot.vendorCity})` : ''}

@@ -684,15 +684,16 @@ export function generateVendorConsolidatedInvoiceCanvas(
     uniqueLotNumbers.length > 0
       ? uniqueLotNumbers.join(', ')
       : (billNumber || lots[0]?.lotNumber || '1').replace(/^LOT-/i, '');
-  const displayBillNo = billNumber || displayLotNo;
+  const lotSavedRaseed = lots.find((l) => l.billNumber && String(l.billNumber).trim())?.billNumber;
+  const displayRaseedNo = lotSavedRaseed || billNumber || displayLotNo;
 
   ctx.textAlign = 'right';
   ctx.fillStyle = '#b91c1c';
   ctx.font = 'bold 12px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('بل نمبر: ', headerX + headerW - 10, subY + 16);
+  ctx.fillText('رسید نمبر: ', headerX + headerW - 10, subY + 16);
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 12px system-ui, monospace';
-  ctx.fillText(displayBillNo, headerX + headerW - 65, subY + 16);
+  ctx.fillText(displayRaseedNo, headerX + headerW - 65, subY + 16);
 
   const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
   ctx.textAlign = 'left';
@@ -1403,7 +1404,7 @@ export function printConsolidatedThermalPOSReceipt(
       <div style="font-size: 10px; line-height: 1.4;">
         <div style="display:flex; justify-content:space-between;">
           <div>زمیندار: <b style="font-size: 12px;">${vendorName}</b> ${vendorCity ? `(${vendorCity})` : ''}</div>
-          ${billNumber ? `<div>بل نمبر: <b style="font-size: 12px; font-family: monospace;">#${billNumber}</b></div>` : ''}
+          ${billNumber ? `<div>رسید نمبر: <b style="font-size: 12px; font-family: monospace;">#${billNumber}</b></div>` : ''}
         </div>
         <div style="display:flex; justify-content:space-between;">
           <span>تاریخ: <b>${displayDate}</b></span>

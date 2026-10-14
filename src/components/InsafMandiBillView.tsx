@@ -39,8 +39,9 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
       ? uniqueLotNumbers.join(', ')
       : (lots[0]?.lotNumber || '').replace(/^LOT-/i, '');
   const targetDate = dateLabel || lots[0]?.arrivalDate;
+  const lotSavedRaseed = lots.find((l) => l.billNumber && String(l.billNumber).trim())?.billNumber;
   const vendorDailyReceiptNo = String(getOrAssignVendorDailyReceiptNumber(vendorName, targetDate, lots));
-  const displayBillNo = billNumber || lots.find((l) => l.billNumber)?.billNumber || vendorDailyReceiptNo;
+  const displayRaseedNo = lotSavedRaseed || billNumber || vendorDailyReceiptNo;
 
   // Aggregate Deductions & Totals
   const aggregatedExpenses = {
@@ -294,12 +295,12 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
 
           {/* 2. SUBHEADER METADATA ROWS - Bill Baname placed under Lot Number */}
           <div className="my-1 border-y-2 border-red-700 py-1 px-2 sm:px-2.5 bg-white flex flex-col gap-1 text-slate-900">
-            {/* Top Row: Bill Number on Right, Date on Left */}
+            {/* Top Row: Raseed Number on Right, Date on Left */}
             <div className="flex items-center justify-between text-[11px] sm:text-xs font-bold">
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-black">بل نمبر:</span>
+                <span className="text-red-700 font-urdu-nastaliq text-xs sm:text-sm font-black">رسید نمبر:</span>
                 <span className="font-numbers underline decoration-red-500 font-black px-1 text-slate-950 text-xs sm:text-sm tracking-wide">
-                  {displayBillNo}
+                  {displayRaseedNo}
                 </span>
               </div>
 

@@ -171,8 +171,10 @@ export function generateInsafMandiBillHtmlSingle(
   const displayLotNo =
     uniqueLotNumbers.length > 0
       ? uniqueLotNumbers.join(', ')
-      : (billNumber || lots[0]?.lotNumber || '101').replace(/^LOT-/i, '');
-  const displayBillNo = billNumber || displayLotNo;
+      : (lots[0]?.lotNumber || '').replace(/^LOT-/i, '');
+  const targetDate = dateLabel || lots[0]?.arrivalDate;
+  const lotSavedRaseed = lots.find((l) => l.billNumber && String(l.billNumber).trim())?.billNumber;
+  const displayRaseedNo = lotSavedRaseed || billNumber || displayLotNo;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const shopName = settings.shopNameUrdu || settings.shopNameEn || 'کمیشن شاپ';
   const shopAddress = settings.shopAddressUrdu || settings.shopAddressEn || '';
@@ -432,8 +434,8 @@ export function generateInsafMandiBillHtmlSingle(
         <div style="margin: 2px 0; border-top: 2px solid #b91c1c; border-bottom: 2px solid #b91c1c; padding: 2.5px 6px; background: #ffffff; display: flex; flex-direction: column; gap: 2px;">
           <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: bold;">
             <div style="flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
-              <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 12px; font-weight: 900;">بل نمبر:</span>
-              <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 12px; color: #0f172a;">${displayBillNo}</span>
+              <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 12px; font-weight: 900;">رسید نمبر:</span>
+              <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 12px; color: #0f172a;">${displayRaseedNo}</span>
             </div>
             <div style="flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
               <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold;">السلام علیکم تاریخ:</span>
