@@ -11,8 +11,7 @@ import {
 } from '../utils/printHelper';
 import { InsafMandiBillView } from './InsafMandiBillView';
 import {
-  getOrAssignBillNumber,
-  getNextDailyBillNumber,
+  getOrAssignVendorDailyReceiptNumber,
   commitBillGeneration,
 } from '../utils/billSequenceManager';
 import {
@@ -69,15 +68,13 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
   const [isAveraged, setIsAveraged] = useState<boolean>(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'paid'>('all');
   const [activeVendorSlip, setActiveVendorSlip] = useState<string | null>(null);
-  const [startBillNumber, setStartBillNumber] = useState<number>(() => {
-    return getNextDailyBillNumber(dateLabel);
-  });
-
-  useEffect(() => {
-    if (isOpen) {
-      setStartBillNumber(getNextDailyBillNumber(dateLabel));
+  const getVendorReceiptNo = (vg: VendorGroupedData) => {
+    const existingBill = vg.lots.find((l) => l.billNumber)?.billNumber;
+    if (existingBill && !isNaN(Number(existingBill))) {
+      return Number(existingBill);
     }
-  }, [isOpen, dateLabel]);
+    return getOrAssignVendorDailyReceiptNumber(vg.vendorName, dateLabel || vg.lots[0]?.arrivalDate, lots);
+  };
 
   // Group lots by vendor
   const vendorGroups = useMemo<VendorGroupedData[]>(() => {
@@ -176,10 +173,10 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
   };
 
   // Direct single bill print handlers
-  const handlePrintSingleA4 = (vg: VendorGroupedData, idx: number, e?: React.MouseEvent) => {
+  const handlePrintSingleA4 = (vg: VendorGroupedData, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     sound.playTick();
-    const bNum = startBillNumber + idx;
+    const bNum = getVendorReceiptNo(vg);
     commitBillGeneration(bNum, vg.vendorName, dateLabel);
     printVendorBillSlipA4(
       vg.vendorName,
@@ -193,10 +190,10 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
     );
   };
 
-  const handlePrintSingleA5 = (vg: VendorGroupedData, idx: number, e?: React.MouseEvent) => {
+  const handlePrintSingleA5 = (vg: VendorGroupedData, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     sound.playTick();
-    const bNum = startBillNumber + idx;
+    const bNum = getVendorReceiptNo(vg);
     commitBillGeneration(bNum, vg.vendorName, dateLabel);
     printVendorBillSlipA5(
       vg.vendorName,
@@ -218,16 +215,18 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
       targetVendors = vendorGroups.filter((vg) => selectedVendors.has(vg.vendorName));
       if (targetVendors.length === 0) return;
     }
-    const maxNum = startBillNumber + targetVendors.length - 1;
-    commitBillGeneration(maxNum, undefined, dateLabel);
     printBatchVendorBillsA4(
-      targetVendors.map((vg, idx) => ({
-        vendorName: vg.vendorName,
-        vendorPhone: vg.vendorPhone,
-        vendorCity: vg.vendorCity,
-        lots: vg.lots,
-        billNumber: String(startBillNumber + idx),
-      })),
+      targetVendors.map((vg) => {
+        const bNum = getVendorReceiptNo(vg);
+        commitBillGeneration(bNum, vg.vendorName, dateLabel);
+        return {
+          vendorName: vg.vendorName,
+          vendorPhone: vg.vendorPhone,
+          vendorCity: vg.vendorCity,
+          lots: vg.lots,
+          billNumber: String(bNum),
+        };
+      }),
       settings,
       dateLabel,
       isAveraged
@@ -241,16 +240,18 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
       targetVendors = vendorGroups.filter((vg) => selectedVendors.has(vg.vendorName));
       if (targetVendors.length === 0) return;
     }
-    const maxNum = startBillNumber + targetVendors.length - 1;
-    commitBillGeneration(maxNum, undefined, dateLabel);
     printBatchVendorBillsA5(
-      targetVendors.map((vg, idx) => ({
-        vendorName: vg.vendorName,
-        vendorPhone: vg.vendorPhone,
-        vendorCity: vg.vendorCity,
-        lots: vg.lots,
-        billNumber: String(startBillNumber + idx),
-      })),
+      targetVendors.map((vg) => {
+        const bNum = getVendorReceiptNo(vg);
+        commitBillGeneration(bNum, vg.vendorName, dateLabel);
+        return {
+          vendorName: vg.vendorName,
+          vendorPhone: vg.vendorPhone,
+          vendorCity: vg.vendorCity,
+          lots: vg.lots,
+          billNumber: String(bNum),
+        };
+      }),
       settings,
       dateLabel,
       isAveraged
@@ -303,22 +304,14 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
 
           {/* Action Buttons in Header */}
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 flex-wrap justify-end">
-            {/* Sequential Start Bill Number Badge */}
-            <div className="flex items-center gap-1 bg-slate-950 border border-amber-500/50 rounded-xl px-2 py-1 shadow-xs">
+            {/* Sequential Receipt Number Badge */}
+            <div className="flex items-center gap-1.5 bg-slate-950 border border-amber-500/40 rounded-xl px-2.5 py-1 shadow-xs">
               <span className="text-[11px] font-bold text-amber-400 font-urdu-sans whitespace-nowrap">
-                شروع بل #:
+                رسید نمبر:
               </span>
-              <input
-                type="number"
-                min="1"
-                value={startBillNumber}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  if (!isNaN(val) && val > 0) setStartBillNumber(val);
-                }}
-                className="w-12 bg-slate-900 border border-amber-400/30 rounded-md px-1 py-0.5 text-center font-numbers font-black text-amber-300 text-xs focus:ring-1 focus:ring-amber-400 outline-none"
-                title="شروع بل نمبر تبدیل کریں"
-              />
+              <span className="font-urdu-sans font-bold text-amber-300 text-xs">
+                خودکار یومیہ بل
+              </span>
             </div>
 
             {/* Averaged Bill Toggle */}
@@ -558,7 +551,7 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
                         settings={settings}
                         dateLabel={dateLabel}
                         isAveraged={isAveraged}
-                        billNumber={String(startBillNumber + idx)}
+                        billNumber={String(getVendorReceiptNo(vg))}
                       />
                     </div>
                   </div>
@@ -637,8 +630,8 @@ export const AllVendorBillsModal: React.FC<AllVendorBillsModalProps> = ({
                     </div>
 
                     <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                      <span className="text-[11px] text-slate-500 font-numbers">
-                        بل نمبر #{101 + idx}
+                      <span className="text-[11px] text-amber-400 font-numbers font-bold">
+                        رسید نمبر #{getVendorReceiptNo(vg)}
                       </span>
                       <div className="flex items-center gap-1.5">
                         <button

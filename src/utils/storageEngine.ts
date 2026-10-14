@@ -1,5 +1,6 @@
 import { VendorLot, AppSettings, CustomerBuyer, SavedVendor, ShopExpense, DrawerAdjustment, SystemLog } from '../types';
 import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors, sampleExpenses } from './sampleData';
+import { syncLotsWithDailyVendorSequence } from './billSequenceManager';
 import * as Neutralino from '@neutralinojs/lib';
 
 const DB_NAME = 'MandiMunshiMasterDB_v2';
@@ -326,7 +327,8 @@ export async function loadInitialApplicationData(): Promise<{
     console.warn('LocalStorage parse error:', e);
   }
 
-  const finalLots = initialLots !== null ? initialLots : getInitialLots();
+  const rawLots = initialLots !== null ? initialLots : getInitialLots();
+  const finalLots = syncLotsWithDailyVendorSequence(rawLots);
   const finalCustomers = initialCustomers !== null ? initialCustomers : sampleCustomers;
   const finalVendors = initialVendors !== null ? initialVendors : sampleVendors;
   const finalExpenses = initialExpenses !== null ? initialExpenses : sampleExpenses;

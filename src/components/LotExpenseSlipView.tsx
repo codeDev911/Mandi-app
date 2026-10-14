@@ -424,9 +424,9 @@ export const LotExpenseSlipView: React.FC<LotExpenseSlipViewProps> = ({
             <div className="flex items-center gap-2">
               <span
                 className="text-xs font-bold font-numbers px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200"
-                title={`لاٹ ID: ${lot.lotNumber}`}
+                title={`رسید نمبر: #${getLotReceiptNumber(lot.lotNumber, lot.billNumber)}`}
               >
-                رسید #{getLotReceiptNumber(lot.lotNumber)}
+                رسید #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)}
               </span>
               <h2 className="text-base sm:text-lg font-black text-stone-900 font-urdu-sans">
                 {lot.vendorName} ({lot.productUrdu})

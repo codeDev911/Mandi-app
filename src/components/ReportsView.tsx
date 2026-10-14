@@ -469,12 +469,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const totalPaid = c.directCashPaid + khataPayments;
       const creditRemaining = Math.max(0, c.totalAmount - totalPaid);
 
+      // Compute all-time credit (Kul Udhar) across all lots & history
+      let allTimeCreditBids = 0;
+      lots.forEach((l) => {
+        l.sales.forEach((s) => {
+          if (s.buyerName.toLowerCase() === c.customerName.toLowerCase() && s.paymentStatus !== 'cash') {
+            allTimeCreditBids += (Number(s.totalAmount) || 0) - (Number(s.paidAmount) || 0);
+          }
+        });
+      });
+      const allTimeOpening = Number(savedCust?.openingBalance) || 0;
+      const allTimeManualCredits = (savedCust?.manualCredits || []).reduce((sum, cr) => sum + (Number(cr.amount) || 0), 0);
+      const allTimePaymentsReceived = (savedCust?.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const allTimeOutstandingCredit = Math.max(0, (allTimeOpening + allTimeManualCredits + allTimeCreditBids) - allTimePaymentsReceived);
+
       return {
         ...c,
         payments: customerPayments,
         khataPaid: khataPayments,
         cashPaid: totalPaid,
         creditPending: creditRemaining,
+        allTimeCredit: allTimeOutstandingCredit,
       };
     });
 
@@ -1748,9 +1763,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </h4>
                           <span
                             className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold font-numbers"
-                            title={`لاٹ ID: ${lot.lotNumber}`}
+                            title={`رسید نمبر: #${getLotReceiptNumber(lot.lotNumber, lot.billNumber)}`}
                           >
-                            #{getLotReceiptNumber(lot.lotNumber)}
+                            #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)}
                           </span>
                           <span className="text-[10px] text-slate-400 font-numbers">
                             {lot.arrivalDate}
@@ -1971,26 +1986,41 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
                       {/* Action Buttons */}
                       <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
-                        {/* Dedicated Payment Button - STRICTLY ONLY IF PENDING BALANCE > 0 */}
-                        {v.pendingBalance > 0 ? (
-                          <button
-                            onClick={() => handleOpenVendorPayment(v.vendorName, v.pendingBalance)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-2xs active:scale-95 ${
-                              selectedVendorForPayment === v.vendorName
-                                ? 'bg-slate-800 text-white'
-                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                            }`}
-                            title="زمیندار کو رقم ادائیگی کا اندراج کریں"
-                          >
+                        {/* Dedicated Payment Button - Enabled if pending payments, disabled otherwise */}
+                        <button
+                          type="button"
+                          disabled={v.pendingBalance <= 0}
+                          onClick={() => {
+                            if (v.pendingBalance > 0) {
+                              handleOpenVendorPayment(v.vendorName, v.pendingBalance);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-2xs ${
+                            v.pendingBalance <= 0
+                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                              : selectedVendorForPayment === v.vendorName
+                              ? 'bg-slate-800 text-white active:scale-95'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95'
+                          }`}
+                          title={
+                            v.pendingBalance <= 0
+                              ? (isUrdu ? 'کوئی بقایا رقم واجب الادا نہیں ہے (مکمل ادا شدہ)' : 'No pending payment (Fully Paid)')
+                              : (isUrdu ? 'زمیندار کو رقم ادائیگی کا اندراج کریں' : 'Record vendor payment')
+                          }
+                        >
+                          {v.pendingBalance <= 0 ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" />
+                          ) : (
                             <Banknote className="w-3.5 h-3.5" />
-                            <span>{selectedVendorForPayment === v.vendorName ? (isUrdu ? 'بند کریں' : 'Close') : (isUrdu ? 'ادائیگی درج کریں' : 'Pay Vendor')}</span>
-                          </button>
-                        ) : (
-                          <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-[11px] font-bold font-urdu-sans flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>{isUrdu ? 'مکمل ادا شدہ' : 'Fully Paid'}</span>
+                          )}
+                          <span>
+                            {v.pendingBalance <= 0
+                              ? (isUrdu ? 'ادائیگی (مکمل)' : 'Paid (Zero Due)')
+                              : selectedVendorForPayment === v.vendorName
+                              ? (isUrdu ? 'بند کریں' : 'Close')
+                              : (isUrdu ? 'ادائیگی درج کریں' : 'Pay Vendor')}
                           </span>
-                        )}
+                        </button>
 
                         <button
                           onClick={() => {
@@ -2092,7 +2122,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                             <option value="all">{isUrdu ? 'تمام لاٹس (کل کھاتہ)' : 'All Lots (Consolidated)'}</option>
                             {v.lots.map((l) => (
                               <option key={l.id} value={l.id}>
-                                {l.productEmoji} {l.productUrdu} ({l.lotNumber}) - {formatPKR(l.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
+                                {l.productEmoji} {l.productUrdu} (رسید #{getLotReceiptNumber(l.lotNumber, l.billNumber)}) - {formatPKR(l.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
                               </option>
                             ))}
                           </select>
@@ -2368,7 +2398,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                                     {lot.productEmoji} {lot.productUrdu}
                                   </span>
                                   <span className="text-[11px] text-slate-400 font-numbers block">
-                                    رسید #{getLotReceiptNumber(lot.lotNumber)} • {lot.arrivalDate} ({lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)})
+                                    رسید #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)} • {lot.arrivalDate} ({lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)})
                                   </span>
                                 </div>
 
@@ -2416,10 +2446,24 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                                 <div className="flex items-center gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenVendorPayment(v.vendorName, Math.max(0, lotNet - lotPaid), lot.id)}
-                                    className="text-[10px] text-emerald-700 hover:text-emerald-900 hover:underline font-bold font-urdu-sans"
+                                    disabled={Math.max(0, lotNet - lotPaid) <= 0}
+                                    onClick={() => {
+                                      if (Math.max(0, lotNet - lotPaid) > 0) {
+                                        handleOpenVendorPayment(v.vendorName, Math.max(0, lotNet - lotPaid), lot.id);
+                                      }
+                                    }}
+                                    className={`text-[10px] font-bold font-urdu-sans transition ${
+                                      Math.max(0, lotNet - lotPaid) <= 0
+                                        ? 'text-slate-400 cursor-not-allowed opacity-60'
+                                        : 'text-emerald-700 hover:text-emerald-900 hover:underline'
+                                    }`}
+                                    title={
+                                      Math.max(0, lotNet - lotPaid) <= 0
+                                        ? (isUrdu ? 'یہ لاٹ مکمل ادا شدہ ہے' : 'Lot fully paid')
+                                        : (isUrdu ? 'اس لاٹ کی ادائیگی درج کریں' : 'Pay this lot')
+                                    }
                                   >
-                                    {isUrdu ? 'ادائیگی' : 'Pay'}
+                                    {Math.max(0, lotNet - lotPaid) <= 0 ? (isUrdu ? 'ادا شدہ' : 'Paid') : (isUrdu ? 'ادائیگی' : 'Pay')}
                                   </button>
 
                                   {onOpenReceipt && (
@@ -2544,9 +2588,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         </span>
                       </div>
                       <div className="text-start sm:text-end bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
-                        <span className="text-[10px] text-amber-900 font-bold font-urdu-sans block">بقایا کھاتہ:</span>
+                        <span className="text-[10px] text-amber-900 font-bold font-urdu-sans block">صافی بقایا (تاریخ فلٹر):</span>
                         <span className="text-xs font-bold text-amber-900 font-numbers block">
                           {formatPKR(c.creditPending, settings.currencySymbol, settings.language)}
+                        </span>
+                      </div>
+                      <div className="text-start sm:text-end bg-rose-50 px-2.5 py-1 rounded-xl border border-rose-200">
+                        <span className="text-[10px] text-rose-900 font-bold font-urdu-sans block">کل ادھار (تمام وقت):</span>
+                        <span className="text-xs font-bold text-rose-900 font-numbers block">
+                          {formatPKR(c.allTimeCredit, settings.currencySymbol, settings.language)}
                         </span>
                       </div>
                       {/* Individual Customer PDF Report Preview Button */}

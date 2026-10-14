@@ -22,6 +22,7 @@ export interface PDFPreviewData {
     vendorPending?: number;
     cashReceived?: number;
     creditPending?: number;
+    allTimeCredit?: number;
     unitsSold?: number;
     lotsCount?: number;
   };
@@ -974,6 +975,7 @@ export function buildSingleCustomerReportPDF(
     totalAmount: number;
     cashPaid: number;
     creditPending: number;
+    allTimeCredit?: number;
     payments?: Array<{
       date?: string;
       paymentDate?: string;
@@ -1009,32 +1011,42 @@ export function buildSingleCustomerReportPDF(
     subInfo
   );
 
+  const allTimeOutstanding = customer.allTimeCredit !== undefined ? customer.allTimeCredit : customer.creditPending;
+
   // Customer Summary Card
   doc.setFillColor(245, 248, 252);
-  doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'F');
+  doc.roundedRect(14, currentY, pageWidth - 28, 17, 2, 2, 'F');
   doc.setDrawColor(210, 225, 245);
-  doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'D');
+  doc.roundedRect(14, currentY, pageWidth - 28, 17, 2, 2, 'D');
 
-  doc.setFontSize(9);
+  doc.setFontSize(8);
   doc.setTextColor(90, 90, 90);
-  doc.text('TOTAL PURCHASES (کل خریداری)', 20, currentY + 4.5);
-  doc.text('TOTAL UNITS BOUGHT (تعداد)', 68, currentY + 4.5);
-  doc.text('CASH PAID (نقد وصول شدہ)', 115, currentY + 4.5);
-  doc.text('REMAINING UDHAAR (بقایا ادھار)', 155, currentY + 4.5);
+  doc.text('TOTAL PURCHASES (کل خریداری)', 18, currentY + 4.5);
+  doc.text('CASH PAID (نقد وصول)', 62, currentY + 4.5);
+  doc.text('DATE-FILTERED (صافی بقایا)', 106, currentY + 4.5);
+  doc.text('KUL UDHAAR (کل ادھار تمام وقت)', 150, currentY + 4.5);
 
-  doc.setFontSize(11.5);
+  doc.setFontSize(10.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20, 20, 20);
-  doc.text(`Rs. ${customer.totalAmount.toLocaleString()}`, 20, currentY + 11.5);
-  doc.text(`${customer.totalUnitsBought} Units`, 68, currentY + 11.5);
+  doc.text(`Rs. ${customer.totalAmount.toLocaleString()}`, 18, currentY + 11);
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(110, 110, 110);
+  doc.text(`(${customer.totalUnitsBought} Units)`, 18, currentY + 14.5);
 
+  doc.setFontSize(10.5);
+  doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 120, 50);
-  doc.text(`Rs. ${customer.cashPaid.toLocaleString()}`, 115, currentY + 11.5);
+  doc.text(`Rs. ${customer.cashPaid.toLocaleString()}`, 62, currentY + 11);
 
-  doc.setTextColor(180, 40, 20);
-  doc.text(`Rs. ${customer.creditPending.toLocaleString()}`, 155, currentY + 11.5);
+  doc.setTextColor(180, 70, 20);
+  doc.text(`Rs. ${customer.creditPending.toLocaleString()}`, 106, currentY + 11);
 
-  currentY += 21;
+  doc.setTextColor(180, 25, 20);
+  doc.text(`Rs. ${allTimeOutstanding.toLocaleString()}`, 150, currentY + 11);
+
+  currentY += 22;
 
   // Purchases Table (NO MISLEADING KHATA UDHAAR STATUS)
   const txRows = customer.transactions.map((tx, idx) => [
@@ -1136,6 +1148,7 @@ export function buildSingleCustomerReportPDF(
       commission: 0,
       cashReceived: customer.cashPaid,
       creditPending: customer.creditPending,
+      allTimeCredit: allTimeOutstanding,
       unitsSold: customer.totalUnitsBought,
       lotsCount: customer.totalPurchases,
     },

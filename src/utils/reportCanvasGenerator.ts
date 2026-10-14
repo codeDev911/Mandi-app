@@ -1150,18 +1150,18 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
           card2Border = '#a7f3d0';
           card2Text = '#065f46';
 
-          card3Title = 'صافی بقایا ادھار';
+          card3Title = 'صافی بقایا ادھار (تاریخی فلٹر)';
           card3Val = formatPKR(summary.creditPending || 0, 'Rs.', 'en');
           card3Bg = (summary.creditPending || 0) > 0 ? '#fff1f2' : '#ecfdf5';
           card3Border = (summary.creditPending || 0) > 0 ? '#fecdd3' : '#a7f3d0';
           card3Text = (summary.creditPending || 0) > 0 ? '#9f1239' : '#065f46';
 
-          const isFullySettled = (summary.creditPending || 0) <= 0;
-          card4Title = 'کیفیت کھاتہ';
-          card4Val = isFullySettled ? '✅ مکمل ادا شدہ' : '⚠️ بقایا ادھار';
-          card4Bg = isFullySettled ? '#ecfdf5' : '#fff1f2';
-          card4Border = isFullySettled ? '#a7f3d0' : '#fecdd3';
-          card4Text = isFullySettled ? '#065f46' : '#9f1239';
+          const allTimeCreditVal = summary.allTimeCredit !== undefined ? summary.allTimeCredit : ((singleCustomer as any)?.allTimeCredit ?? summary.creditPending ?? 0);
+          card4Title = 'کل ادھار (تمام وقت)';
+          card4Val = formatPKR(allTimeCreditVal, 'Rs.', 'en');
+          card4Bg = allTimeCreditVal > 0 ? '#fef2f2' : '#ecfdf5';
+          card4Border = allTimeCreditVal > 0 ? '#fca5a5' : '#a7f3d0';
+          card4Text = allTimeCreditVal > 0 ? '#991b1b' : '#065f46';
         } else if (singleProduct || reportType === 'single_product') {
           card1Title = 'مجموعی ٹرن اوور';
           card1Val = formatPKR(summary.grossSales, 'Rs.', 'en');

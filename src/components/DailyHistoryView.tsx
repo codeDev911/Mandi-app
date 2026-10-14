@@ -372,9 +372,9 @@ export const DailyHistoryView: React.FC<DailyHistoryViewProps> = ({
                       </h4>
                       <span
                         className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold font-numbers"
-                        title={`لاٹ ID: ${lot.lotNumber}`}
+                        title={`رسید نمبر: #${getLotReceiptNumber(lot.lotNumber, lot.billNumber)}`}
                       >
-                        #{getLotReceiptNumber(lot.lotNumber)}
+                        #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)}
                       </span>
                       <span
                         className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-urdu-sans ${

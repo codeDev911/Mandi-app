@@ -106,7 +106,7 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
         const q = searchQuery.toLowerCase().trim();
         const matchesName = lot.vendorName.toLowerCase().includes(q);
         const matchesPhone = lot.vendorPhone ? lot.vendorPhone.includes(q) : false;
-        const receiptNo = getLotReceiptNumber(lot.lotNumber);
+        const receiptNo = getLotReceiptNumber(lot.lotNumber, lot.billNumber);
         const matchesLotNum = lot.lotNumber.toLowerCase().includes(q) || receiptNo.includes(q);
         const matchesProductUrdu = lot.productUrdu.toLowerCase().includes(q);
         const matchesProductName = lot.productName.toLowerCase().includes(q);
@@ -631,9 +631,9 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
                                 </h4>
                                 <span
                                   className="font-mono text-[11px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-numbers font-bold flex-shrink-0"
-                                  title={`لاٹ ID: ${lot.lotNumber}`}
+                                  title={`رسید نمبر: #${getLotReceiptNumber(lot.lotNumber, lot.billNumber)}`}
                                 >
-                                  #{getLotReceiptNumber(lot.lotNumber)}
+                                  #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)}
                                 </span>
                               </div>
                               <p className="text-xs text-emerald-800 font-semibold font-urdu-sans">
@@ -1061,9 +1061,9 @@ export const AllLotsModal: React.FC<AllLotsModalProps> = ({
                                   </h4>
                                   <span
                                     className="font-mono text-[11px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-numbers font-bold flex-shrink-0"
-                                    title={`لاٹ ID: ${lot.lotNumber}`}
+                                    title={`رسید نمبر: #${getLotReceiptNumber(lot.lotNumber, lot.billNumber)}`}
                                   >
-                                    #{getLotReceiptNumber(lot.lotNumber)}
+                                    #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)}
                                   </span>
                                 </div>
                                 <p className="text-xs text-emerald-800 font-semibold font-urdu-sans">

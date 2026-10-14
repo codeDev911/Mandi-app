@@ -237,9 +237,9 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                     <span className="text-base">{lot.productEmoji}</span>
                     <span
                       className="text-[10px] font-mono px-1 py-0.2 rounded bg-white text-slate-700 border border-slate-200 font-numbers font-bold"
-                      title={`لاٹ ID: ${lot.lotNumber}`}
+                      title={`رسید نمبر: #${getLotReceiptNumber(lot.lotNumber, lot.billNumber)}`}
                     >
-                      #{getLotReceiptNumber(lot.lotNumber)}
+                      #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)}
                     </span>
                   </div>
                   <span
@@ -312,9 +312,9 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                     </h2>
                     <span
                       className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-numbers"
-                      title={`لاٹ ID: ${selectedLot.lotNumber}`}
+                      title={`رسید نمبر: #${getLotReceiptNumber(selectedLot.lotNumber, selectedLot.billNumber)}`}
                     >
-                      رسید #{getLotReceiptNumber(selectedLot.lotNumber)}
+                      رسید #{getLotReceiptNumber(selectedLot.lotNumber, selectedLot.billNumber)}
                     </span>
                   </div>
                   <p className="text-xs text-slate-600 font-urdu-sans flex items-center flex-wrap gap-2 mt-0.5">
@@ -392,8 +392,8 @@ export const BolliRoomView: React.FC<BolliRoomViewProps> = ({
                       setPendingDeleteLot({
                         lotId: selectedLot.id,
                         description: isUrdu
-                          ? `لاٹ ریکارڈ حذف کریں: #${getLotReceiptNumber(selectedLot.lotNumber)} - ${selectedLot.vendorName} (${selectedLot.productUrdu})`
-                          : `Delete Lot Record: #${getLotReceiptNumber(selectedLot.lotNumber)} - ${selectedLot.vendorName}`,
+                          ? `لاٹ ریکارڈ حذف کریں: #${getLotReceiptNumber(selectedLot.lotNumber, selectedLot.billNumber)} - ${selectedLot.vendorName} (${selectedLot.productUrdu})`
+                          : `Delete Lot Record: #${getLotReceiptNumber(selectedLot.lotNumber, selectedLot.billNumber)} - ${selectedLot.vendorName}`,
                       });
                     }}
                     className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition flex items-center gap-1.5 border border-rose-200 font-urdu-sans active:scale-95 cursor-pointer"

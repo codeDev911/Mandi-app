@@ -15,6 +15,7 @@ import {
 } from './types';
 import { defaultSettings, getInitialLots, sampleCustomers, sampleVendors, sampleExpenses } from './utils/sampleData';
 import { calculateLotSummary, calculateCashDrawerSummary } from './utils/calculations';
+import { syncLotsWithDailyVendorSequence } from './utils/billSequenceManager';
 import { sound } from './utils/sound';
 import {
   loadInitialApplicationData,
@@ -71,11 +72,16 @@ export default function App() {
   const [lots, setLots] = useState<VendorLot[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_LOTS);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return syncLotsWithDailyVendorSequence(parsed);
+        }
+      }
     } catch {
       // fallback
     }
-    return getInitialLots();
+    return syncLotsWithDailyVendorSequence(getInitialLots());
   });
 
   // 3. Customers Directory State
@@ -571,7 +577,7 @@ export default function App() {
       },
     });
 
-    setLots((prev) => [newLot, ...prev]);
+    setLots((prev) => syncLotsWithDailyVendorSequence([newLot, ...prev]));
     setSelectedLotId(newLot.id);
     setActiveTab('bolli');
   };

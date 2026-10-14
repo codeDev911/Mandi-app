@@ -207,11 +207,14 @@ export function generateLotNumber(
 }
 
 /**
- * Extracts the daily receipt own number from a lot number.
+ * Extracts the daily receipt own number from a lot number or bill number.
  * E.g.: "261010-1" -> "1", "261010-12" -> "12", "LOT-260810-122" -> "122"
- * Increments by 1 and resets to 1 each day.
+ * Increments by 1 and resets to 1 each day. Matches the receipt number in InsafMandiBillView.
  */
-export function getLotReceiptNumber(lotNumber?: string): string {
+export function getLotReceiptNumber(lotNumber?: string, billNumber?: string): string {
+  if (billNumber && String(billNumber).trim()) {
+    return String(billNumber).trim();
+  }
   if (!lotNumber) return '1';
   const clean = String(lotNumber).trim();
   // Match trailing sequence number after dash, stripping leading zeros

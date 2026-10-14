@@ -10,10 +10,8 @@ import { saveBlobFile, downloadBlobFile } from '../utils/fileDownloader';
 import { UniversalShareModal, UniversalShareItem } from './UniversalShareModal';
 import { InsafMandiBillView } from './InsafMandiBillView';
 import {
-  getOrAssignBillNumber,
-  getNextDailyBillNumber,
+  getOrAssignVendorDailyReceiptNumber,
   commitBillGeneration,
-  advanceToNextBillNumber,
 } from '../utils/billSequenceManager';
 import {
   Printer,
@@ -66,11 +64,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   const [shareModalItem, setShareModalItem] = useState<UniversalShareItem | null>(null);
   const [isAveraged, setIsAveraged] = useState<boolean>(false);
   const [billNumber, setBillNumber] = useState<number>(() => {
-    const existingBill = lots.find((l) => l.billNumber)?.billNumber;
-    if (existingBill && !isNaN(Number(existingBill))) {
-      return Number(existingBill);
-    }
-    return getOrAssignBillNumber(vendorName, dateLabel || lots[0]?.arrivalDate);
+    return getOrAssignVendorDailyReceiptNumber(vendorName, dateLabel || lots[0]?.arrivalDate, lots);
   });
 
   const displayDate = formatFullRealDate(dateLabel, lots[0]?.arrivalDate);
@@ -78,12 +72,7 @@ export const VendorConsolidatedBillModal: React.FC<VendorConsolidatedBillModalPr
   // Sync bill number when modal opens or vendor changes
   useEffect(() => {
     if (isOpen) {
-      const existingBill = lots.find((l) => l.billNumber)?.billNumber;
-      if (existingBill && !isNaN(Number(existingBill))) {
-        setBillNumber(Number(existingBill));
-      } else {
-        setBillNumber(getOrAssignBillNumber(vendorName, dateLabel || lots[0]?.arrivalDate));
-      }
+      setBillNumber(getOrAssignVendorDailyReceiptNumber(vendorName, dateLabel || lots[0]?.arrivalDate, lots));
     }
   }, [isOpen, vendorName, lots, dateLabel]);
 
@@ -663,37 +652,14 @@ ${itemsText}
 
         {/* Action Controls & Close */}
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0 flex-wrap justify-end">
-          {/* Daily Bill Number Sequential Control */}
-          <div className="flex items-center gap-1 bg-slate-950 border border-amber-500/50 rounded-xl px-2 py-1 shadow-xs">
+          {/* Daily Receipt Number Sequential Badge (Auto-assigned per vendor) */}
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-amber-500/40 rounded-xl px-2.5 py-1 shadow-xs">
             <span className="text-[11px] font-bold text-amber-400 font-urdu-sans whitespace-nowrap">
-              بل نمبر:
+              رسید نمبر:
             </span>
-            <input
-              type="number"
-              min="1"
-              value={billNumber}
-              onChange={(e) => {
-                const val = parseInt(e.target.value, 10);
-                if (!isNaN(val) && val > 0) {
-                  setBillNumber(val);
-                }
-              }}
-              className="w-12 bg-slate-900 border border-amber-400/30 rounded-md px-1 py-0.5 text-center font-numbers font-black text-amber-300 text-xs focus:ring-1 focus:ring-amber-400 outline-none"
-              title="بل نمبر تبدیل کریں"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                sound.playTick();
-                const nextNum = advanceToNextBillNumber(dateLabel || lots[0]?.arrivalDate);
-                setBillNumber(nextNum);
-                showToast(isUrdu ? `اگلا بل نمبر: #${nextNum}` : `Next bill number: #${nextNum}`);
-              }}
-              className="px-1.5 py-0.5 rounded-md bg-amber-500/20 hover:bg-amber-500/30 active:scale-95 text-amber-300 border border-amber-500/40 text-[10px] font-urdu-sans font-bold transition whitespace-nowrap"
-              title="اگلا بل نمبر تیار کریں (Next Bill Number)"
-            >
-              <span>اگلا بل (#{billNumber + 1})</span>
-            </button>
+            <span className="font-numbers font-black text-amber-300 text-xs sm:text-sm">
+              #{billNumber}
+            </span>
           </div>
 
           {/* Averaged Bill Toggle Option (بڑی لسٹ کیلئے اجناس وار اوسط بل کا آپشن) */}

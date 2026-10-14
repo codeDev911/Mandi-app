@@ -112,6 +112,16 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   // Primary Tab: Customer Khata vs. Vendor Khata & Payments
   const [activeKhataSection, setActiveKhataSection] = useState<'customers' | 'vendors'>('customers');
 
+  const lotBillMap = useMemo(() => {
+    const map = new Map<string, string>();
+    lots.forEach((l) => {
+      if (l.lotNumber && l.billNumber) {
+        map.set(l.lotNumber, l.billNumber);
+      }
+    });
+    return map;
+  }, [lots]);
+
   // Unified PIN Security Delete Action State
   const [pendingDeleteAction, setPendingDeleteAction] = useState<{
     type: 'buyer_sale' | 'customer_payment' | 'customer_credit' | 'vendor_payment' | 'vendor_lot';
@@ -1522,7 +1532,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                   <tbody className="divide-y divide-slate-100">
                                     {paginatedCustSales.map((sale) => (
                                       <tr key={sale.saleId} className="hover:bg-slate-50/80">
-                                        <td className="py-1.5 px-2.5 text-slate-500 font-numbers">#{sale.lotNumber}</td>
+                                        <td className="py-1.5 px-2.5 text-slate-500 font-numbers">#{getLotReceiptNumber(sale.lotNumber, lotBillMap.get(sale.lotNumber))}</td>
                                         <td className="py-1.5 px-2.5 font-bold text-slate-800">{sale.productUrdu}</td>
                                         <td className="py-1.5 px-2.5 text-center font-numbers">{sale.quantity} {sale.unitLabel}</td>
                                         <td className="py-1.5 px-2.5 text-center font-numbers">
@@ -1836,7 +1846,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {paginatedTransactions.map((sale) => (
                       <tr key={sale.saleId} className="hover:bg-slate-50/80">
-                        <td className="py-2 px-3 font-mono font-bold text-slate-700">#{sale.lotNumber}</td>
+                        <td className="py-2 px-3 font-mono font-bold text-slate-700">#{getLotReceiptNumber(sale.lotNumber, lotBillMap.get(sale.lotNumber))}</td>
                         <td className="py-2 px-3 font-bold text-slate-800">{sale.vendorName}</td>
                         <td className="py-2 px-3 font-bold text-emerald-800">{sale.buyerName}</td>
                         <td className="py-2 px-3 font-bold text-slate-900">{sale.productUrdu}</td>
@@ -2146,11 +2156,12 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                             </button>
                           )}
 
-                          {/* Dedicated Record Payment / Pay to Vendor Button - STRICTLY ONLY IF REMAINING DUE > 0 */}
-                          {vendor.remainingDue > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => {
+                          {/* Dedicated Record Payment / Pay to Vendor Button - Enabled if pending payments, disabled otherwise */}
+                          <button
+                            type="button"
+                            disabled={vendor.remainingDue <= 0}
+                            onClick={() => {
+                              if (vendor.remainingDue > 0) {
                                 sound.playTick();
                                 setSelectedVendorForPayment(
                                   isPaymentFormOpen ? null : vendor.name
@@ -2158,18 +2169,30 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                 setVendorPaymentAmount(vendor.remainingDue);
                                 setVendorPaymentLotTarget('all');
                                 setVendorPaymentNote('');
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black transition flex items-center gap-1 shadow-xs active:scale-95"
-                            >
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs ${
+                              vendor.remainingDue <= 0
+                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                                : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 active:scale-95'
+                            }`}
+                            title={
+                              vendor.remainingDue <= 0
+                                ? (isUrdu ? 'کوئی بقایا رقم واجب الادا نہیں (مکمل ادا شدہ)' : 'No pending payment (Fully Paid)')
+                                : (isUrdu ? 'زمیندار کو رقم ادائیگی کا اندراج کریں' : 'Pay to Vendor')
+                            }
+                          >
+                            {vendor.remainingDue <= 0 ? (
+                              <Check className="w-3.5 h-3.5 stroke-[2.5] text-slate-400" />
+                            ) : (
                               <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.5]" />
-                              <span>{isUrdu ? 'ادائیگی کا اندراج' : 'Pay to Vendor'}</span>
-                            </button>
-                          ) : (
-                            <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-[11px] font-bold font-urdu-sans flex items-center gap-1">
-                              <Check className="w-3 h-3 stroke-[3]" />
-                              <span>{isUrdu ? 'مکمل ادا شدہ' : 'Fully Paid'}</span>
+                            )}
+                            <span>
+                              {vendor.remainingDue <= 0
+                                ? (isUrdu ? 'ادائیگی (مکمل)' : 'Fully Paid')
+                                : (isUrdu ? 'ادائیگی کا اندراج' : 'Pay to Vendor')}
                             </span>
-                          )}
+                          </button>
 
                           {/* Toggle Details */}
                           <button
@@ -2249,7 +2272,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                               <option value="all">مجموعی کھاتہ پر تقسیم کریں (All Lots)</option>
                               {vendor.lots.map((l) => (
                                 <option key={l.id} value={l.id}>
-                                  لاٹ #{l.lotNumber} - {l.productUrdu} ({formatPKR(l.summary.netPayableToVendor, settings.currencySymbol, settings.language)})
+                                  رسید #{getLotReceiptNumber(l.lotNumber, l.billNumber)} - {l.productUrdu} ({formatPKR(l.summary.netPayableToVendor, settings.currencySymbol, settings.language)})
                                 </option>
                               ))}
                             </select>
@@ -2429,7 +2452,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                           className="py-2 px-2.5 font-mono font-bold text-slate-700"
                                           title={`لاٹ ID: ${lot.lotNumber}`}
                                         >
-                                          #{getLotReceiptNumber(lot.lotNumber)}
+                                          #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)}
                                         </td>
                                         <td className="py-2 px-2.5 text-slate-500 font-numbers">{lot.arrivalDate}</td>
                                         <td className="py-2 px-2.5 font-bold text-slate-900">{lot.productUrdu}</td>
@@ -2488,8 +2511,8 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                                     type: 'vendor_lot',
                                                     title: isUrdu ? 'لاٹ ریکارڈ حذف کرنے کی تصدیق' : 'Confirm Lot Deletion',
                                                     description: isUrdu
-                                                      ? `لاٹ ریکارڈ حذف کریں: #${lot.lotNumber} - ${vendor.name} (${lot.productUrdu})`
-                                                      : `Delete lot record: #${lot.lotNumber} - ${vendor.name} (${lot.productUrdu})`,
+                                                      ? `لاٹ ریکارڈ حذف کریں: #${getLotReceiptNumber(lot.lotNumber, lot.billNumber)} - ${vendor.name} (${lot.productUrdu})`
+                                                      : `Delete lot record: #${getLotReceiptNumber(lot.lotNumber, lot.billNumber)} - ${vendor.name} (${lot.productUrdu})`,
                                                     execute: () => {
                                                       if (onDeleteLot) {
                                                         onDeleteLot(lot.id);

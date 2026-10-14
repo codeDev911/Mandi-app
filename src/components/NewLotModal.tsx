@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { UnitType, AppSettings, VendorLot, SavedVendor, MazdooriRateItem } from '../types';
 import { translations, commonMandiProducts, unitLabels, ProductPreset, getAvailableProducts, getUnitDisplayLabel, resolveUnitType } from '../utils/localization';
 import { generateLotNumber, getLotReceiptNumber, calculateLotSummary, getUnitMazdooriRate, getMazdooriItems } from '../utils/calculations';
+import { commitBillGeneration, getOrAssignVendorDailyReceiptNumber } from '../utils/billSequenceManager';
 import { parseNumber } from '../utils/currency';
 import { sound } from '../utils/sound';
 import {
@@ -57,6 +58,12 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
   );
 
   const [vendorName, setVendorName] = useState('');
+
+  const arrivalDateKey = useMemo(() => new Date().toISOString().slice(0, 10), [isOpen]);
+
+  const vendorReceiptNumber = useMemo(() => {
+    return getOrAssignVendorDailyReceiptNumber(vendorName, arrivalDateKey, existingLots);
+  }, [vendorName, arrivalDateKey, existingLots, isOpen]);
   const [vendorPhone, setVendorPhone] = useState('');
   const [vendorCity, setVendorCity] = useState('');
   const [saveVendorToDb, setSaveVendorToDb] = useState(true);
@@ -178,9 +185,12 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
       prodEmoji = preset.emoji;
     }
 
+    const assignedReceiptNumber = String(vendorReceiptNumber);
+
     const newLot: VendorLot = {
       id: `lot-${Date.now()}`,
       lotNumber,
+      billNumber: assignedReceiptNumber,
       vendorName: vendorName.trim(),
       vendorPhone: vendorPhone.trim() || undefined,
       vendorCity: vendorCity.trim() || undefined,
@@ -256,6 +266,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
     }
 
     sound.playBidSound();
+    commitBillGeneration(vendorReceiptNumber, vendorName.trim(), newLot.arrivalDate);
     onSaveLot(newLot);
 
     // If "keep vendor details & don't close" is checked:
@@ -304,7 +315,7 @@ export const NewLotModal: React.FC<NewLotModalProps> = ({
                   className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-numbers text-xs font-bold"
                   title={`لاٹ ID: ${upcomingLotNumber}`}
                 >
-                  رسید #{getLotReceiptNumber(upcomingLotNumber)}
+                  رسید #{vendorReceiptNumber}
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-300 font-urdu-sans">

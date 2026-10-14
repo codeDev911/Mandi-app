@@ -1,17 +1,23 @@
+import { VendorLot } from '../types';
+
 /**
- * Daily Sequential Bill Number Manager for Insaf Mandi Bills
+ * Daily Sequential Bill/Receipt Number Manager for Insaf Mandi
  * 
- * Tracks daily sequential bill numbers (1, 2, 3, ...).
- * When a new day begins, sequence automatically resets to start from 1 again.
+ * Rules:
+ * 1. Each day starts at receipt #1.
+ * 2. All lots belonging to the same vendor on the same day share the EXACT SAME receipt number.
+ *    (e.g., Vendor A has 4 lots today -> all 4 lots are under receipt #1.
+ *     Vendor B has 2 lots today -> all 2 lots are under receipt #2).
+ * 3. When a new day arrives (date changes), the sequence resets to start from #1 again.
  */
 
-export interface DailyBillSequenceState {
-  dateKey: string; // YYYY-MM-DD
-  lastBillNumber: number; // e.g. 43
-  assignedBills?: Record<string, number>; // vendor / lot session key -> bill number
+export interface DailyVendorSequenceRecord {
+  lastNumber: number;
+  vendors: Record<string, number>; // normalized vendor name -> daily receipt number (1, 2, 3...)
 }
 
-const STORAGE_KEY_BILL_SEQ = 'mandi_bolli_daily_bill_sequence_v1';
+const STORAGE_KEY_VENDOR_SEQ = 'mandi_bolli_daily_vendor_sequence_v2';
+const STORAGE_KEY_LEGACY_BILL_SEQ = 'mandi_bolli_daily_bill_sequence_v1';
 
 /**
  * Returns today's local date string formatted as YYYY-MM-DD
@@ -46,54 +52,193 @@ export function normalizeDateKey(dateInput?: string): string {
 }
 
 /**
- * Loads current daily bill sequence from storage.
- * If target date is a new day, returns state with lastBillNumber = 0 (next bill will be 1).
+ * Loads all daily vendor sequences from localStorage
  */
-export function getDailyBillSequence(targetDate?: string): DailyBillSequenceState {
-  const dateKey = normalizeDateKey(targetDate);
+function loadAllDailySequences(): Record<string, DailyVendorSequenceRecord> {
   try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY_BILL_SEQ) : null;
-    if (raw) {
-      const parsed: DailyBillSequenceState = JSON.parse(raw);
-      if (parsed && parsed.dateKey === dateKey) {
-        return {
-          dateKey,
-          lastBillNumber: Math.max(0, Number(parsed.lastBillNumber) || 0),
-          assignedBills: parsed.assignedBills || {},
-        };
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEY_VENDOR_SEQ);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
       }
     }
   } catch (err) {
-    console.error('Error loading daily bill sequence:', err);
+    console.error('Error loading daily vendor sequence store:', err);
   }
-
-  // New day or first time: reset to 0 so next is 1
-  return {
-    dateKey,
-    lastBillNumber: 0,
-    assignedBills: {},
-  };
+  return {};
 }
 
 /**
- * Returns the next available daily bill number for the day (e.g. if 43 generated, returns 44; on new day returns 1)
+ * Saves all daily vendor sequences to localStorage
  */
-export function getNextDailyBillNumber(targetDate?: string): number {
-  const state = getDailyBillSequence(targetDate);
-  return (state.lastBillNumber || 0) + 1;
+function saveAllDailySequences(data: Record<string, DailyVendorSequenceRecord>): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY_VENDOR_SEQ, JSON.stringify(data));
+    }
+  } catch (err) {
+    console.error('Error saving daily vendor sequence store:', err);
+  }
+}
+
+/**
+ * Gets or assigns a daily receipt number for a specific vendor on a specific date.
+ * - Same vendor on same date ALWAYS gets the same receipt number.
+ * - If vendor is new for this date, gets next sequential number (starts from 1 each new day).
+ */
+export function getOrAssignVendorDailyReceiptNumber(
+  vendorName: string,
+  targetDate?: string,
+  existingLots?: VendorLot[]
+): number {
+  const dateKey = normalizeDateKey(targetDate);
+  const cleanVendor = (vendorName || '').trim().toLowerCase();
+  const allData = loadAllDailySequences();
+  const dayRecord: DailyVendorSequenceRecord = allData[dateKey] || {
+    lastNumber: 0,
+    vendors: {},
+  };
+
+  // 1. If already assigned in persistent storage for this date
+  if (cleanVendor && dayRecord.vendors[cleanVendor]) {
+    return dayRecord.vendors[cleanVendor];
+  }
+
+  // 2. Check if any existing lot on this date for this vendor already has a billNumber
+  if (cleanVendor && Array.isArray(existingLots) && existingLots.length > 0) {
+    const matchingLot = existingLots.find((lot) => {
+      if (!lot || !lot.vendorName) return false;
+      const lotDate = normalizeDateKey(lot.arrivalDate);
+      return lotDate === dateKey && lot.vendorName.trim().toLowerCase() === cleanVendor;
+    });
+
+    if (matchingLot && matchingLot.billNumber) {
+      const parsedNum = parseInt(matchingLot.billNumber, 10);
+      if (!isNaN(parsedNum) && parsedNum > 0) {
+        dayRecord.vendors[cleanVendor] = parsedNum;
+        dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, parsedNum);
+        allData[dateKey] = dayRecord;
+        saveAllDailySequences(allData);
+        return parsedNum;
+      }
+    }
+  }
+
+  // 3. If vendor name is empty, just return next available without permanently assigning empty key
+  if (!cleanVendor) {
+    return (dayRecord.lastNumber || 0) + 1;
+  }
+
+  // 4. Determine next number starting from 1 for this date
+  let maxFound = dayRecord.lastNumber || 0;
+  if (Array.isArray(existingLots)) {
+    for (const lot of existingLots) {
+      if (!lot) continue;
+      const lotDate = normalizeDateKey(lot.arrivalDate);
+      if (lotDate === dateKey && lot.billNumber) {
+        const num = parseInt(lot.billNumber, 10);
+        if (!isNaN(num) && num > maxFound) {
+          maxFound = num;
+        }
+      }
+    }
+  }
+
+  const nextNumber = Math.max(1, maxFound + 1);
+  dayRecord.vendors[cleanVendor] = nextNumber;
+  dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, nextNumber);
+  allData[dateKey] = dayRecord;
+  saveAllDailySequences(allData);
+
+  return nextNumber;
+}
+
+/**
+ * Synchronizes an array of lots so that every lot of the day for the same vendor
+ * shares the exact same receipt number (starting from #1 each day).
+ */
+export function syncLotsWithDailyVendorSequence(lots: VendorLot[]): VendorLot[] {
+  if (!Array.isArray(lots) || lots.length === 0) return lots;
+
+  const allData = loadAllDailySequences();
+  let hasChanges = false;
+
+  // Group lots by arrival date
+  const dateGroups = new Map<string, VendorLot[]>();
+  // We process lots in original/chronological order (reversed if lots are prepended [new, ...old])
+  const chronologicalLots = [...lots].reverse();
+
+  for (const lot of chronologicalLots) {
+    const dateKey = normalizeDateKey(lot.arrivalDate);
+    if (!dateGroups.has(dateKey)) {
+      dateGroups.set(dateKey, []);
+    }
+    dateGroups.get(dateKey)!.push(lot);
+  }
+
+  // Map to hold target billNumber for each lot id
+  const lotBillMap = new Map<string, string>();
+
+  dateGroups.forEach((dayLots, dateKey) => {
+    const dayRecord: DailyVendorSequenceRecord = allData[dateKey] || {
+      lastNumber: 0,
+      vendors: {},
+    };
+
+    let currentDaySeq = 0;
+    // Find highest already established sequence number for this date
+    Object.values(dayRecord.vendors).forEach((num) => {
+      if (num > currentDaySeq) currentDaySeq = num;
+    });
+
+    for (const lot of dayLots) {
+      const cleanVendor = (lot.vendorName || '').trim().toLowerCase();
+      if (!cleanVendor) continue;
+
+      let vendorBillNum: number;
+      if (dayRecord.vendors[cleanVendor]) {
+        vendorBillNum = dayRecord.vendors[cleanVendor];
+      } else {
+        // Assign next sequence starting from 1 for this day
+        currentDaySeq += 1;
+        vendorBillNum = currentDaySeq;
+        dayRecord.vendors[cleanVendor] = vendorBillNum;
+        dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, vendorBillNum);
+        hasChanges = true;
+      }
+
+      lotBillMap.set(lot.id, String(vendorBillNum));
+    }
+
+    allData[dateKey] = dayRecord;
+  });
+
+  if (hasChanges) {
+    saveAllDailySequences(allData);
+  }
+
+  // Update lots where billNumber doesn't match
+  return lots.map((lot) => {
+    const targetBill = lotBillMap.get(lot.id);
+    if (targetBill && lot.billNumber !== targetBill) {
+      return {
+        ...lot,
+        billNumber: targetBill,
+      };
+    }
+    return lot;
+  });
 }
 
 /**
  * Gets the bill number for a specific vendor/lot session.
- * If already assigned for today, returns existing; otherwise returns next daily bill number.
+ * Backward compatible alias for getOrAssignVendorDailyReceiptNumber.
  */
-export function getOrAssignBillNumber(sessionKey?: string, targetDate?: string): number {
-  const state = getDailyBillSequence(targetDate);
-  const cleanKey = (sessionKey || '').trim().toLowerCase();
-  if (cleanKey && state.assignedBills && state.assignedBills[cleanKey]) {
-    return state.assignedBills[cleanKey];
-  }
-  return (state.lastBillNumber || 0) + 1;
+export function getOrAssignBillNumber(sessionKey?: string, targetDate?: string, existingLots?: VendorLot[]): number {
+  return getOrAssignVendorDailyReceiptNumber(sessionKey || '', targetDate, existingLots);
 }
 
 /**
@@ -102,31 +247,32 @@ export function getOrAssignBillNumber(sessionKey?: string, targetDate?: string):
  */
 export function commitBillGeneration(billNumber: number, sessionKey?: string, targetDate?: string): number {
   const dateKey = normalizeDateKey(targetDate);
-  const state = getDailyBillSequence(dateKey);
   const num = Math.max(1, Math.round(Number(billNumber) || 1));
-  const newLast = Math.max(state.lastBillNumber || 0, num);
-  const newAssigned = { ...(state.assignedBills || {}) };
+  const allData = loadAllDailySequences();
+  const dayRecord: DailyVendorSequenceRecord = allData[dateKey] || {
+    lastNumber: 0,
+    vendors: {},
+  };
 
   const cleanKey = (sessionKey || '').trim().toLowerCase();
   if (cleanKey) {
-    newAssigned[cleanKey] = num;
+    dayRecord.vendors[cleanKey] = num;
   }
+  dayRecord.lastNumber = Math.max(dayRecord.lastNumber || 0, num);
+  allData[dateKey] = dayRecord;
+  saveAllDailySequences(allData);
 
-  const newState: DailyBillSequenceState = {
-    dateKey,
-    lastBillNumber: newLast,
-    assignedBills: newAssigned,
-  };
+  return dayRecord.lastNumber;
+}
 
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_BILL_SEQ, JSON.stringify(newState));
-    }
-  } catch (err) {
-    console.error('Error persisting bill generation:', err);
-  }
-
-  return newLast;
+/**
+ * Returns the next available daily bill number for the day
+ */
+export function getNextDailyBillNumber(targetDate?: string): number {
+  const dateKey = normalizeDateKey(targetDate);
+  const allData = loadAllDailySequences();
+  const dayRecord = allData[dateKey];
+  return ((dayRecord?.lastNumber) || 0) + 1;
 }
 
 /**
@@ -139,22 +285,31 @@ export function advanceToNextBillNumber(targetDate?: string): number {
 }
 
 /**
- * Sets daily bill number manually (useful if synchronizing with manual paper bill book)
+ * Backward compatibility: DailyBillSequenceState
  */
+export interface DailyBillSequenceState {
+  dateKey: string;
+  lastBillNumber: number;
+  assignedBills?: Record<string, number>;
+}
+
+export function getDailyBillSequence(targetDate?: string): DailyBillSequenceState {
+  const dateKey = normalizeDateKey(targetDate);
+  const allData = loadAllDailySequences();
+  const dayRecord = allData[dateKey] || { lastNumber: 0, vendors: {} };
+  return {
+    dateKey,
+    lastBillNumber: dayRecord.lastNumber,
+    assignedBills: dayRecord.vendors,
+  };
+}
+
 export function setDailyBillNumber(num: number, targetDate?: string): void {
   const dateKey = normalizeDateKey(targetDate);
-  const state = getDailyBillSequence(dateKey);
   const safeNum = Math.max(0, Math.round(Number(num) || 0));
-  const newState: DailyBillSequenceState = {
-    ...state,
-    dateKey,
-    lastBillNumber: safeNum,
-  };
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_BILL_SEQ, JSON.stringify(newState));
-    }
-  } catch (err) {
-    console.error('Error setting daily bill number:', err);
-  }
+  const allData = loadAllDailySequences();
+  const dayRecord = allData[dateKey] || { lastNumber: 0, vendors: {} };
+  dayRecord.lastNumber = safeNum;
+  allData[dateKey] = dayRecord;
+  saveAllDailySequences(allData);
 }

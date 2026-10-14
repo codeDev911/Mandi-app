@@ -2,7 +2,7 @@ import React from 'react';
 import { VendorLot, AppSettings } from '../types';
 import { unitLabels, formatFullRealDate, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR } from '../utils/currency';
-import { getOrAssignBillNumber } from '../utils/billSequenceManager';
+import { getOrAssignVendorDailyReceiptNumber } from '../utils/billSequenceManager';
 
 export interface InsafMandiBillViewProps {
   vendorName: string;
@@ -38,8 +38,9 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
     uniqueLotNumbers.length > 0
       ? uniqueLotNumbers.join(', ')
       : (lots[0]?.lotNumber || '').replace(/^LOT-/i, '');
-  const fallbackDailyBillNo = String(getOrAssignBillNumber(vendorName, dateLabel || lots[0]?.arrivalDate));
-  const displayBillNo = billNumber || lots[0]?.billNumber || fallbackDailyBillNo;
+  const targetDate = dateLabel || lots[0]?.arrivalDate;
+  const vendorDailyReceiptNo = String(getOrAssignVendorDailyReceiptNumber(vendorName, targetDate, lots));
+  const displayBillNo = billNumber || lots.find((l) => l.billNumber)?.billNumber || vendorDailyReceiptNo;
 
   // Aggregate Deductions & Totals
   const aggregatedExpenses = {
