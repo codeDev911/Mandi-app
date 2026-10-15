@@ -14,7 +14,14 @@ import {
 } from '../types';
 import { translations, unitLabels, commonMandiProducts, getUnitDisplayLabel } from '../utils/localization';
 import { formatPKR, parseNumber } from '../utils/currency';
-import { calculateCashDrawerSummary, calculateLotSummary, distributeMunshianaToLots, getLotReceiptNumber } from '../utils/calculations';
+import {
+  calculateCashDrawerSummary,
+  calculateLotSummary,
+  distributeMunshianaToLots,
+  getLotReceiptNumber,
+  getAllReconciledVendorPayments,
+  getReconciledVendorPaymentsForVendor,
+} from '../utils/calculations';
 import { sound } from '../utils/sound';
 import { VendorConsolidatedBillModal } from './VendorConsolidatedBillModal';
 import { AllVendorBillsModal } from './AllVendorBillsModal';
@@ -129,12 +136,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   const [selectedExpensePaymentMethodFilter, setSelectedExpensePaymentMethodFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // State for Dedicated Vendor Payment div
-  const [selectedVendorForPayment, setSelectedVendorForPayment] = useState<string | null>(null);
-  const [vendorPaymentAmount, setVendorPaymentAmount] = useState<number>(0);
-  const [vendorPaymentNote, setVendorPaymentNote] = useState('');
-  const [vendorPaymentMethod, setVendorPaymentMethod] = useState<'cash' | 'online' | 'cheque'>('cash');
-  const [vendorPaymentTargetLotId, setVendorPaymentTargetLotId] = useState<string>('all');
 
   // State for PDF preview modal
   const [pdfPreview, setPdfPreview] = useState<PDFPreviewData | null>(null);
@@ -625,38 +626,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const lotNetPayable = Math.max(0, lotGrossSales - lotExpensesInDate);
       vendorPayable += lotNetPayable;
 
-      // Vendor payments on this lot recorded on this date
-      if (dateFilter === 'all') {
-        const lotPaid =
-          lot.vendorPaymentAmount !== undefined
-            ? lot.vendorPaymentAmount
-            : lot.vendorPaymentStatus === 'paid'
-            ? lot.summary.netPayableToVendor
-            : 0;
-        vendorPaid += lotPaid;
-      } else if (lot.vendorPaymentDate && isDateInRange(lot.vendorPaymentDate)) {
-        const lotPaid =
-          lot.vendorPaymentAmount !== undefined
-            ? lot.vendorPaymentAmount
-            : lot.vendorPaymentStatus === 'paid'
-            ? lot.summary.netPayableToVendor
-            : 0;
-        vendorPaid += lotPaid;
-      }
     });
 
-    // 2. Standalone vendor payments recorded in vendors list matching this date
-    if (vendors && Array.isArray(vendors)) {
-      vendors.forEach((v) => {
-        (v.payments || []).forEach((pay) => {
-          if (pay.lotId) return; // already counted under lot
-          const payDate = (pay.paymentDate || pay.date || pay.timestamp || '').slice(0, 10);
-          if (dateFilter === 'all' || isDateInRange(payDate)) {
-            vendorPaid += Number(pay.amount) || 0;
-          }
-        });
-      });
-    }
+    // 2. Vendor payments recorded on this date (reconciled to prevent double counting between vendor payments and lots)
+    const allReconciledVendorPayments = getAllReconciledVendorPayments(filteredLotsByDate, vendors);
+    allReconciledVendorPayments.forEach((p) => {
+      if (dateFilter === 'all' || isDateInRange(p.date)) {
+        vendorPaid += Number(p.amount) || 0;
+      }
+    });
 
     // 3. Customer Khata Payments received: from EACH payment record directly
     // This guarantees that any payment recorded today (even for 4-day-old sales) shows up in today's collected cash
@@ -823,64 +801,48 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const lotNet = Math.max(0, lotGross - lotExp);
       existing.netPayable += (dateFilter === 'all') ? lot.summary.netPayableToVendor : lotNet;
 
-      let lotPaid = 0;
-      if (dateFilter === 'all') {
-        lotPaid =
-          lot.vendorPaymentAmount !== undefined
-            ? lot.vendorPaymentAmount
-            : lot.vendorPaymentStatus === 'paid'
-            ? lot.summary.netPayableToVendor
-            : 0;
-      } else if (isPaymentDate) {
-        lotPaid =
-          lot.vendorPaymentAmount !== undefined
-            ? lot.vendorPaymentAmount
-            : lot.vendorPaymentStatus === 'paid'
-            ? lot.summary.netPayableToVendor
-            : 0;
-      } else if (!lot.vendorPaymentDate && isArrival && lot.vendorPaymentStatus === 'paid') {
-        lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : lot.summary.netPayableToVendor;
-      }
-
-      existing.totalPaid += lotPaid;
-      existing.pendingBalance = Math.max(0, existing.netPayable - existing.totalPaid);
       existing.lots.push(lot);
-
       vendorMap.set(lot.vendorName, existing);
     });
 
-    // Also include standalone vendor payments from vendors list matching date
+    // Also include any saved vendors who have payments or exist in vendors list
     if (vendors && Array.isArray(vendors)) {
       vendors.forEach((v) => {
         if (selectedVendorFilter !== 'all' && v.name !== selectedVendorFilter) {
           return;
         }
-        (v.payments || []).forEach((pay) => {
-          if (pay.lotId) return; // already counted under lot
-          const payDate = (pay.paymentDate || pay.date || pay.timestamp || '').slice(0, 10);
-          if (dateFilter === 'all' || isDateInRange(payDate)) {
-            const existing = vendorMap.get(v.name) || {
-              vendorName: v.name,
-              vendorPhone: v.phone,
-              vendorCity: v.city,
-              lotsCount: 0,
-              totalUnits: 0,
-              unitsSold: 0,
-              grossSales: 0,
-              totalExpenses: 0,
-              commission: 0,
-              netPayable: 0,
-              totalPaid: 0,
-              pendingBalance: 0,
-              lots: [],
-            };
-            existing.totalPaid += Number(pay.amount) || 0;
-            existing.pendingBalance = Math.max(0, existing.netPayable - existing.totalPaid);
-            vendorMap.set(v.name, existing);
-          }
-        });
+        if (!vendorMap.has(v.name)) {
+          vendorMap.set(v.name, {
+            vendorName: v.name,
+            vendorPhone: v.phone,
+            vendorCity: v.city,
+            lotsCount: 0,
+            totalUnits: 0,
+            unitsSold: 0,
+            grossSales: 0,
+            totalExpenses: 0,
+            commission: 0,
+            netPayable: 0,
+            totalPaid: 0,
+            pendingBalance: 0,
+            lots: [],
+          });
+        }
       });
     }
+
+    // Accurately reconcile totalPaid and pendingBalance for each vendor without double counting
+    vendorMap.forEach((existing, vName) => {
+      const vPayments = getReconciledVendorPaymentsForVendor(vName, existing.lots, vendors);
+      let vPaid = 0;
+      vPayments.forEach((p) => {
+        if (dateFilter === 'all' || isDateInRange(p.date)) {
+          vPaid += Number(p.amount) || 0;
+        }
+      });
+      existing.totalPaid = vPaid;
+      existing.pendingBalance = Math.max(0, existing.netPayable - existing.totalPaid);
+    });
 
     return Array.from(vendorMap.values()).filter((v) =>
       v.vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1426,33 +1388,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  // Handlers for Dedicated Vendor Payment Form
-  const handleOpenVendorPayment = (vendorName: string, defaultAmount: number, targetLotId: string = 'all') => {
-    sound.playTick();
-    if (selectedVendorForPayment === vendorName && vendorPaymentTargetLotId === targetLotId) {
-      setSelectedVendorForPayment(null);
-    } else {
-      setSelectedVendorForPayment(vendorName);
-      setVendorPaymentAmount(defaultAmount > 0 ? defaultAmount : 0);
-      setVendorPaymentNote('');
-      setVendorPaymentMethod('cash');
-      setVendorPaymentTargetLotId(targetLotId);
-    }
-  };
-
-  const handleSaveVendorPayment = (vendorName: string) => {
-    if (vendorPaymentAmount <= 0) return;
-    if (onRecordVendorPayment) {
-      onRecordVendorPayment(vendorName, {
-        lotId: vendorPaymentTargetLotId === 'all' ? undefined : vendorPaymentTargetLotId,
-        amount: vendorPaymentAmount,
-        notes: vendorPaymentNote.trim() || undefined,
-        paymentMethod: vendorPaymentMethod,
-      });
-    }
-    sound.playCashChime();
-    setSelectedVendorForPayment(null);
-  };
 
   const handlePrint = (e?: React.MouseEvent) => {
     if (e) {
@@ -2061,72 +1996,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         </span>
                       </div>
 
-                      {/* Paid Amount */}
-                      <div className="text-start sm:text-end bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200">
-                        <span className="text-[10px] text-emerald-800 font-bold font-urdu-sans flex items-center gap-1 justify-end">
-                          <CheckCircle2 className="w-2.5 h-2.5" />
-                          <span>{isUrdu ? 'ادا شدہ:' : 'Paid:'}</span>
-                        </span>
-                        <span className="text-xs sm:text-sm font-bold text-emerald-950 font-numbers block">
-                          {formatPKR(v.totalPaid, settings.currencySymbol, settings.language)}
-                        </span>
-                      </div>
-
-                      {/* Pending Balance */}
-                      <div className={`text-start sm:text-end px-2.5 py-1 rounded-xl border ${
-                        v.pendingBalance > 0 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'
-                      }`}>
-                        <span className={`text-[10px] font-bold font-urdu-sans flex items-center gap-1 justify-end ${
-                          v.pendingBalance > 0 ? 'text-amber-800' : 'text-slate-500'
-                        }`}>
-                          <Clock className="w-2.5 h-2.5" />
-                          <span>{isUrdu ? 'بقایا واجب الادا:' : 'Pending:'}</span>
-                        </span>
-                        <span className={`text-xs sm:text-sm font-bold font-numbers block ${
-                          v.pendingBalance > 0 ? 'text-amber-950' : 'text-slate-500'
-                        }`}>
-                          {formatPKR(v.pendingBalance, settings.currencySymbol, settings.language)}
-                        </span>
-                      </div>
-
                       {/* Action Buttons */}
                       <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
-                        {/* Dedicated Payment Button - Enabled if pending payments, disabled otherwise */}
-                        <button
-                          type="button"
-                          disabled={v.pendingBalance <= 0}
-                          onClick={() => {
-                            if (v.pendingBalance > 0) {
-                              handleOpenVendorPayment(v.vendorName, v.pendingBalance);
-                            }
-                          }}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold font-urdu-sans transition flex items-center gap-1.5 shadow-2xs ${
-                            v.pendingBalance <= 0
-                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
-                              : selectedVendorForPayment === v.vendorName
-                              ? 'bg-slate-800 text-white active:scale-95'
-                              : 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95'
-                          }`}
-                          title={
-                            v.pendingBalance <= 0
-                              ? (isUrdu ? 'کوئی بقایا رقم واجب الادا نہیں ہے (مکمل ادا شدہ)' : 'No pending payment (Fully Paid)')
-                              : (isUrdu ? 'زمیندار کو رقم ادائیگی کا اندراج کریں' : 'Record vendor payment')
-                          }
-                        >
-                          {v.pendingBalance <= 0 ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" />
-                          ) : (
-                            <Banknote className="w-3.5 h-3.5" />
-                          )}
-                          <span>
-                            {v.pendingBalance <= 0
-                              ? (isUrdu ? 'ادائیگی (مکمل)' : 'Paid (Zero Due)')
-                              : selectedVendorForPayment === v.vendorName
-                              ? (isUrdu ? 'بند کریں' : 'Close')
-                              : (isUrdu ? 'ادائیگی درج کریں' : 'Pay Vendor')}
-                          </span>
-                        </button>
-
                         <button
                           onClick={() => {
                             sound.playTick();
@@ -2142,150 +2013,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       </div>
                     </div>
                   </div>
-
-                  {/* DEDICATED PAYMENT RECEIVE / PAYOUT FORM FOR VENDOR - STRICTLY ONLY IF PENDING BALANCE > 0 */}
-                  {selectedVendorForPayment === v.vendorName && v.pendingBalance > 0 && (
-                    <div className="bg-emerald-50/90 p-3.5 sm:p-4 rounded-2xl border-2 border-emerald-300 space-y-3 animate-in fade-in duration-150 shadow-xs">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200 pb-2">
-                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-950 font-urdu-sans">
-                          <Banknote className="w-4 h-4 text-emerald-700" />
-                          <span>{isUrdu ? `زمیندار (${v.vendorName}) کو رقم ادائیگی کا اندراج:` : `Record Payment to ${v.vendorName}:`}</span>
-                        </div>
-                        <div className="flex items-center gap-3 text-xs font-urdu-sans flex-wrap">
-                          <span className="text-slate-600">
-                            {isUrdu ? 'کل واجب الادا:' : 'Net Payable:'}{' '}
-                            <strong className="text-slate-900 font-numbers">{formatPKR(v.netPayable, settings.currencySymbol, settings.language)}</strong>
-                          </span>
-                          <span className="text-emerald-800">
-                            {isUrdu ? 'ادا شدہ:' : 'Paid:'}{' '}
-                            <strong className="text-emerald-700 font-numbers">{formatPKR(v.totalPaid, settings.currencySymbol, settings.language)}</strong>
-                          </span>
-                          <span className="text-amber-800 font-bold">
-                            {isUrdu ? 'موجودہ بقایا:' : 'Pending:'}{' '}
-                            <strong className="text-amber-900 font-numbers">{formatPKR(v.pendingBalance, settings.currencySymbol, settings.language)}</strong>
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
-                        {/* Amount Input */}
-                        <div className="sm:col-span-3">
-                          <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
-                            {isUrdu ? 'ادائیگی رقم (روپے):' : 'Amount Paid (Rs.):'}
-                          </label>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            value={vendorPaymentAmount || ''}
-                            onChange={(e) => setVendorPaymentAmount(parseNumber(e.target.value))}
-                            placeholder="0"
-                            className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-numbers font-bold text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-2xs"
-                            autoFocus
-                          />
-                        </div>
-
-                        {/* Description / Notes */}
-                        <div className="sm:col-span-4">
-                          <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
-                            {isUrdu ? 'تفصیل و نوٹس (نوٹ / حوالہ):' : 'Description / Notes:'}
-                          </label>
-                          <input
-                            type="text"
-                            value={vendorPaymentNote}
-                            onChange={(e) => setVendorPaymentNote(e.target.value)}
-                            placeholder={isUrdu ? 'مثلاً: نقد بذریعہ منشی، آن لائن ٹرانسفر، وغیرہ' : 'e.g. Cash, Bank Transfer'}
-                            className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 shadow-2xs"
-                          />
-                        </div>
-
-                        {/* Payment Method */}
-                        <div className="sm:col-span-2">
-                          <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
-                            {isUrdu ? 'طریقہ ادائیگی:' : 'Method:'}
-                          </label>
-                          <select
-                            value={vendorPaymentMethod}
-                            onChange={(e) => setVendorPaymentMethod(e.target.value as 'cash' | 'online' | 'cheque')}
-                            className="w-full px-2.5 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 shadow-2xs"
-                          >
-                            <option value="cash">{isUrdu ? 'نقد (Cash)' : 'Cash'}</option>
-                            <option value="online">{isUrdu ? 'آن لائن / بینک' : 'Online / Bank'}</option>
-                            <option value="cheque">{isUrdu ? 'بینک چیک' : 'Cheque'}</option>
-                          </select>
-                        </div>
-
-                        {/* Target Lot Selector */}
-                        <div className="sm:col-span-3">
-                          <label className="text-[11px] font-bold text-slate-700 font-urdu-sans block mb-1">
-                            {isUrdu ? 'کھاتہ / لاٹ:' : 'Target Lot:'}
-                          </label>
-                          <select
-                            value={vendorPaymentTargetLotId}
-                            onChange={(e) => setVendorPaymentTargetLotId(e.target.value)}
-                            className="w-full px-2.5 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-urdu-sans focus:ring-2 focus:ring-emerald-500 shadow-2xs"
-                          >
-                            <option value="all">{isUrdu ? 'تمام لاٹس (کل کھاتہ)' : 'All Lots (Consolidated)'}</option>
-                            {v.lots.map((l) => (
-                              <option key={l.id} value={l.id}>
-                                {l.productEmoji} {l.productUrdu} (رسید #{getLotReceiptNumber(l.lotNumber, l.billNumber)}) - {formatPKR(l.summary.netPayableToVendor, settings.currencySymbol, settings.language)}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* Quick helpers and action buttons */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-emerald-200">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[10px] text-slate-500 font-urdu-sans">{isUrdu ? 'فوری رقم:' : 'Quick Pay:'}</span>
-                          <button
-                            type="button"
-                            onClick={() => setVendorPaymentAmount(v.pendingBalance > 0 ? v.pendingBalance : v.netPayable)}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-[10px] font-bold font-urdu-sans transition shadow-2xs"
-                          >
-                            {isUrdu ? 'پوری بقایا رقم' : 'Full Balance'} ({formatPKR(v.pendingBalance > 0 ? v.pendingBalance : v.netPayable, settings.currencySymbol, settings.language)})
-                          </button>
-                          {v.netPayable > 10000 && (
-                            <button
-                              type="button"
-                              onClick={() => setVendorPaymentAmount((prev) => prev + 10000)}
-                              className="px-2 py-0.5 rounded-md bg-white border border-emerald-300 text-emerald-800 text-[10px] font-bold font-numbers hover:bg-emerald-50 transition"
-                            >
-                              +10,000
-                            </button>
-                          )}
-                          {v.netPayable > 50000 && (
-                            <button
-                              type="button"
-                              onClick={() => setVendorPaymentAmount((prev) => prev + 50000)}
-                              className="px-2 py-0.5 rounded-md bg-white border border-emerald-300 text-emerald-800 text-[10px] font-bold font-numbers hover:bg-emerald-50 transition"
-                            >
-                              +50,000
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2 justify-end">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedVendorForPayment(null)}
-                            className="px-3 py-1.5 bg-white text-slate-700 rounded-xl text-xs font-urdu-sans border border-slate-300 hover:bg-slate-50 transition"
-                          >
-                            {t.cancel}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={vendorPaymentAmount <= 0}
-                            onClick={() => handleSaveVendorPayment(v.vendorName)}
-                            className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold font-urdu-sans shadow-xs flex items-center gap-1.5 transition active:scale-95"
-                          >
-                            <Check className="w-4 h-4" />
-                            <span>{isUrdu ? 'ادائیگی محفوظ کریں' : 'Save Payment'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Micro lots list for this vendor with 'See All Bill' option and sub-pagination */}
                   {(() => {
@@ -2549,28 +2276,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    disabled={Math.max(0, lotNet - lotPaid) <= 0}
-                                    onClick={() => {
-                                      if (Math.max(0, lotNet - lotPaid) > 0) {
-                                        handleOpenVendorPayment(v.vendorName, Math.max(0, lotNet - lotPaid), lot.id);
-                                      }
-                                    }}
-                                    className={`text-[10px] font-bold font-urdu-sans transition ${
-                                      Math.max(0, lotNet - lotPaid) <= 0
-                                        ? 'text-slate-400 cursor-not-allowed opacity-60'
-                                        : 'text-emerald-700 hover:text-emerald-900 hover:underline'
-                                    }`}
-                                    title={
-                                      Math.max(0, lotNet - lotPaid) <= 0
-                                        ? (isUrdu ? 'یہ لاٹ مکمل ادا شدہ ہے' : 'Lot fully paid')
-                                        : (isUrdu ? 'اس لاٹ کی ادائیگی درج کریں' : 'Pay this lot')
-                                    }
-                                  >
-                                    {Math.max(0, lotNet - lotPaid) <= 0 ? (isUrdu ? 'ادا شدہ' : 'Paid') : (isUrdu ? 'ادائیگی' : 'Pay')}
-                                  </button>
-
                                   {onOpenReceipt && (
                                     <button
                                       onClick={() => onOpenReceipt(lot.id)}

@@ -292,40 +292,16 @@ export function calculateCashDrawerSummary(
     }
   });
 
-  // 5. Vendor cash paid deducted
+  // 5. Vendor cash paid deducted (reconciled across vendor ledger and lots to prevent double counting)
   let vendorCashPaid = 0;
-  lots.forEach((lot) => {
-    const isCash = !lot.vendorPaymentMethod || lot.vendorPaymentMethod === 'cash';
+  const allReconciledVendorPayments = getAllReconciledVendorPayments(lots, vendors);
+  allReconciledVendorPayments.forEach((pay) => {
+    const isCash = !pay.paymentMethod || pay.paymentMethod === 'cash';
     if (!isCash) return;
-
-    const payDate = (lot.vendorPaymentDate || (lot.vendorPaymentStatus === 'paid' ? lot.arrivalDate : '') || '').slice(0, 10);
-    if (!payDate) return;
-    if (dateFilterFn && !dateFilterFn(payDate)) return;
-
-    const amt =
-      lot.vendorPaymentAmount !== undefined
-        ? lot.vendorPaymentAmount
-        : lot.vendorPaymentStatus === 'paid'
-        ? lot.summary.netPayableToVendor
-        : 0;
-
-    vendorCashPaid += Number(amt) || 0;
+    const payDate = pay.date;
+    if (dateFilterFn && payDate && !dateFilterFn(payDate)) return;
+    vendorCashPaid += Number(pay.amount) || 0;
   });
-
-  // Also include any standalone vendor cash payments not linked to a lot
-  if (vendors && Array.isArray(vendors)) {
-    vendors.forEach((v) => {
-      (v.payments || []).forEach((pay) => {
-        if (pay.lotId) return; // already counted under lot if applicable
-        const payDate = (pay.paymentDate || pay.date || pay.timestamp || '').slice(0, 10);
-        if (dateFilterFn && payDate && !dateFilterFn(payDate)) return;
-        const isCash = !pay.paymentMethod || pay.paymentMethod === 'cash';
-        if (isCash) {
-          vendorCashPaid += Number(pay.amount) || 0;
-        }
-      });
-    });
-  }
 
   const totalCashIn = salesCashCollected + buyerKhataCashCollected + manualCashIn;
   const totalCashOut = shopCashExpenses + vendorCashPaid + manualCashOut;
@@ -342,4 +318,139 @@ export function calculateCashDrawerSummary(
     totalCashOut,
     netCashInDrawer,
   };
+}
+
+export interface ReconciledVendorPaymentItem {
+  id: string;
+  vendorName: string;
+  amount: number;
+  date: string;
+  paymentMethod: 'cash' | 'online' | 'cheque';
+  lotId?: string;
+  notes?: string;
+}
+
+/**
+ * Returns a deduplicated, reconciled list of vendor payments for a specific vendor.
+ * Handles both persistent vendor.payments records and lot-level payments (status toggles or distributed payments)
+ * without double-counting when a payment is recorded in both vendor.payments and lot.vendorPaymentAmount.
+ */
+export function getReconciledVendorPaymentsForVendor(
+  vendorName: string,
+  vendorLots: VendorLot[],
+  vendors: SavedVendor[] = []
+): ReconciledVendorPaymentItem[] {
+  const normName = vendorName.trim().toLowerCase();
+  const savedVendor = (vendors || []).find((v) => v.name.trim().toLowerCase() === normName);
+
+  const seenSignatures = new Set<string>();
+  const historyMap = new Map<string, ReconciledVendorPaymentItem>();
+
+  // 1. Gather all recorded payments from the saved vendor's ledger
+  (savedVendor?.payments || []).forEach((p) => {
+    const timeKey = p.timestamp ? p.timestamp.slice(0, 16) : (p.date || p.paymentDate || '');
+    const signature = `${p.amount}_${p.paymentDate || p.date || ''}_${timeKey}_${p.lotId || 'all'}`;
+    if (!seenSignatures.has(signature) && !historyMap.has(p.id)) {
+      seenSignatures.add(signature);
+      historyMap.set(p.id, {
+        id: p.id,
+        vendorName: p.vendorName || vendorName,
+        amount: Number(p.amount) || 0,
+        date: (p.paymentDate || p.date || p.timestamp || '').slice(0, 10),
+        paymentMethod: p.paymentMethod || 'cash',
+        lotId: p.lotId,
+        notes: p.notes,
+      });
+    }
+  });
+
+  // Track lots that are explicitly linked in the payment ledger
+  const linkedLotIds = new Set<string>();
+  historyMap.forEach((p) => {
+    if (p.lotId) linkedLotIds.add(p.lotId);
+  });
+
+  // Pool of unassigned/general vendor payments (payments made to vendor without a specific lotId)
+  let unassignedSavedPool = Array.from(historyMap.values())
+    .filter((p) => !p.lotId)
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+  // 2. Evaluate each lot of this vendor
+  vendorLots.forEach((lot) => {
+    const lotPaid =
+      lot.vendorPaymentAmount !== undefined
+        ? Number(lot.vendorPaymentAmount) || 0
+        : lot.vendorPaymentStatus === 'paid'
+        ? Number(lot.summary.netPayableToVendor) || 0
+        : 0;
+
+    if (lotPaid > 0) {
+      // If this lot was already explicitly recorded in a saved payment, it's accounted for
+      if (linkedLotIds.has(lot.id)) {
+        return;
+      }
+
+      // If covered by general/unassigned vendor payments (distributed across lots), it's already accounted for in savedVendor.payments
+      if (unassignedSavedPool >= lotPaid) {
+        unassignedSavedPool -= lotPaid;
+        return;
+      } else if (unassignedSavedPool > 0) {
+        const excess = lotPaid - unassignedSavedPool;
+        unassignedSavedPool = 0;
+        if (excess > 0) {
+          const lotPayKey = `lot-excess-${lot.id}`;
+          historyMap.set(lotPayKey, {
+            id: lotPayKey,
+            vendorName: lot.vendorName,
+            amount: excess,
+            date: (lot.vendorPaymentDate || (lot.vendorPaymentStatus === 'paid' ? lot.arrivalDate : '') || '').slice(0, 10),
+            paymentMethod: lot.vendorPaymentMethod || 'cash',
+            lotId: lot.id,
+            notes: lot.vendorPaymentNotes || 'لاٹ ادائیگی',
+          });
+        }
+      } else {
+        // Not covered by any saved payment record (e.g. lot toggled directly to 'paid')
+        const lotPayKey = `lot-pay-${lot.id}`;
+        historyMap.set(lotPayKey, {
+          id: lotPayKey,
+          vendorName: lot.vendorName,
+          amount: lotPaid,
+          date: (lot.vendorPaymentDate || (lot.vendorPaymentStatus === 'paid' ? lot.arrivalDate : '') || '').slice(0, 10),
+          paymentMethod: lot.vendorPaymentMethod || 'cash',
+          lotId: lot.id,
+          notes: lot.vendorPaymentNotes || 'لاٹ ادائیگی',
+        });
+      }
+    }
+  });
+
+  return Array.from(historyMap.values());
+}
+
+/**
+ * Returns all reconciled vendor payment records across all vendors and lots.
+ */
+export function getAllReconciledVendorPayments(
+  lots: VendorLot[],
+  vendors: SavedVendor[] = []
+): ReconciledVendorPaymentItem[] {
+  const vendorNamesSet = new Set<string>();
+  (lots || []).forEach((l) => {
+    if (l.vendorName) vendorNamesSet.add(l.vendorName.trim());
+  });
+  (vendors || []).forEach((v) => {
+    if (v.name) vendorNamesSet.add(v.name.trim());
+  });
+
+  const allPayments: ReconciledVendorPaymentItem[] = [];
+  vendorNamesSet.forEach((vendorName) => {
+    const vLots = (lots || []).filter(
+      (l) => l.vendorName.trim().toLowerCase() === vendorName.toLowerCase()
+    );
+    const vPayments = getReconciledVendorPaymentsForVendor(vendorName, vLots, vendors);
+    allPayments.push(...vPayments);
+  });
+
+  return allPayments;
 }

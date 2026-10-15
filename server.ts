@@ -556,8 +556,7 @@ async function startServer() {
   // --- Vite / Frontend Serving Middleware ---
   const isProduction =
     process.env.NODE_ENV === 'production' ||
-    process.env.NODE_ENV === 'preview' ||
-    (!process.env.NODE_ENV && fs.existsSync(path.join(process.cwd(), 'dist', 'index.html')));
+    process.env.NODE_ENV === 'preview';
 
   if (!isProduction) {
     const vite = await createViteServer({
