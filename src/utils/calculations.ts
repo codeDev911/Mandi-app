@@ -241,7 +241,7 @@ export function calculateCashDrawerSummary(
   let salesCashCollected = 0;
   lots.forEach((lot) => {
     lot.sales.forEach((sale) => {
-      const saleDate = (sale as any).date || sale.timestamp?.slice(0, 10) || lot.arrivalDate?.slice(0, 10);
+      const saleDate = ((sale as any).date || sale.timestamp || lot.arrivalDate || '').slice(0, 10);
       if (dateFilterFn && saleDate && !dateFilterFn(saleDate)) return;
 
       if (sale.paymentStatus === 'cash') {
@@ -256,7 +256,7 @@ export function calculateCashDrawerSummary(
   let buyerKhataCashCollected = 0;
   customers.forEach((cust) => {
     (cust.payments || []).forEach((pay) => {
-      const payDate = pay.paymentDate || pay.date || '';
+      const payDate = (pay.date || pay.paymentDate || (pay as any).timestamp || '').slice(0, 10);
       if (dateFilterFn && payDate && !dateFilterFn(payDate)) return;
 
       const isCash = !pay.paymentMethod || pay.paymentMethod === 'cash';
@@ -270,7 +270,8 @@ export function calculateCashDrawerSummary(
   let manualCashIn = 0;
   let manualCashOut = 0;
   drawerAdjustments.forEach((adj) => {
-    if (dateFilterFn && adj.date && !dateFilterFn(adj.date)) return;
+    const adjDate = (adj.date || adj.timestamp || '').slice(0, 10);
+    if (dateFilterFn && adjDate && !dateFilterFn(adjDate)) return;
 
     if (adj.type === 'in') {
       manualCashIn += Number(adj.amount) || 0;
@@ -282,7 +283,8 @@ export function calculateCashDrawerSummary(
   // 4. Shop cash expenses deducted
   let shopCashExpenses = 0;
   expenses.forEach((exp) => {
-    if (dateFilterFn && exp.date && !dateFilterFn(exp.date)) return;
+    const expDate = (exp.date || '').slice(0, 10);
+    if (dateFilterFn && expDate && !dateFilterFn(expDate)) return;
 
     const isCash = !exp.paymentMethod || exp.paymentMethod === 'cash';
     if (isCash) {
@@ -290,39 +292,15 @@ export function calculateCashDrawerSummary(
     }
   });
 
-  // 5. Vendor cash paid deducted
+  // 5. Vendor cash paid deducted (Calculated from unique vendor payment records without doubling)
   let vendorCashPaid = 0;
-  lots.forEach((lot) => {
-    const isCash = !lot.vendorPaymentMethod || lot.vendorPaymentMethod === 'cash';
+  const uniqueVendorPayments = getAllUniqueVendorPayments(lots, vendors);
+  uniqueVendorPayments.forEach((pay) => {
+    const isCash = !pay.paymentMethod || pay.paymentMethod === 'cash';
     if (!isCash) return;
-
-    const payDate = lot.vendorPaymentDate || lot.arrivalDate?.slice(0, 10) || '';
-    if (dateFilterFn && payDate && !dateFilterFn(payDate)) return;
-
-    const amt =
-      lot.vendorPaymentAmount !== undefined
-        ? lot.vendorPaymentAmount
-        : lot.vendorPaymentStatus === 'paid'
-        ? lot.summary.netPayableToVendor
-        : 0;
-
-    vendorCashPaid += Number(amt) || 0;
+    if (dateFilterFn && pay.date && !dateFilterFn(pay.date)) return;
+    vendorCashPaid += Number(pay.amount) || 0;
   });
-
-  // Also include any standalone vendor cash payments not linked to a lot
-  if (vendors && Array.isArray(vendors)) {
-    vendors.forEach((v) => {
-      (v.payments || []).forEach((pay) => {
-        if (pay.lotId) return; // already counted under lot if applicable
-        const payDate = pay.paymentDate || pay.date || '';
-        if (dateFilterFn && payDate && !dateFilterFn(payDate)) return;
-        const isCash = !pay.paymentMethod || pay.paymentMethod === 'cash';
-        if (isCash) {
-          vendorCashPaid += Number(pay.amount) || 0;
-        }
-      });
-    });
-  }
 
   const totalCashIn = salesCashCollected + buyerKhataCashCollected + manualCashIn;
   const totalCashOut = shopCashExpenses + vendorCashPaid + manualCashOut;
@@ -339,4 +317,142 @@ export function calculateCashDrawerSummary(
     totalCashOut,
     netCashInDrawer,
   };
+}
+
+export interface ResolvedVendorPayment {
+  id: string;
+  vendorName: string;
+  amount: number;
+  date: string;
+  paymentMethod: 'cash' | 'online' | 'cheque';
+  lotId?: string;
+  notes?: string;
+  timestamp?: string;
+}
+
+/**
+ * Extracts all unique, deduplicated vendor payments across saved vendor records and lots.
+ * Guarantees that general vendor payments and distributed lot payments are NEVER double counted!
+ */
+export function getAllUniqueVendorPayments(
+  lots: VendorLot[],
+  vendors?: SavedVendor[]
+): ResolvedVendorPayment[] {
+  const result: ResolvedVendorPayment[] = [];
+  const processedVendors = new Set<string>();
+
+  // 1. Process from saved vendors list
+  if (vendors && Array.isArray(vendors)) {
+    vendors.forEach((v) => {
+      const vKey = v.name.trim().toLowerCase();
+      processedVendors.add(vKey);
+      const seenSignatures = new Set<string>();
+      const savedPayments: ResolvedVendorPayment[] = [];
+
+      (v.payments || []).forEach((p) => {
+        const amt = Number(p.amount) || 0;
+        if (amt <= 0) return;
+        const pDate = (p.paymentDate || p.date || p.timestamp || '').slice(0, 10);
+        const timeKey = p.timestamp ? p.timestamp.slice(0, 16) : pDate;
+        const sig = `${amt}_${pDate}_${timeKey}_${p.lotId || 'all'}`;
+        if (!seenSignatures.has(sig)) {
+          seenSignatures.add(sig);
+          savedPayments.push({
+            id: p.id,
+            vendorName: v.name,
+            amount: amt,
+            date: pDate,
+            paymentMethod: p.paymentMethod || 'cash',
+            lotId: p.lotId,
+            notes: p.notes,
+            timestamp: p.timestamp,
+          });
+        }
+      });
+
+      const savedSum = savedPayments.reduce((sum, p) => sum + p.amount, 0);
+
+      // Check lots for this vendor to see if there are any direct lot toggles NOT covered by saved payments
+      const vendorLots = lots.filter(
+        (l) => l.vendorName.trim().toLowerCase() === vKey
+      );
+      const lotsPaidSum = vendorLots.reduce((sum, l) => {
+        const amt =
+          l.vendorPaymentAmount !== undefined
+            ? l.vendorPaymentAmount
+            : l.vendorPaymentStatus === 'paid'
+            ? l.summary.netPayableToVendor
+            : 0;
+        return sum + (Number(amt) || 0);
+      }, 0);
+
+      // Add all saved payments
+      savedPayments.forEach((p) => result.push(p));
+
+      // If lots had more paid amount than saved payments (e.g. lots toggled to paid directly),
+      // synthesize records ONLY for the excess difference:
+      if (lotsPaidSum > savedSum) {
+        let excessRemaining = lotsPaidSum - savedSum;
+        vendorLots.forEach((l) => {
+          if (excessRemaining <= 0) return;
+          const lPaid =
+            l.vendorPaymentAmount !== undefined
+              ? l.vendorPaymentAmount
+              : l.vendorPaymentStatus === 'paid'
+              ? l.summary.netPayableToVendor
+              : 0;
+          if (lPaid > 0) {
+            const isExplicitlyLinked = savedPayments.some((sp) => sp.lotId === l.id);
+            if (!isExplicitlyLinked) {
+              const synthAmount = Math.min(excessRemaining, lPaid);
+              excessRemaining -= synthAmount;
+              const payDate = (l.vendorPaymentDate || (l.vendorPaymentStatus === 'paid' ? l.arrivalDate : '') || '').slice(0, 10);
+              result.push({
+                id: `synth-${l.id}`,
+                vendorName: l.vendorName,
+                amount: synthAmount,
+                date: payDate || new Date().toISOString().slice(0, 10),
+                paymentMethod: (l.vendorPaymentMethod as any) || 'cash',
+                lotId: l.id,
+                notes: l.vendorPaymentNotes || `لاٹ #${l.lotNumber} ادائیگی`,
+              });
+            }
+          }
+        });
+      }
+    });
+  }
+
+  // 2. Also process any vendors present in lots but not in saved vendors
+  lots.forEach((lot) => {
+    const vKey = lot.vendorName.trim().toLowerCase();
+    if (processedVendors.has(vKey)) return;
+    processedVendors.add(vKey);
+
+    const vendorLots = lots.filter(
+      (l) => l.vendorName.trim().toLowerCase() === vKey
+    );
+    vendorLots.forEach((l) => {
+      const amt =
+        l.vendorPaymentAmount !== undefined
+          ? l.vendorPaymentAmount
+          : l.vendorPaymentStatus === 'paid'
+          ? l.summary.netPayableToVendor
+          : 0;
+      if (amt > 0) {
+        const payDate = (l.vendorPaymentDate || (l.vendorPaymentStatus === 'paid' ? l.arrivalDate : '') || '').slice(0, 10);
+        result.push({
+          id: `lot-direct-${l.id}`,
+          vendorName: lot.vendorName,
+          amount: Number(amt) || 0,
+          date: payDate || new Date().toISOString().slice(0, 10),
+          paymentMethod: (l.vendorPaymentMethod as any) || 'cash',
+          lotId: lot.id,
+          notes: l.vendorPaymentNotes,
+        });
+      }
+    });
+  });
+
+  return result;
 }

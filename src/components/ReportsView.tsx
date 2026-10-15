@@ -316,6 +316,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         khataPaid: number;
         cashPaid: number;
         creditPending: number;
+        allTimeCredit: number;
         transactions: Array<{
           lotId: string;
           lotNumber: string;
@@ -325,104 +326,136 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           ratePerUnit: number;
           totalAmount: number;
           paymentStatus: 'cash' | 'credit' | 'partial';
+          isPaymentRecord?: boolean;
         }>;
+        payments: any[];
       }
     >();
 
-    // Helper to calculate relevant manual credits & opening balance for a customer
-    const getCustomerInitialBalances = (c: CustomerBuyer) => {
-      const relevantCredits = (c.manualCredits || []).filter((cr) => {
-        if (dateFilter === 'all') return true;
-        const d = (cr.date || cr.createdAt || '').slice(0, 10);
-        return d ? isLotInDateRange(d) : false;
-      });
-      const manualCreditsTotal = relevantCredits.reduce((sum, cr) => sum + (Number(cr.amount) || 0), 0);
-      const opening = dateFilter === 'all' ? (Number(c.openingBalance) || 0) : 0;
-      return {
-        opening,
-        manualCreditsTotal,
-        initialTotal: opening + manualCreditsTotal,
-        relevantCredits,
-      };
-    };
+    // 1. Gather all customer names that have ANY activity in the selected date range
+    const activeCustomerNames = new Set<string>();
 
-    // If viewing all dates, or filtering a specific customer, or customer has manual credits in date range:
     customers.forEach((c) => {
       if (selectedCustomerFilter !== 'all' && c.name.toLowerCase() !== selectedCustomerFilter.toLowerCase()) {
         return;
       }
-
-      const { initialTotal } = getCustomerInitialBalances(c);
-
-      if (dateFilter === 'all' || selectedCustomerFilter !== 'all' || initialTotal > 0) {
-        if (!custMap.has(c.name)) {
-          custMap.set(c.name, {
-            customerName: c.name,
-            phone: c.phone,
-            shopName: c.shopName,
-            totalPurchases: 0,
-            totalUnitsBought: 0,
-            totalAmount: initialTotal,
-            directCashPaid: 0,
-            khataPaid: 0,
-            cashPaid: 0,
-            creditPending: initialTotal,
-            transactions: [],
-          });
-        }
+      if (dateFilter === 'all' || selectedCustomerFilter !== 'all') {
+        activeCustomerNames.add(c.name);
+        return;
+      }
+      // Check if customer had any manual credits in date range
+      const hasCredits = (c.manualCredits || []).some((cr) => {
+        const d = (cr.date || cr.createdAt || '').slice(0, 10);
+        return d ? isDateInRange(d) : false;
+      });
+      if (hasCredits) {
+        activeCustomerNames.add(c.name);
+        return;
+      }
+      // Check if customer had any payments in date range
+      const hasPayments = (c.payments || []).some((p) => {
+        const d = (p.paymentDate || p.date || p.timestamp || '').slice(0, 10);
+        return d ? isDateInRange(d) : false;
+      });
+      if (hasPayments) {
+        activeCustomerNames.add(c.name);
+        return;
       }
     });
 
+    // Also check if any lot sales in date range belong to customers
     lots.forEach((lot) => {
       lot.sales.forEach((sale) => {
         if (selectedCustomerFilter !== 'all' && sale.buyerName.toLowerCase() !== selectedCustomerFilter.toLowerCase()) {
           return;
         }
-
         const saleDate = getSaleDate(sale, lot);
-        if (dateFilter !== 'all' && !isDateInRange(saleDate)) {
-          return;
+        if (dateFilter === 'all' || isDateInRange(saleDate)) {
+          activeCustomerNames.add(sale.buyerName);
         }
+      });
+    });
 
-        const savedCust = customers.find((c) => c.name.toLowerCase() === sale.buyerName.toLowerCase());
-        let existing = custMap.get(sale.buyerName);
-        if (!existing) {
-          const { initialTotal } = savedCust
-            ? getCustomerInitialBalances(savedCust)
-            : { initialTotal: 0 };
+    // 2. Build detailed records for each active customer
+    activeCustomerNames.forEach((custName) => {
+      const savedCust = customers.find((c) => c.name.toLowerCase() === custName.toLowerCase());
 
-          existing = {
-            customerName: sale.buyerName,
-            phone: sale.buyerPhone || savedCust?.phone,
-            shopName: savedCust?.shopName,
-            totalPurchases: 0,
-            totalUnitsBought: 0,
-            totalAmount: initialTotal,
-            directCashPaid: 0,
-            khataPaid: 0,
-            cashPaid: 0,
-            creditPending: initialTotal,
-            transactions: [],
-          };
-        }
+      // Collect sales in date range
+      const salesInDate: Array<{ sale: BolliSale; lot: VendorLot; saleDate: string }> = [];
+      lots.forEach((lot) => {
+        lot.sales.forEach((sale) => {
+          if (sale.buyerName.toLowerCase() !== custName.toLowerCase()) return;
+          const saleDate = getSaleDate(sale, lot);
+          if (dateFilter === 'all' || isDateInRange(saleDate)) {
+            salesInDate.push({ sale, lot, saleDate });
+          }
+        });
+      });
 
-        existing.totalPurchases += 1;
-        existing.totalUnitsBought += sale.quantity;
-        existing.totalAmount += sale.totalAmount;
+      // Collect manual credits in date range
+      const creditsInDate = (savedCust?.manualCredits || []).filter((cr) => {
+        if (dateFilter === 'all') return true;
+        const d = (cr.date || cr.createdAt || '').slice(0, 10);
+        return d ? isDateInRange(d) : false;
+      });
+
+      // Collect payments in date range
+      const paymentsInDate = (savedCust?.payments || []).filter((p) => {
+        if (dateFilter === 'all') return true;
+        const d = (p.paymentDate || p.date || p.timestamp || '').slice(0, 10);
+        return d ? isDateInRange(d) : false;
+      });
+
+      const totalPurchases = salesInDate.length;
+      const totalUnitsBought = salesInDate.reduce((sum, item) => sum + (Number(item.sale.quantity) || 0), 0);
+      const salesTotalAmount = salesInDate.reduce((sum, item) => sum + (Number(item.sale.totalAmount) || 0), 0);
+      const manualCreditsAmount = creditsInDate.reduce((sum, cr) => sum + (Number(cr.amount) || 0), 0);
+      const openingBalance = dateFilter === 'all' ? (Number(savedCust?.openingBalance) || 0) : 0;
+      const totalAmount = salesTotalAmount + manualCreditsAmount + openingBalance;
+
+      let directCashPaid = 0;
+      salesInDate.forEach(({ sale }) => {
         if (sale.paymentStatus === 'cash') {
-          existing.directCashPaid += sale.totalAmount;
-        } else if (sale.paidAmount) {
-          existing.directCashPaid += sale.paidAmount;
+          directCashPaid += Number(sale.totalAmount) || 0;
+        } else if (sale.paidAmount && Number(sale.paidAmount) > 0) {
+          directCashPaid += Number(sale.paidAmount) || 0;
         }
+      });
 
-        if (!existing.phone && (sale.buyerPhone || savedCust?.phone)) {
-          existing.phone = sale.buyerPhone || savedCust?.phone;
-        }
-        if (!existing.shopName && savedCust?.shopName) {
-          existing.shopName = savedCust.shopName;
-        }
+      const khataPaid = paymentsInDate.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const cashPaid = directCashPaid + khataPaid;
+      const creditPending = Math.max(0, totalAmount - cashPaid);
 
-        existing.transactions.push({
+      // Compute all-time master outstanding credit (Kul Udhar)
+      let allTimeCreditBids = 0;
+      lots.forEach((l) => {
+        l.sales.forEach((s) => {
+          if (s.buyerName.toLowerCase() === custName.toLowerCase() && s.paymentStatus !== 'cash') {
+            allTimeCreditBids += (Number(s.totalAmount) || 0) - (Number(s.paidAmount) || 0);
+          }
+        });
+      });
+      const allTimeOpening = Number(savedCust?.openingBalance) || 0;
+      const allTimeManualCredits = (savedCust?.manualCredits || []).reduce((sum, cr) => sum + (Number(cr.amount) || 0), 0);
+      const allTimePaymentsReceived = (savedCust?.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const allTimeCredit = Math.max(0, (allTimeOpening + allTimeManualCredits + allTimeCreditBids) - allTimePaymentsReceived);
+
+      // Build transactions statement
+      const transactions: Array<{
+        lotId: string;
+        lotNumber: string;
+        productUrdu: string;
+        date: string;
+        quantity: number;
+        ratePerUnit: number;
+        totalAmount: number;
+        paymentStatus: 'cash' | 'credit' | 'partial';
+        isPaymentRecord?: boolean;
+      }> = [];
+
+      // 1. Sales
+      salesInDate.forEach(({ sale, lot, saleDate }) => {
+        transactions.push({
           lotId: lot.id,
           lotNumber: lot.lotNumber,
           productUrdu: lot.productUrdu,
@@ -432,66 +465,62 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           totalAmount: sale.totalAmount,
           paymentStatus: sale.paymentStatus,
         });
+      });
 
-        custMap.set(sale.buyerName, existing);
+      // 2. Manual Credits
+      creditsInDate.forEach((cr) => {
+        transactions.push({
+          lotId: `mc-${cr.id}`,
+          lotNumber: isUrdu ? 'دستی ادھار' : 'Manual Credit',
+          productUrdu: cr.notes || (isUrdu ? 'دستی کھاتہ ادھار' : 'Manual Credit'),
+          date: (cr.date || cr.createdAt || '').slice(0, 10) || '-',
+          quantity: 1,
+          ratePerUnit: cr.amount,
+          totalAmount: cr.amount,
+          paymentStatus: 'credit',
+        });
+      });
+
+      // 3. Payments Received
+      paymentsInDate.forEach((p) => {
+        transactions.push({
+          lotId: `pay-${p.id}`,
+          lotNumber: isUrdu ? 'ادائیگی رسید' : 'Payment Receipt',
+          productUrdu: p.notes
+            ? `${isUrdu ? 'وصولی کیش' : 'Cash Received'}: ${p.notes}`
+            : (isUrdu ? 'وصولی کیش کھاتہ' : 'Khata Cash Payment'),
+          date: (p.paymentDate || p.date || p.timestamp || '').slice(0, 10) || '-',
+          quantity: 1,
+          ratePerUnit: p.amount,
+          totalAmount: p.amount,
+          paymentStatus: 'cash',
+          isPaymentRecord: true,
+        });
+      });
+
+      transactions.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+      const phone = savedCust?.phone || salesInDate[0]?.sale.buyerPhone;
+      const shopName = savedCust?.shopName;
+
+      custMap.set(custName, {
+        customerName: custName,
+        phone,
+        shopName,
+        totalPurchases,
+        totalUnitsBought,
+        totalAmount,
+        directCashPaid,
+        khataPaid,
+        cashPaid,
+        creditPending,
+        allTimeCredit,
+        transactions,
+        payments: paymentsInDate,
       });
     });
 
-    // Append manual credits to each customer's transaction statement
-    Array.from(custMap.values()).forEach((c) => {
-      const savedCust = customers.find((sc) => sc.name.toLowerCase() === c.customerName.toLowerCase());
-      if (savedCust) {
-        const { relevantCredits } = getCustomerInitialBalances(savedCust);
-        relevantCredits.forEach((cr) => {
-          c.transactions.push({
-            lotId: `mc-${cr.id}`,
-            lotNumber: 'دستی ادھار',
-            productUrdu: cr.notes || (isUrdu ? 'دستی کھاتہ ادھار' : 'Manual Credit'),
-            date: (cr.date || cr.createdAt || '').slice(0, 10) || '-',
-            quantity: 1,
-            ratePerUnit: cr.amount,
-            totalAmount: cr.amount,
-            paymentStatus: 'credit',
-          });
-        });
-
-        c.transactions.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-      }
-    });
-
-    const list = Array.from(custMap.values()).map((c) => {
-      const savedCust = customers.find((sc) => sc.name.toLowerCase() === c.customerName.toLowerCase());
-      const customerPayments = (savedCust?.payments || []).filter(
-        (p) => dateFilter === 'all' || isDateInRange((p.paymentDate || p.date || '').slice(0, 10))
-      );
-      const khataPayments = customerPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-      const totalPaid = c.directCashPaid + khataPayments;
-      const creditRemaining = Math.max(0, c.totalAmount - totalPaid);
-
-      // Compute all-time credit (Kul Udhar) across all lots & history
-      let allTimeCreditBids = 0;
-      lots.forEach((l) => {
-        l.sales.forEach((s) => {
-          if (s.buyerName.toLowerCase() === c.customerName.toLowerCase() && s.paymentStatus !== 'cash') {
-            allTimeCreditBids += (Number(s.totalAmount) || 0) - (Number(s.paidAmount) || 0);
-          }
-        });
-      });
-      const allTimeOpening = Number(savedCust?.openingBalance) || 0;
-      const allTimeManualCredits = (savedCust?.manualCredits || []).reduce((sum, cr) => sum + (Number(cr.amount) || 0), 0);
-      const allTimePaymentsReceived = (savedCust?.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-      const allTimeOutstandingCredit = Math.max(0, (allTimeOpening + allTimeManualCredits + allTimeCreditBids) - allTimePaymentsReceived);
-
-      return {
-        ...c,
-        payments: customerPayments,
-        khataPaid: khataPayments,
-        cashPaid: totalPaid,
-        creditPending: creditRemaining,
-        allTimeCredit: allTimeOutstandingCredit,
-      };
-    });
+    const list = Array.from(custMap.values());
 
     return list.filter((c) =>
       c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -501,44 +530,43 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   }, [lots, selectedCustomerFilter, customers, searchTerm, dateFilter, customFromDate, customToDate, isUrdu]);
 
   // 2. DATE REPORT STATS
+  // Production-grade accurate stats calculated directly from each record by its actual creation / event date
   const dateReportStats = useMemo(() => {
     let grossSales = 0;
-    let commission = 0;
-    let totalExpenses = 0;
-    let vendorPayable = 0;
-    let vendorPaid = 0;
     let unitsSold = 0;
     let directCashReceived = 0;
+    let commission = 0;
+    let totalExpenses = 0;
     let totalMazdoori = 0;
     let totalMunshiana = 0;
+    let vendorPayable = 0;
+    let vendorPaid = 0;
+    let newCreditGenerated = 0;
 
-    filteredLotsByDate.forEach((lot) => {
-      // 1. Sales on this date range
-      const salesInDate = lot.sales.filter((s) => {
-        if (dateFilter === 'all') return true;
-        return isDateInRange(getSaleDate(s, lot));
-      });
+    // 1. Sales & Bids on this date range across ALL lots
+    lots.forEach((lot) => {
+      const salesInDate = dateFilter === 'all'
+        ? lot.sales
+        : lot.sales.filter((s) => isDateInRange(getSaleDate(s, lot)));
 
-      const lotGrossSales = dateFilter === 'all'
-        ? lot.summary.grossSales
-        : salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
-      const lotUnitsSold = dateFilter === 'all'
-        ? lot.summary.totalSoldQuantity
-        : salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+      const lotGrossSales = salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+      const lotUnitsSold = salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
 
       grossSales += lotGrossSales;
       unitsSold += lotUnitsSold;
 
-      const salesForCash = dateFilter === 'all' ? lot.sales : salesInDate;
-      salesForCash.forEach((s) => {
+      salesInDate.forEach((s) => {
         if (s.paymentStatus === 'cash') {
           directCashReceived += Number(s.totalAmount) || 0;
-        } else if (s.paidAmount) {
+        } else if (s.paidAmount && Number(s.paidAmount) > 0) {
           directCashReceived += Number(s.paidAmount) || 0;
+          newCreditGenerated += Math.max(0, (Number(s.totalAmount) || 0) - Number(s.paidAmount));
+        } else {
+          newCreditGenerated += Number(s.totalAmount) || 0;
         }
       });
 
-      // 2. Commission
+      // Commission from sales in this date range
       let lotCommission = 0;
       if (lot.expenses?.commission?.enabled) {
         if (dateFilter === 'all') {
@@ -546,57 +574,58 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         } else if (lot.expenses.commission.type === 'percentage') {
           const rate = Number(lot.expenses.commission.rate) || 0;
           lotCommission = Math.round((lotGrossSales * rate) / 100);
-        } else if (isDateInRange(lot.arrivalDate)) {
-          lotCommission = Number(lot.expenses.commission.amount) || 0;
         } else if (lot.totalQuantity > 0 && lotUnitsSold > 0) {
           lotCommission = Math.round(((Number(lot.expenses.commission.amount) || 0) * lotUnitsSold) / lot.totalQuantity);
+        } else if (isDateInRange(lot.arrivalDate)) {
+          lotCommission = Number(lot.expenses.commission.amount) || 0;
         }
       }
       commission += lotCommission;
 
-      // 3. Mazdoori & Munshiana
+      // Mazdoori from sales in this date range
       let lotMazdoori = 0;
-      let lotMunshiana = 0;
-
       if (lot.expenses?.mazdoori?.enabled) {
         if (dateFilter === 'all') {
           lotMazdoori = Number(lot.expenses.mazdoori.amount) || 0;
+        } else if (lot.expenses.mazdoori.ratePerUnit && lotUnitsSold > 0) {
+          lotMazdoori = lot.expenses.mazdoori.ratePerUnit * lotUnitsSold;
+        } else if (lot.totalQuantity > 0 && lotUnitsSold > 0) {
+          lotMazdoori = Math.round(((Number(lot.expenses.mazdoori.amount) || 0) * lotUnitsSold) / lot.totalQuantity);
         } else if (isDateInRange(lot.arrivalDate)) {
           lotMazdoori = Number(lot.expenses.mazdoori.amount) || 0;
-        } else if (lotUnitsSold > 0 && lot.expenses.mazdoori.ratePerUnit) {
-          lotMazdoori = lot.expenses.mazdoori.ratePerUnit * lotUnitsSold;
         }
       }
       totalMazdoori += lotMazdoori;
 
+      // Munshiana
+      let lotMunshiana = 0;
       if (lot.expenses?.munshiana?.enabled) {
         if (dateFilter === 'all' || isDateInRange(lot.arrivalDate)) {
           lotMunshiana = Number(lot.expenses.munshiana.amount) || 0;
+        } else if (lot.totalQuantity > 0 && lotUnitsSold > 0) {
+          lotMunshiana = Math.round(((Number(lot.expenses.munshiana.amount) || 0) * lotUnitsSold) / lot.totalQuantity);
         }
       }
       totalMunshiana += lotMunshiana;
 
-      // 4. Expenses and Vendor Payable
-      let lotExpensesInDate = 0;
+      // Deductions and Net payable to vendor for this date
+      let lotExpensesInDate = lotCommission + lotMazdoori + lotMunshiana;
       if (dateFilter === 'all') {
         lotExpensesInDate = lot.summary.totalExpenses;
-      } else {
-        lotExpensesInDate = lotCommission + lotMazdoori + lotMunshiana;
-        if (isDateInRange(lot.arrivalDate)) {
-          if (lot.expenses?.kiraya?.enabled) lotExpensesInDate += Number(lot.expenses.kiraya.amount) || 0;
-          if (lot.expenses?.marketFee?.enabled) lotExpensesInDate += Number(lot.expenses.marketFee.amount) || 0;
-          if (lot.expenses?.naqdAdvance?.enabled) lotExpensesInDate += Number(lot.expenses.naqdAdvance.amount) || 0;
-          (lot.expenses?.customExpenses || []).forEach((ce) => {
-            lotExpensesInDate += Number(ce.amount) || 0;
-          });
-        }
+      } else if (isDateInRange(lot.arrivalDate)) {
+        if (lot.expenses?.kiraya?.enabled) lotExpensesInDate += Number(lot.expenses.kiraya.amount) || 0;
+        if (lot.expenses?.marketFee?.enabled) lotExpensesInDate += Number(lot.expenses.marketFee.amount) || 0;
+        if (lot.expenses?.naqdAdvance?.enabled) lotExpensesInDate += Number(lot.expenses.naqdAdvance.amount) || 0;
+        (lot.expenses?.customExpenses || []).forEach((ce) => {
+          lotExpensesInDate += Number(ce.amount) || 0;
+        });
       }
       totalExpenses += lotExpensesInDate;
 
       const lotNetPayable = Math.max(0, lotGrossSales - lotExpensesInDate);
       vendorPayable += lotNetPayable;
 
-      // 5. Vendor payment in this date range
+      // Vendor payments on this lot recorded on this date
       if (dateFilter === 'all') {
         const lotPaid =
           lot.vendorPaymentAmount !== undefined
@@ -605,27 +634,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             ? lot.summary.netPayableToVendor
             : 0;
         vendorPaid += lotPaid;
-      } else {
-        if (lot.vendorPaymentDate && isDateInRange(lot.vendorPaymentDate)) {
-          const lotPaid =
-            lot.vendorPaymentAmount !== undefined
-              ? lot.vendorPaymentAmount
-              : lot.vendorPaymentStatus === 'paid'
-              ? lot.summary.netPayableToVendor
-              : 0;
-          vendorPaid += lotPaid;
-        } else if (!lot.vendorPaymentDate && isDateInRange(lot.arrivalDate) && lot.vendorPaymentStatus === 'paid') {
-          vendorPaid += lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : lot.summary.netPayableToVendor;
-        }
+      } else if (lot.vendorPaymentDate && isDateInRange(lot.vendorPaymentDate)) {
+        const lotPaid =
+          lot.vendorPaymentAmount !== undefined
+            ? lot.vendorPaymentAmount
+            : lot.vendorPaymentStatus === 'paid'
+            ? lot.summary.netPayableToVendor
+            : 0;
+        vendorPaid += lotPaid;
       }
     });
 
-    // Also include vendor payments recorded in vendors list if date matches
+    // 2. Standalone vendor payments recorded in vendors list matching this date
     if (vendors && Array.isArray(vendors)) {
       vendors.forEach((v) => {
         (v.payments || []).forEach((pay) => {
           if (pay.lotId) return; // already counted under lot
-          const payDate = pay.paymentDate || pay.date || '';
+          const payDate = (pay.paymentDate || pay.date || pay.timestamp || '').slice(0, 10);
           if (dateFilter === 'all' || isDateInRange(payDate)) {
             vendorPaid += Number(pay.amount) || 0;
           }
@@ -633,10 +658,52 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       });
     }
 
-    const totalKhataPaid = customerReports.reduce((sum, c) => sum + c.khataPaid, 0);
-    const totalCreditPending = customerReports.reduce((sum, c) => sum + c.creditPending, 0);
+    // 3. Customer Khata Payments received: from EACH payment record directly
+    // This guarantees that any payment recorded today (even for 4-day-old sales) shows up in today's collected cash
+    let totalKhataPaid = 0;
+    customers.forEach((c) => {
+      (c.payments || []).forEach((pay) => {
+        const payDate = (pay.paymentDate || pay.date || pay.timestamp || '').slice(0, 10);
+        if (dateFilter === 'all' || isDateInRange(payDate)) {
+          totalKhataPaid += Number(pay.amount) || 0;
+        }
+      });
+      // Also add manual credits created on this date
+      (c.manualCredits || []).forEach((cr) => {
+        const crDate = (cr.date || cr.createdAt || '').slice(0, 10);
+        if (dateFilter === 'all' || isDateInRange(crDate)) {
+          newCreditGenerated += Number(cr.amount) || 0;
+        }
+      });
+    });
+
+    // 4. Total Cash Collected = Direct Cash from Sales on this date + Khata Cash received on this date
     const cashReceived = directCashReceived + totalKhataPaid;
+
+    // 5. Vendor Pending
     const vendorPending = Math.max(0, vendorPayable - vendorPaid);
+
+    // 6. Master All-Time Customer Outstanding Credit (Total Udhaar across whole ledger)
+    let allTimeCustomerCredit = 0;
+    customers.forEach((c) => {
+      let custBidsCredit = 0;
+      lots.forEach((l) => {
+        l.sales.forEach((s) => {
+          if (s.buyerName.toLowerCase() === c.name.toLowerCase() && s.paymentStatus !== 'cash') {
+            custBidsCredit += (Number(s.totalAmount) || 0) - (Number(s.paidAmount) || 0);
+          }
+        });
+      });
+      const cOpening = Number(c.openingBalance) || 0;
+      const cManualCredits = (c.manualCredits || []).reduce((sum, cr) => sum + (Number(cr.amount) || 0), 0);
+      const cPayments = (c.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const cOutstanding = Math.max(0, (cOpening + cManualCredits + custBidsCredit) - cPayments);
+      allTimeCustomerCredit += cOutstanding;
+    });
+
+    const creditPending = dateFilter === 'all'
+      ? allTimeCustomerCredit
+      : Math.max(0, newCreditGenerated - totalKhataPaid);
 
     return {
       lotsCount: filteredLotsByDate.length,
@@ -647,17 +714,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       vendorPaid,
       vendorPending,
       unitsSold,
+      directCashReceived,
+      totalKhataPaid,
       cashReceived,
-      creditPending: totalCreditPending,
+      creditPending,
+      allTimeCustomerCredit,
+      newCreditGenerated,
       totalMazdoori,
       totalMunshiana,
     };
-  }, [filteredLotsByDate, customerReports, dateFilter, customFromDate, customToDate, vendors]);
+  }, [lots, filteredLotsByDate, dateFilter, customFromDate, customToDate, vendors, customers]);
 
   // Overall Cash in Drawer Summary
   const cashDrawerSummary = useMemo(() => {
-    return calculateCashDrawerSummary(lots, customers, expenses, drawerAdjustments);
-  }, [lots, customers, expenses, drawerAdjustments]);
+    return calculateCashDrawerSummary(lots, customers, expenses, drawerAdjustments, vendors);
+  }, [lots, customers, expenses, drawerAdjustments, vendors]);
 
   // 2. VENDOR REPORT DATA
   const vendorReports = useMemo(() => {
@@ -778,11 +849,44 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       vendorMap.set(lot.vendorName, existing);
     });
 
+    // Also include standalone vendor payments from vendors list matching date
+    if (vendors && Array.isArray(vendors)) {
+      vendors.forEach((v) => {
+        if (selectedVendorFilter !== 'all' && v.name !== selectedVendorFilter) {
+          return;
+        }
+        (v.payments || []).forEach((pay) => {
+          if (pay.lotId) return; // already counted under lot
+          const payDate = (pay.paymentDate || pay.date || pay.timestamp || '').slice(0, 10);
+          if (dateFilter === 'all' || isDateInRange(payDate)) {
+            const existing = vendorMap.get(v.name) || {
+              vendorName: v.name,
+              vendorPhone: v.phone,
+              vendorCity: v.city,
+              lotsCount: 0,
+              totalUnits: 0,
+              unitsSold: 0,
+              grossSales: 0,
+              totalExpenses: 0,
+              commission: 0,
+              netPayable: 0,
+              totalPaid: 0,
+              pendingBalance: 0,
+              lots: [],
+            };
+            existing.totalPaid += Number(pay.amount) || 0;
+            existing.pendingBalance = Math.max(0, existing.netPayable - existing.totalPaid);
+            vendorMap.set(v.name, existing);
+          }
+        });
+      });
+    }
+
     return Array.from(vendorMap.values()).filter((v) =>
       v.vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (v.vendorCity && v.vendorCity.toLowerCase().includes(searchTerm.toLowerCase()))
     );
-  }, [filteredLotsByDate, selectedVendorFilter, searchTerm, dateFilter, customFromDate, customToDate]);
+  }, [filteredLotsByDate, selectedVendorFilter, searchTerm, dateFilter, customFromDate, customToDate, vendors]);
 
   // 3. PRODUCT REPORT DATA
   const productReports = useMemo(() => {
@@ -1569,20 +1673,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           <span className="text-base sm:text-lg font-black text-emerald-700 font-numbers block mt-0.5">
             {formatPKR(dateReportStats.cashReceived, settings.currencySymbol, settings.language)}
           </span>
-          <span className="text-[10px] text-slate-400 font-urdu-sans">
-            {dateReportStats.unitsSold} {t.totalUnitsSold}
-          </span>
+          <div className="flex items-center justify-between text-[10px] text-slate-400 font-urdu-sans mt-0.5 flex-wrap gap-1">
+            <span>{isUrdu ? 'سیل نقد:' : 'Sales:'} {formatPKR(dateReportStats.directCashReceived, settings.currencySymbol, settings.language)}</span>
+            <span>{isUrdu ? 'کھاتہ وصولی:' : 'Khata:'} {formatPKR(dateReportStats.totalKhataPaid, settings.currencySymbol, settings.language)}</span>
+          </div>
         </div>
 
         {/* 7. Customer Credit Outstanding */}
         <div className="bg-amber-50 p-3.5 sm:p-4 rounded-2xl border border-amber-200 shadow-xs">
           <span className="text-[11px] text-amber-900 font-bold font-urdu-sans block">{t.creditOutstanding} (ادھار)</span>
           <span className="text-base sm:text-lg font-black text-amber-800 font-numbers block mt-0.5">
-            {formatPKR(dateReportStats.creditPending, settings.currencySymbol, settings.language)}
+            {formatPKR(dateFilter === 'all' ? dateReportStats.allTimeCustomerCredit : dateReportStats.creditPending, settings.currencySymbol, settings.language)}
           </span>
-          <span className="text-[10px] text-amber-700 font-urdu-sans">
-            {isUrdu ? 'خریداروں کا بقایا کھاتہ' : 'Pending from buyers'}
-          </span>
+          <div className="flex items-center justify-between text-[10px] text-amber-700 font-urdu-sans mt-0.5">
+            <span>{isUrdu ? 'کل واجب الوصول:' : 'Total Due:'} {formatPKR(dateReportStats.allTimeCustomerCredit, settings.currencySymbol, settings.language)}</span>
+          </div>
         </div>
       </div>
 
@@ -2677,25 +2782,36 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {paginatedTransactions.map((tx, idx) => (
-                              <tr key={idx} className="hover:bg-white">
+                              <tr key={idx} className={tx.isPaymentRecord ? "bg-emerald-50/70 hover:bg-emerald-100/50" : "hover:bg-white"}>
                                 <td className="py-1 px-2 font-numbers text-slate-500">{tx.date}</td>
-                                <td className="py-1 px-2 font-bold text-slate-800">{tx.productUrdu}</td>
-                                <td className="py-1 px-2 text-center font-numbers">{tx.quantity}</td>
-                                <td className="py-1 px-2 text-center font-numbers">
-                                  {formatPKR(tx.ratePerUnit, settings.currencySymbol, settings.language)}
+                                <td className="py-1 px-2 font-bold text-slate-800">
+                                  {tx.isPaymentRecord ? (
+                                    <span className="text-emerald-800 flex items-center gap-1 font-urdu-sans font-bold">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 inline flex-shrink-0" />
+                                      {tx.productUrdu}
+                                    </span>
+                                  ) : (
+                                    tx.productUrdu
+                                  )}
                                 </td>
-                                <td className="py-1 px-2 text-end font-bold font-numbers text-slate-900">
-                                  {formatPKR(tx.totalAmount, settings.currencySymbol, settings.language)}
+                                <td className="py-1 px-2 text-center font-numbers">{tx.isPaymentRecord ? '-' : tx.quantity}</td>
+                                <td className="py-1 px-2 text-center font-numbers">
+                                  {tx.isPaymentRecord ? '-' : formatPKR(tx.ratePerUnit, settings.currencySymbol, settings.language)}
+                                </td>
+                                <td className={`py-1 px-2 text-end font-bold font-numbers ${tx.isPaymentRecord ? 'text-emerald-700' : 'text-slate-900'}`}>
+                                  {tx.isPaymentRecord ? `+${formatPKR(tx.totalAmount, settings.currencySymbol, settings.language)}` : formatPKR(tx.totalAmount, settings.currencySymbol, settings.language)}
                                 </td>
                                 <td className="py-1 px-2 text-center">
                                   <span
                                     className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
-                                      tx.paymentStatus === 'cash'
+                                      tx.isPaymentRecord
+                                        ? 'bg-emerald-200 text-emerald-900 border border-emerald-300'
+                                        : tx.paymentStatus === 'cash'
                                         ? 'bg-emerald-100 text-emerald-800'
                                         : 'bg-amber-100 text-amber-900'
                                     }`}
                                   >
-                                    {tx.paymentStatus === 'cash' ? t.paymentCash : t.paymentCredit}
+                                    {tx.isPaymentRecord ? (isUrdu ? 'وصول شدہ نقد' : 'Cash Paid') : tx.paymentStatus === 'cash' ? t.paymentCash : t.paymentCredit}
                                   </span>
                                 </td>
                               </tr>

@@ -653,8 +653,23 @@ export function buildEntireRecordReportPDF({
   const netVendorPayable = lots.reduce((a, b) => a + b.summary.netPayableToVendor, 0);
 
   const allSales = lots.flatMap((l) => l.sales);
-  const cashReceived = allSales.filter((s) => s.paymentStatus === 'cash').reduce((a, b) => a + b.totalAmount, 0);
-  const creditPending = allSales.filter((s) => s.paymentStatus === 'credit').reduce((a, b) => a + b.totalAmount, 0);
+  const directCashReceived = allSales.reduce((sum, s) => {
+    if (s.paymentStatus === 'cash') return sum + (Number(s.totalAmount) || 0);
+    if (s.paidAmount && Number(s.paidAmount) > 0) return sum + (Number(s.paidAmount) || 0);
+    return sum;
+  }, 0);
+  const khataCashReceived = (customers || []).flatMap((c) => c.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const cashReceived = directCashReceived + khataCashReceived;
+
+  let allTimeCreditBids = 0;
+  allSales.forEach((s) => {
+    if (s.paymentStatus !== 'cash') {
+      allTimeCreditBids += (Number(s.totalAmount) || 0) - (Number(s.paidAmount) || 0);
+    }
+  });
+  const allTimeOpening = (customers || []).reduce((sum, c) => sum + (Number(c.openingBalance) || 0), 0);
+  const allTimeManualCredits = (customers || []).flatMap((c) => c.manualCredits || []).reduce((sum, cr) => sum + (Number(cr.amount) || 0), 0);
+  const creditPending = Math.max(0, (allTimeOpening + allTimeManualCredits + allTimeCreditBids) - khataCashReceived);
 
   let currentY = addPDFHeader(
     doc,
@@ -747,6 +762,28 @@ export function buildEntireRecordReportPDF({
         row.cashReceived += paid;
         row.creditPending += Math.max(0, s.totalAmount - paid);
       }
+    });
+  });
+
+  // Also distribute customer khata payments into dateMap by their payment date
+  (customers || []).forEach((c) => {
+    (c.payments || []).forEach((p) => {
+      const pDate = (p.paymentDate || p.date || '').slice(0, 10);
+      if (!pDate) return;
+      if (!dateMap.has(pDate)) {
+        dateMap.set(pDate, {
+          date: pDate,
+          grossSales: 0,
+          mazdoori: 0,
+          munshiana: 0,
+          commission: 0,
+          shopProfit: 0,
+          cashReceived: 0,
+          creditPending: 0,
+        });
+      }
+      const row = dateMap.get(pDate)!;
+      row.cashReceived += Number(p.amount) || 0;
     });
   });
 

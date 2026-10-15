@@ -213,7 +213,7 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
         paymentStatus: sale.paymentStatus,
         paidAmount: sale.paidAmount,
         timestamp: sale.timestamp,
-        date: lot.arrivalDate,
+        date: (sale as any).date || sale.timestamp?.slice(0, 10) || lot.arrivalDate,
       }))
     );
   }, [lots, settings.language]);
@@ -287,6 +287,10 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
       entry.grossPurchasesAmount += sale.totalAmount;
       if (sale.paymentStatus === 'cash') {
         entry.cashPaidDirect += sale.totalAmount;
+      } else if (sale.paymentStatus === 'partial' || (sale.paidAmount && Number(sale.paidAmount) > 0)) {
+        const paid = Number(sale.paidAmount) || 0;
+        entry.cashPaidDirect += paid;
+        entry.creditBidsAmount += Math.max(0, sale.totalAmount - paid);
       } else {
         entry.creditBidsAmount += sale.totalAmount;
       }
@@ -330,6 +334,32 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
     () => customerList.reduce((sum, c) => sum + c.cashPaidDirect + c.khataPaymentsReceived, 0),
     [customerList]
   );
+
+  const todayCashCollected = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let total = 0;
+    // 1. Direct cash from sales made today
+    allSales.forEach((sale) => {
+      const sDate = (sale.date || sale.timestamp?.slice(0, 10) || '').slice(0, 10);
+      if (sDate === todayStr) {
+        if (sale.paymentStatus === 'cash') {
+          total += Number(sale.totalAmount) || 0;
+        } else if (sale.paidAmount && Number(sale.paidAmount) > 0) {
+          total += Number(sale.paidAmount) || 0;
+        }
+      }
+    });
+    // 2. Customer payments received today (from each record created today)
+    customers.forEach((c) => {
+      (c.payments || []).forEach((p) => {
+        const pDate = (p.paymentDate || p.date || '').slice(0, 10);
+        if (pDate === todayStr) {
+          total += Number(p.amount) || 0;
+        }
+      });
+    });
+    return total;
+  }, [allSales, customers]);
 
   // Customer pagination
   const [customerPage, setCustomerPage] = useState(1);
@@ -715,10 +745,14 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
     if (custPaymentAmount <= 0) return;
 
     sound.playCashChime();
+    const todayStr = new Date().toISOString().slice(0, 10);
     const newRecord: BuyerPaymentRecord = {
       id: `pay-${Date.now()}`,
+      buyerName: customer.name,
+      buyerPhone: customer.phone,
       amount: custPaymentAmount,
-      date: new Date().toISOString().slice(0, 10),
+      date: todayStr,
+      paymentDate: todayStr,
       paymentMethod: 'cash',
       notes: custPaymentNote.trim() || undefined,
     };
@@ -976,6 +1010,9 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                   <span className="text-lg sm:text-xl font-black text-emerald-950 font-numbers block">
                     {formatPKR(totalCashCollected, settings.currencySymbol, settings.language)}
                   </span>
+                  <div className="flex items-center gap-2 text-[10px] text-emerald-700 font-urdu-sans mt-0.5">
+                    <span>{isUrdu ? 'آج کی وصولی:' : "Today's Cash:"} <strong className="font-numbers">{formatPKR(todayCashCollected, settings.currencySymbol, settings.language)}</strong></span>
+                  </div>
                 </div>
               </div>
             </div>
