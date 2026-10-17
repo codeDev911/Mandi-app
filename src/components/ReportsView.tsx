@@ -247,19 +247,39 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Backward-compatible alias
   const isLotInDateRange = isDateInRange;
 
-  // Helper to check if a lot has activity (arrival, sales, or vendor payment) in the selected date range
+  // Date helper to check if a date string is strictly BEFORE the selected date range
+  const isDateBeforeRange = (dateStr?: string): boolean => {
+    if (!dateStr || dateFilter === 'all') return false;
+    const cleanDate = dateStr.slice(0, 10);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const yesterdayStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+    if (dateFilter === 'today') return cleanDate < todayStr;
+    if (dateFilter === 'yesterday') return cleanDate < yesterdayStr;
+    if (dateFilter === 'last7days') {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      return cleanDate < sevenDaysAgo;
+    }
+    if (dateFilter === 'thismonth') {
+      const thisMonthStart = new Date().toISOString().slice(0, 7) + '-01';
+      return cleanDate < thisMonthStart;
+    }
+    if (dateFilter === 'custom') {
+      return Boolean(customFromDate && cleanDate < customFromDate);
+    }
+    return false;
+  };
+
+  // Helper to check if a lot has activity (arrival or auction sales) in the selected date range
   const isLotActiveInDateRange = (lot: VendorLot): boolean => {
     if (dateFilter === 'all') return true;
     // 1. Lot arrived or was created on this date
-    if (isDateInRange(lot.arrivalDate) || isDateInRange(lot.createdAt?.slice(0, 10))) {
+    const createdDate = (lot.arrivalDate || lot.createdAt || '').slice(0, 10);
+    if (createdDate && isDateInRange(createdDate)) {
       return true;
     }
     // 2. Any auction sale / bid was recorded on this date
     if (lot.sales.some((s) => isDateInRange(getSaleDate(s, lot)))) {
-      return true;
-    }
-    // 3. Any vendor payment was recorded on this date
-    if (lot.vendorPaymentDate && isDateInRange(lot.vendorPaymentDate)) {
       return true;
     }
     return false;
@@ -310,6 +330,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         customerName: string;
         phone?: string;
         shopName?: string;
+        city?: string;
+        address?: string;
         totalPurchases: number;
         totalUnitsBought: number;
         totalAmount: number;
@@ -317,6 +339,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         khataPaid: number;
         cashPaid: number;
         creditPending: number;
+        oldUdhaar: number;
         allTimeCredit: number;
         transactions: Array<{
           lotId: string;
@@ -441,6 +464,41 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       const allTimePaymentsReceived = (savedCust?.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
       const allTimeCredit = Math.max(0, (allTimeOpening + allTimeManualCredits + allTimeCreditBids) - allTimePaymentsReceived);
 
+      // Compute oldUdhaar (سابقہ ادھار) strictly BEFORE the selected date range
+      let creditBidsBefore = 0;
+      lots.forEach((l) => {
+        l.sales.forEach((s) => {
+          if (s.buyerName.toLowerCase() === custName.toLowerCase() && s.paymentStatus !== 'cash') {
+            const sDate = getSaleDate(s, l);
+            if (dateFilter !== 'all' && isDateBeforeRange(sDate)) {
+              creditBidsBefore += (Number(s.totalAmount) || 0) - (Number(s.paidAmount) || 0);
+            }
+          }
+        });
+      });
+
+      let manualCreditsBefore = 0;
+      (savedCust?.manualCredits || []).forEach((cr) => {
+        const d = (cr.date || cr.createdAt || '').slice(0, 10);
+        if (dateFilter !== 'all' && isDateBeforeRange(d)) {
+          manualCreditsBefore += Number(cr.amount) || 0;
+        }
+      });
+
+      const openingBalanceBefore = dateFilter !== 'all' ? (Number(savedCust?.openingBalance) || 0) : 0;
+
+      let paymentsBefore = 0;
+      (savedCust?.payments || []).forEach((p) => {
+        const d = (p.paymentDate || p.date || p.timestamp || '').slice(0, 10);
+        if (dateFilter !== 'all' && isDateBeforeRange(d)) {
+          paymentsBefore += Number(p.amount) || 0;
+        }
+      });
+
+      const oldUdhaar = dateFilter === 'all'
+        ? (Number(savedCust?.openingBalance) || 0)
+        : Math.max(0, (openingBalanceBefore + manualCreditsBefore + creditBidsBefore) - paymentsBefore);
+
       // Build transactions statement
       const transactions: Array<{
         lotId: string;
@@ -503,11 +561,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       const phone = savedCust?.phone || salesInDate[0]?.sale.buyerPhone;
       const shopName = savedCust?.shopName;
+      const city = savedCust?.city;
+      const address = savedCust?.address;
 
       custMap.set(custName, {
         customerName: custName,
         phone,
         shopName,
+        city,
+        address,
         totalPurchases,
         totalUnitsBought,
         totalAmount,
@@ -515,6 +577,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         khataPaid,
         cashPaid,
         creditPending,
+        oldUdhaar,
         allTimeCredit,
         transactions,
         payments: paymentsInDate,
@@ -729,20 +792,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       }
     >();
 
-    filteredLotsByDate.forEach((lot) => {
+    lots.forEach((lot) => {
       if (selectedVendorFilter !== 'all' && lot.vendorName !== selectedVendorFilter) {
         return;
       }
 
-      const salesInDate = lot.sales.filter((s) => {
-        if (dateFilter === 'all') return true;
-        return isDateInRange(getSaleDate(s, lot));
-      });
-
-      const isArrival = isDateInRange(lot.arrivalDate);
-      const isPaymentDate = Boolean(lot.vendorPaymentDate && isDateInRange(lot.vendorPaymentDate));
-
-      if (dateFilter !== 'all' && salesInDate.length === 0 && !isArrival && !isPaymentDate) {
+      // Filter strictly by the lot's created / arrival date (NOT payment date, NOT updated date)
+      const lotCreatedDate = (lot.arrivalDate || lot.createdAt || '').slice(0, 10);
+      if (dateFilter !== 'all' && !isDateInRange(lotCreatedDate)) {
         return;
       }
 
@@ -762,44 +819,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         lots: [],
       };
 
-      const lotGross = dateFilter === 'all'
-        ? lot.summary.grossSales
-        : salesInDate.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
-      const lotSold = dateFilter === 'all'
-        ? lot.summary.totalSoldQuantity
-        : salesInDate.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+      const lotGross = lot.summary.grossSales;
+      const lotSold = lot.summary.totalSoldQuantity;
+      const lotComm = lot.summary.arhtiProfitCommission;
+      const lotExp = lot.summary.totalExpenses;
+      const lotNet = lot.summary.netPayableToVendor;
 
       existing.lotsCount += 1;
-      existing.totalUnits += (dateFilter === 'all' || isArrival) ? lot.totalQuantity : lotSold;
+      existing.totalUnits += lot.totalQuantity;
       existing.unitsSold += lotSold;
       existing.grossSales += lotGross;
-
-      let lotComm = 0;
-      if (lot.expenses?.commission?.enabled) {
-        if (dateFilter === 'all') {
-          lotComm = Number(lot.expenses.commission.amount) || 0;
-        } else if (lot.expenses.commission.type === 'percentage') {
-          lotComm = Math.round((lotGross * (Number(lot.expenses.commission.rate) || 0)) / 100);
-        } else if (isArrival) {
-          lotComm = Number(lot.expenses.commission.amount) || 0;
-        } else if (lot.totalQuantity > 0 && lotSold > 0) {
-          lotComm = Math.round(((Number(lot.expenses.commission.amount) || 0) * lotSold) / lot.totalQuantity);
-        }
-      }
       existing.commission += lotComm;
-
-      let lotExp = lotComm;
-      if (dateFilter === 'all') {
-        lotExp = lot.summary.totalExpenses;
-      } else if (isArrival) {
-        lotExp = lot.summary.totalExpenses;
-      } else if (lot.expenses?.mazdoori?.enabled && lot.expenses.mazdoori.ratePerUnit) {
-        lotExp += lot.expenses.mazdoori.ratePerUnit * lotSold;
-      }
       existing.totalExpenses += lotExp;
-
-      const lotNet = Math.max(0, lotGross - lotExp);
-      existing.netPayable += (dateFilter === 'all') ? lot.summary.netPayableToVendor : lotNet;
+      existing.netPayable += lotNet;
 
       existing.lots.push(lot);
       vendorMap.set(lot.vendorName, existing);
@@ -848,7 +880,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       v.vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (v.vendorCity && v.vendorCity.toLowerCase().includes(searchTerm.toLowerCase()))
     );
-  }, [filteredLotsByDate, selectedVendorFilter, searchTerm, dateFilter, customFromDate, customToDate, vendors]);
+  }, [lots, selectedVendorFilter, searchTerm, dateFilter, customFromDate, customToDate, vendors]);
 
   // 3. PRODUCT REPORT DATA
   const productReports = useMemo(() => {
@@ -2229,8 +2261,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                                   <span className="font-bold text-slate-800 font-urdu-sans">
                                     {lot.productEmoji} {lot.productUrdu}
                                   </span>
-                                  <span className="text-[11px] text-slate-400 font-numbers block">
-                                    رسید #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)} • {lot.arrivalDate} ({lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)})
+                                  <span className="text-[11px] text-slate-500 font-numbers block">
+                                    رسید #{getLotReceiptNumber(lot.lotNumber, lot.billNumber)} • {isUrdu ? 'تاریخ اندراج:' : 'Created:'} {(lot.arrivalDate || lot.createdAt || '').slice(0, 10)} ({lot.totalQuantity} {getUnitDisplayLabel(lot.unitType, settings.language)})
                                   </span>
                                 </div>
 
@@ -2398,9 +2430,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         </span>
                       </div>
                       <div className="text-start sm:text-end bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">
-                        <span className="text-[10px] text-amber-900 font-bold font-urdu-sans block">صافی بقایا (تاریخ فلٹر):</span>
+                        <span className="text-[10px] text-amber-900 font-bold font-urdu-sans block">{isUrdu ? 'سابقہ ادھار:' : 'Old Udhaar:'}</span>
                         <span className="text-xs font-bold text-amber-900 font-numbers block">
-                          {formatPKR(c.creditPending, settings.currencySymbol, settings.language)}
+                          {formatPKR(c.oldUdhaar, settings.currencySymbol, settings.language)}
                         </span>
                       </div>
                       <div className="text-start sm:text-end bg-rose-50 px-2.5 py-1 rounded-xl border border-rose-200">

@@ -22,6 +22,7 @@ export interface PDFPreviewData {
     vendorPending?: number;
     cashReceived?: number;
     creditPending?: number;
+    oldUdhaar?: number;
     allTimeCredit?: number;
     unitsSold?: number;
     lotsCount?: number;
@@ -78,6 +79,10 @@ export interface PDFPreviewData {
     customerName: string;
     shopName?: string;
     phone?: string;
+    city?: string;
+    address?: string;
+    oldUdhaar?: number;
+    allTimeCredit?: number;
     totalPurchases: number;
     totalUnitsBought: number;
     totalAmount: number;
@@ -1007,6 +1012,9 @@ export function buildSingleCustomerReportPDF(
     customerName: string;
     phone?: string;
     shopName?: string;
+    city?: string;
+    address?: string;
+    oldUdhaar?: number;
     totalPurchases: number;
     totalUnitsBought: number;
     totalAmount: number;
@@ -1023,7 +1031,7 @@ export function buildSingleCustomerReportPDF(
     transactions: Array<{
       date: string;
       lotId: string;
-      productName: string;
+      productName?: string;
       productUrdu: string;
       quantity: number;
       ratePerUnit: number;
@@ -1037,105 +1045,157 @@ export function buildSingleCustomerReportPDF(
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
 
-  const subInfo = periodInfo
-    ? `Customer: ${customer.customerName} | Phone: ${customer.phone || 'N/A'} | Shop: ${customer.shopName || 'N/A'} | Period: ${periodInfo}`
-    : `Customer: ${customer.customerName} | Phone: ${customer.phone || 'N/A'} | Shop: ${customer.shopName || 'N/A'}`;
-
   let currentY = addPDFHeader(
     doc,
     settings,
-    `CUSTOMER KHAATA & PURCHASES STATEMENT - ${customer.customerName.toUpperCase()}`,
-    subInfo
+    `CUSTOMER KHAATA & PURCHASES STATEMENT`,
+    `Customer Statement & Account Ledger | Period: ${periodInfo || 'All Records'}`
   );
 
-  const allTimeOutstanding = customer.allTimeCredit !== undefined ? customer.allTimeCredit : customer.creditPending;
+  // 1. WELL-DEFINED CUSTOMER PROFILE & CONTACT DETAILS CARD (PROMINENT & ENLARGED)
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(148, 163, 184); // slate-400
+  doc.setLineWidth(0.4);
+  doc.roundedRect(14, currentY, pageWidth - 28, 28, 3, 3, 'FD');
 
-  // Customer Summary Card
-  doc.setFillColor(245, 248, 252);
-  doc.roundedRect(14, currentY, pageWidth - 28, 17, 2, 2, 'F');
-  doc.setDrawColor(210, 225, 245);
-  doc.roundedRect(14, currentY, pageWidth - 28, 17, 2, 2, 'D');
-
-  doc.setFontSize(8);
-  doc.setTextColor(90, 90, 90);
-  doc.text('TOTAL PURCHASES (کل خریداری)', 18, currentY + 4.5);
-  doc.text('CASH PAID (نقد وصول)', 62, currentY + 4.5);
-  doc.text('DATE-FILTERED (صافی بقایا)', 106, currentY + 4.5);
-  doc.text('KUL UDHAAR (کل ادھار تمام وقت)', 150, currentY + 4.5);
-
-  doc.setFontSize(10.5);
+  // Left Column: Customer Name, Shop, and Address
+  doc.setFontSize(15);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(20, 20, 20);
-  doc.text(`Rs. ${customer.totalAmount.toLocaleString()}`, 18, currentY + 11);
-  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42); // slate-900
+  doc.text(`BUYER / KHAATA: ${customer.customerName.toUpperCase()}`, 19, currentY + 8);
+
+  doc.setFontSize(11.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(51, 65, 85); // slate-700
+  const shopLabel = customer.shopName ? `Shop / Dukan: ${customer.shopName}` : 'Shop / Business: N/A';
+  doc.text(shopLabel, 19, currentY + 15.5);
+
+  const addressText = [customer.address, customer.city].filter(Boolean).join(', ') || 'Sabzi & Fruit Mandi';
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(110, 110, 110);
-  doc.text(`(${customer.totalUnitsBought} Units)`, 18, currentY + 14.5);
+  doc.setTextColor(71, 85, 105); // slate-600
+  doc.text(`Address / City: ${addressText}`, 19, currentY + 22.5);
 
-  doc.setFontSize(10.5);
+  // Right Column: Phone, Period, and Statement Date
+  doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 120, 50);
-  doc.text(`Rs. ${customer.cashPaid.toLocaleString()}`, 62, currentY + 11);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Phone: ${customer.phone || 'N/A'}`, pageWidth - 19, currentY + 8, { align: 'right' });
 
-  doc.setTextColor(180, 70, 20);
-  doc.text(`Rs. ${customer.creditPending.toLocaleString()}`, 106, currentY + 11);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Period: ${periodInfo || 'All Records'}`, pageWidth - 19, currentY + 15.5, { align: 'right' });
 
-  doc.setTextColor(180, 25, 20);
-  doc.text(`Rs. ${allTimeOutstanding.toLocaleString()}`, 150, currentY + 11);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Date Printed: ${new Date().toISOString().slice(0, 10)}`, pageWidth - 19, currentY + 22.5, { align: 'right' });
 
-  currentY += 22;
+  currentY += 32;
 
-  // Purchases Table (NO MISLEADING KHATA UDHAAR STATUS)
+  const allTimeOutstanding = customer.allTimeCredit !== undefined ? customer.allTimeCredit : customer.creditPending;
+  const oldUdhaarAmount = customer.oldUdhaar !== undefined ? customer.oldUdhaar : 0;
+
+  // 2. ENLARGED CUSTOMER SUMMARY CARD (WITH OLD UDHAAR REPLACING SAFI BAQAYA)
+  doc.setFillColor(245, 248, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.4);
+  doc.roundedRect(14, currentY, pageWidth - 28, 24, 3, 3, 'FD');
+
+  const colW = (pageWidth - 28) / 4;
+  const col1X = 14 + 4;
+  const col2X = 14 + colW + 2;
+  const col3X = 14 + colW * 2 + 2;
+  const col4X = 14 + colW * 3 + 2;
+
+  // Header Labels (Enlarged 10pt Bold)
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(71, 85, 105);
+  doc.text('TOTAL PURCHASES (کل خریداری)', col1X, currentY + 6.5);
+  doc.text('CASH PAID (نقد وصول)', col2X, currentY + 6.5);
+  doc.text('OLD UDHAAR (سابقہ ادھار)', col3X, currentY + 6.5);
+  doc.text('KUL UDHAAR (کل ادھار تمام وقت)', col4X, currentY + 6.5);
+
+  // Metric Values (Enlarged 13.5pt Bold)
+  doc.setFontSize(13.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Rs. ${customer.totalAmount.toLocaleString()}`, col1X, currentY + 15);
+  doc.setFontSize(9.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(`(${customer.totalUnitsBought} Units)`, col1X, currentY + 20);
+
+  doc.setFontSize(13.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 120, 50); // Emerald
+  doc.text(`Rs. ${customer.cashPaid.toLocaleString()}`, col2X, currentY + 15);
+
+  doc.setTextColor(180, 83, 9); // Amber-700 for Old Udhaar
+  doc.text(`Rs. ${oldUdhaarAmount.toLocaleString()}`, col3X, currentY + 15);
+
+  doc.setTextColor(190, 24, 24); // Red-700 for Kul Udhaar
+  doc.text(`Rs. ${allTimeOutstanding.toLocaleString()}`, col4X, currentY + 15);
+
+  currentY += 29;
+
+  // 3. PURCHASES & TRANSACTIONS TABLE (ENLARGED FONT SIZE & COMFORTABLE PADDING)
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('PURCHASES & COMMODITY TRANSACTIONS (خریداری و بولی تفصیلات)', 14, currentY);
+  currentY += 4;
+
   const txRows = customer.transactions.map((tx, idx) => [
     idx + 1,
     tx.date,
-    tx.productUrdu || tx.productName,
+    tx.productUrdu || tx.productName || 'سبزی / فروٹ',
     tx.quantity,
-    `Rs. ${tx.ratePerUnit}`,
-    `Rs. ${tx.totalAmount.toLocaleString()}`,
+    `Rs. ${Number(tx.ratePerUnit || 0).toLocaleString()}`,
+    `Rs. ${Number(tx.totalAmount || 0).toLocaleString()}`,
   ]);
 
   autoTable(doc, {
     startY: currentY,
-    head: [['#', 'Date', 'Product / Commodity (جنس)', 'Qty', 'Rate (PKR)', 'Total Amount (PKR)']],
+    head: [['#', 'Date (تاریخ)', 'Product / Commodity (جنس)', 'Qty (تعداد)', 'Rate (PKR)', 'Total Amount (PKR)']],
     body: txRows,
     theme: 'grid',
-    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 10, fontStyle: 'bold' },
-    styles: { fontSize: 9.5, cellPadding: 3.2 },
+    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 11, fontStyle: 'bold' },
+    styles: { fontSize: 10.5, cellPadding: 4 },
     columnStyles: {
-      0: { cellWidth: 8, halign: 'center' },
-      1: { cellWidth: 26, halign: 'center' },
+      0: { cellWidth: 12, halign: 'center' },
+      1: { cellWidth: 30, halign: 'center' },
       2: { fontStyle: 'bold' },
-      3: { cellWidth: 20, halign: 'center' },
-      4: { cellWidth: 28, halign: 'center' },
-      5: { cellWidth: 38, halign: 'right', fontStyle: 'bold' },
+      3: { cellWidth: 24, halign: 'center' },
+      4: { cellWidth: 32, halign: 'center' },
+      5: { cellWidth: 44, halign: 'right', fontStyle: 'bold' },
     },
     foot: [[
       'Total',
       '',
-      `${customer.transactions.length} Purchases`,
+      `${customer.transactions.length} Purchases / Bids`,
       customer.totalUnitsBought,
       '',
       `Rs. ${customer.totalAmount.toLocaleString()}`,
     ]],
-    footStyles: { fillColor: [240, 243, 246], textColor: [20, 20, 20], fontStyle: 'bold', fontSize: 10 },
+    footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 11 },
   });
 
-  currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 8 : currentY + 30;
+  currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 10 : currentY + 32;
 
-  // Section 2: Payments Received & Khata Recovery Table
-  doc.setFontSize(11);
+  // 4. PAYMENTS RECEIVED & KHATA RECOVERY TABLE (ENLARGED FONT SIZE)
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 110, 50);
   doc.text('PAYMENTS RECEIVED & KHATA RECOVERY (وصول شدہ نقد ادائیگیاں)', 14, currentY);
-  currentY += 3;
+  currentY += 4;
 
   const paymentRows = (customer.payments || []).map((p, idx) => [
     idx + 1,
     p.date || p.paymentDate || '-',
     p.paymentMethod === 'online' ? 'Online Bank' : p.paymentMethod === 'cheque' ? 'Cheque' : 'Cash (نقد)',
     p.notes || 'نقد وصولی',
-    `Rs. ${p.amount.toLocaleString()}`,
+    `Rs. ${Number(p.amount || 0).toLocaleString()}`,
   ]);
 
   if (paymentRows.length === 0 && customer.cashPaid > 0) {
@@ -1151,17 +1211,17 @@ export function buildSingleCustomerReportPDF(
   if (paymentRows.length > 0) {
     autoTable(doc, {
       startY: currentY,
-      head: [['#', 'Date', 'Payment Method', 'Notes / Description', 'Amount Received (PKR)']],
+      head: [['#', 'Date (تاریخ)', 'Payment Method (طریقہ)', 'Notes / Description (تفصیل)', 'Amount Received (PKR)']],
       body: paymentRows,
       theme: 'grid',
-      headStyles: { fillColor: [15, 110, 50], textColor: 255, fontSize: 9.5, fontStyle: 'bold' },
-      styles: { fontSize: 9.5, cellPadding: 3 },
+      headStyles: { fillColor: [15, 110, 50], textColor: 255, fontSize: 11, fontStyle: 'bold' },
+      styles: { fontSize: 10.5, cellPadding: 4 },
       columnStyles: {
-        0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 26, halign: 'center' },
-        2: { cellWidth: 32, halign: 'center' },
+        0: { cellWidth: 12, halign: 'center' },
+        1: { cellWidth: 30, halign: 'center' },
+        2: { cellWidth: 36, halign: 'center' },
         3: { halign: 'left' },
-        4: { cellWidth: 42, halign: 'right', fontStyle: 'bold', textColor: [15, 110, 50] },
+        4: { cellWidth: 46, halign: 'right', fontStyle: 'bold', textColor: [15, 110, 50] },
       },
       foot: [[
         'Total',
@@ -1170,7 +1230,7 @@ export function buildSingleCustomerReportPDF(
         'Total Cash Received (کل نقد وصول شدہ)',
         `Rs. ${customer.cashPaid.toLocaleString()}`,
       ]],
-      footStyles: { fillColor: [240, 248, 240], textColor: [15, 110, 50], fontStyle: 'bold', fontSize: 8.5 },
+      footStyles: { fillColor: [240, 248, 240], textColor: [15, 110, 50], fontStyle: 'bold', fontSize: 11 },
     });
   }
 
@@ -1185,6 +1245,7 @@ export function buildSingleCustomerReportPDF(
       commission: 0,
       cashReceived: customer.cashPaid,
       creditPending: customer.creditPending,
+      oldUdhaar: oldUdhaarAmount,
       allTimeCredit: allTimeOutstanding,
       unitsSold: customer.totalUnitsBought,
       lotsCount: customer.totalPurchases,
