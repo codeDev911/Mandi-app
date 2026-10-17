@@ -92,6 +92,7 @@ interface ReportsViewProps {
     vendorName: string,
     payment: {
       lotId?: string;
+      lotIds?: string[];
       amount: number;
       notes?: string;
       paymentDate?: string;

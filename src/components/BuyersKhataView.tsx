@@ -49,6 +49,7 @@ import {
   FileText,
   DollarSign,
   CheckCircle2,
+  CheckSquare,
 } from 'lucide-react';
 
 interface BuyersKhataViewProps {
@@ -68,6 +69,7 @@ interface BuyersKhataViewProps {
     vendorName: string,
     payment: {
       lotId?: string;
+      lotIds?: string[];
       amount: number;
       notes?: string;
       paymentDate?: string;
@@ -176,6 +178,9 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
   const [vendorPaymentMethod, setVendorPaymentMethod] = useState<'cash' | 'online' | 'cheque'>('cash');
   const [vendorPaymentDate, setVendorPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [vendorPaymentLotTarget, setVendorPaymentLotTarget] = useState<string>('all');
+  const [vendorPaymentSelectedLotIds, setVendorPaymentSelectedLotIds] = useState<string[]>([]);
+  const [vendorPaymentLotSearch, setVendorPaymentLotSearch] = useState<string>('');
+  const [vendorPaymentLotDateFilter, setVendorPaymentLotDateFilter] = useState<string>('');
 
   // Sub-pagination states for expanded Customer Details and Vendor Details
   const [customerSalesSubPages, setCustomerSalesSubPages] = useState<Record<string, number>>({});
@@ -830,8 +835,12 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
 
     sound.playCashChime();
     if (onRecordVendorPayment) {
+      const hasSpecificLots = vendorPaymentSelectedLotIds.length > 0;
       onRecordVendorPayment(vendor.name, {
-        lotId: vendorPaymentLotTarget === 'all' ? undefined : vendorPaymentLotTarget,
+        lotId: vendorPaymentSelectedLotIds.length === 1
+          ? vendorPaymentSelectedLotIds[0]
+          : (vendorPaymentLotTarget !== 'all' ? vendorPaymentLotTarget : undefined),
+        lotIds: hasSpecificLots ? vendorPaymentSelectedLotIds : undefined,
         amount: vendorPaymentAmount,
         notes: vendorPaymentNote.trim() || undefined,
         paymentDate: vendorPaymentDate,
@@ -842,6 +851,9 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
     setSelectedVendorForPayment(null);
     setVendorPaymentAmount(0);
     setVendorPaymentNote('');
+    setVendorPaymentSelectedLotIds([]);
+    setVendorPaymentLotSearch('');
+    setVendorPaymentLotDateFilter('');
   };
 
   const handleQuickMarkVendorFullyPaid = (vendor: typeof vendorList[0]) => {
@@ -2200,11 +2212,15 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                             onClick={() => {
                               if (vendor.remainingDue > 0) {
                                 sound.playTick();
+                                const isOpening = !isPaymentFormOpen;
                                 setSelectedVendorForPayment(
-                                  isPaymentFormOpen ? null : vendor.name
+                                  isOpening ? vendor.name : null
                                 );
                                 setVendorPaymentAmount(vendor.remainingDue);
                                 setVendorPaymentLotTarget('all');
+                                setVendorPaymentSelectedLotIds([]);
+                                setVendorPaymentLotSearch('');
+                                setVendorPaymentLotDateFilter('');
                                 setVendorPaymentNote('');
                               }
                             }}
@@ -2263,7 +2279,8 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                        {/* Top Controls: Amount, Method & Payment Date */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                           {/* Payment Amount Input */}
                           <div>
                             <label className="block text-[11px] font-bold text-slate-700 mb-1">
@@ -2296,25 +2313,6 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                             </select>
                           </div>
 
-                          {/* Target Lot or Whole Balance */}
-                          <div>
-                            <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                              لاٹ منتخب کریں
-                            </label>
-                            <select
-                              value={vendorPaymentLotTarget}
-                              onChange={(e) => setVendorPaymentLotTarget(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs focus:ring-2 focus:ring-amber-500"
-                            >
-                              <option value="all">مجموعی کھاتہ پر تقسیم کریں (All Lots)</option>
-                              {vendor.lots.map((l) => (
-                                <option key={l.id} value={l.id}>
-                                  رسید #{getLotReceiptNumber(l.lotNumber, l.billNumber)} - {l.productUrdu} ({formatPKR(l.summary.netPayableToVendor, settings.currencySymbol, settings.language)})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
                           {/* Payment Date */}
                           <div>
                             <label className="block text-[11px] font-bold text-slate-700 mb-1">
@@ -2328,6 +2326,290 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                             />
                           </div>
                         </div>
+
+                        {/* Dedicated Lots Selection Div with Search, Date Filter & Multi-Select */}
+                        {(() => {
+                          const filteredVendorLotsForPayment = vendor.lots.filter((lot) => {
+                            if (vendorPaymentLotSearch.trim()) {
+                              const q = vendorPaymentLotSearch.toLowerCase().trim();
+                              const rNo = getLotReceiptNumber(lot.lotNumber, lot.billNumber).toLowerCase();
+                              const lNo = (lot.lotNumber || '').toLowerCase();
+                              const pUrdu = (lot.productUrdu || '').toLowerCase();
+                              const pName = (lot.productName || '').toLowerCase();
+                              if (!rNo.includes(q) && !lNo.includes(q) && !pUrdu.includes(q) && !pName.includes(q)) {
+                                return false;
+                              }
+                            }
+                            if (vendorPaymentLotDateFilter) {
+                              const lotDate = (lot.date || lot.arrivalDate || (lot.createdAt ? lot.createdAt.slice(0, 10) : '')).slice(0, 10);
+                              if (lotDate !== vendorPaymentLotDateFilter) {
+                                return false;
+                              }
+                            }
+                            return true;
+                          });
+
+                          const selectedLotsPendingTotal = vendor.lots
+                            .filter((l) => vendorPaymentSelectedLotIds.includes(l.id))
+                            .reduce((sum, l) => {
+                              const paid = l.vendorPaymentAmount !== undefined
+                                ? l.vendorPaymentAmount
+                                : (l.vendorPaymentStatus === 'paid' ? l.summary.netPayableToVendor : 0);
+                              return sum + Math.max(0, l.summary.netPayableToVendor - paid);
+                            }, 0);
+
+                          return (
+                            <div className="bg-white/95 border border-amber-300/80 rounded-xl p-3 shadow-xs space-y-2.5">
+                              {/* Header with Title and Selection Counters */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200/70 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <Package className="w-4 h-4 text-amber-700" />
+                                  <span className="text-xs font-black text-slate-900">
+                                    {isUrdu ? 'لاٹس کا انتخاب برائے ادائیگی (ایک یا زائد لاٹس منتخب کریں):' : 'Select Lots to Pay (Multi-Select):'}
+                                  </span>
+                                  {vendorPaymentSelectedLotIds.length > 0 ? (
+                                    <span className="bg-amber-100 text-amber-950 text-[11px] font-bold px-2 py-0.5 rounded-full border border-amber-300">
+                                      {vendorPaymentSelectedLotIds.length} {isUrdu ? 'لاٹس منتخب' : 'selected'}
+                                    </span>
+                                  ) : (
+                                    <span className="bg-slate-100 text-slate-600 text-[11px] font-bold px-2 py-0.5 rounded-full border border-slate-200">
+                                      {isUrdu ? 'مجموعی کھاتہ (تمام لاٹس)' : 'General Khata (All Lots)'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Quick selection helper buttons */}
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      sound.playTick();
+                                      const unpaidIds = vendor.lots
+                                        .filter((l) => {
+                                          const paid = l.vendorPaymentAmount !== undefined ? l.vendorPaymentAmount : (l.vendorPaymentStatus === 'paid' ? l.summary.netPayableToVendor : 0);
+                                          return l.summary.netPayableToVendor - paid > 0;
+                                        })
+                                        .map((l) => l.id);
+                                      setVendorPaymentSelectedLotIds(unpaidIds);
+                                      const sumDues = vendor.lots
+                                        .filter((l) => unpaidIds.includes(l.id))
+                                        .reduce((sum, l) => {
+                                          const paid = l.vendorPaymentAmount !== undefined ? l.vendorPaymentAmount : (l.vendorPaymentStatus === 'paid' ? l.summary.netPayableToVendor : 0);
+                                          return sum + Math.max(0, l.summary.netPayableToVendor - paid);
+                                        }, 0);
+                                      if (sumDues > 0) setVendorPaymentAmount(sumDues);
+                                    }}
+                                    className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                                  >
+                                    <CheckSquare className="w-3.5 h-3.5 text-amber-700" />
+                                    <span>{isUrdu ? 'تمام غیر ادا شدہ لاٹس' : 'All Unpaid Lots'}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      sound.playTick();
+                                      const allIds = filteredVendorLotsForPayment.map((l) => l.id);
+                                      setVendorPaymentSelectedLotIds(allIds);
+                                      const sumDues = filteredVendorLotsForPayment.reduce((sum, l) => {
+                                        const paid = l.vendorPaymentAmount !== undefined ? l.vendorPaymentAmount : (l.vendorPaymentStatus === 'paid' ? l.summary.netPayableToVendor : 0);
+                                        return sum + Math.max(0, l.summary.netPayableToVendor - paid);
+                                      }, 0);
+                                      if (sumDues > 0) setVendorPaymentAmount(sumDues);
+                                    }}
+                                    className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition"
+                                  >
+                                    <span>{isUrdu ? 'سب منتخب کریں' : 'Select All'}</span>
+                                  </button>
+
+                                  {vendorPaymentSelectedLotIds.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        sound.playTick();
+                                        setVendorPaymentSelectedLotIds([]);
+                                        setVendorPaymentAmount(vendor.remainingDue);
+                                      }}
+                                      className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                      <span>{isUrdu ? 'انتخاب ختم' : 'Clear'}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Search Bar & Date Filter Controls */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {/* Search Input */}
+                                <div className="relative">
+                                  <input
+                                    type="text"
+                                    value={vendorPaymentLotSearch}
+                                    onChange={(e) => setVendorPaymentLotSearch(e.target.value)}
+                                    placeholder={isUrdu ? 'لاٹ نمبر، جنس یا رسید نمبر تلاش کریں...' : 'Search Lot #, Commodity, Receipt #...'}
+                                    className="w-full pl-8 pr-7 rtl:pr-8 rtl:pl-7 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-urdu-sans focus:ring-2 focus:ring-amber-500 focus:bg-white"
+                                  />
+                                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 rtl:right-2.5 rtl:left-auto top-2" />
+                                  {vendorPaymentLotSearch && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setVendorPaymentLotSearch('')}
+                                      className="absolute right-2 rtl:left-2 rtl:right-auto top-2 text-slate-400 hover:text-slate-600"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Date Filter Input */}
+                                <div className="flex items-center gap-1.5">
+                                  <div className="relative flex-1">
+                                    <input
+                                      type="date"
+                                      value={vendorPaymentLotDateFilter}
+                                      onChange={(e) => setVendorPaymentLotDateFilter(e.target.value)}
+                                      className="w-full pl-7 pr-2 rtl:pr-7 rtl:pl-2 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-numbers focus:ring-2 focus:ring-amber-500 focus:bg-white"
+                                      title={isUrdu ? 'تاریخ کے لحاظ سے لاٹس فلٹر کریں' : 'Filter lots by date'}
+                                    />
+                                    <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-2 rtl:right-2 rtl:left-auto top-2 pointer-events-none" />
+                                  </div>
+                                  {vendorPaymentLotDateFilter && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setVendorPaymentLotDateFilter('')}
+                                      className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-[11px] font-bold whitespace-nowrap transition"
+                                      title="تمام تاریخیں دیکھیں"
+                                    >
+                                      {isUrdu ? 'تمام' : 'All'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Scrollable Lot Cards Container */}
+                              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-0.5 border border-slate-200 rounded-lg bg-slate-50/60 p-1.5">
+                                {filteredVendorLotsForPayment.length === 0 ? (
+                                  <div className="py-6 text-center text-xs text-slate-500 font-bold">
+                                    {isUrdu ? 'فلٹر کے مطابق کوئی لاٹ نہیں ملی' : 'No lots match your search/date filter'}
+                                  </div>
+                                ) : (
+                                  filteredVendorLotsForPayment.map((lot) => {
+                                    const isSelected = vendorPaymentSelectedLotIds.includes(lot.id);
+                                    const lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : (lot.vendorPaymentStatus === 'paid' ? lot.summary.netPayableToVendor : 0);
+                                    const remainingDue = Math.max(0, lot.summary.netPayableToVendor - lotPaid);
+                                    const isPaid = remainingDue <= 0;
+                                    const receiptNo = getLotReceiptNumber(lot.lotNumber, lot.billNumber);
+                                    const lotDate = lot.date || lot.arrivalDate || (lot.createdAt ? lot.createdAt.slice(0, 10) : '');
+
+                                    return (
+                                      <div
+                                        key={lot.id}
+                                        onClick={() => {
+                                          sound.playTick();
+                                          setVendorPaymentSelectedLotIds((prev) => {
+                                            const next = prev.includes(lot.id)
+                                              ? prev.filter((id) => id !== lot.id)
+                                              : [...prev, lot.id];
+                                            const newSum = vendor.lots
+                                              .filter((l) => next.includes(l.id))
+                                              .reduce((sum, l) => {
+                                                const p = l.vendorPaymentAmount !== undefined ? l.vendorPaymentAmount : (l.vendorPaymentStatus === 'paid' ? l.summary.netPayableToVendor : 0);
+                                                return sum + Math.max(0, l.summary.netPayableToVendor - p);
+                                              }, 0);
+                                            if (next.length > 0) {
+                                              setVendorPaymentAmount(newSum);
+                                            } else {
+                                              setVendorPaymentAmount(vendor.remainingDue);
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                        className={`p-2 rounded-lg cursor-pointer transition flex items-center justify-between gap-2 text-xs border ${
+                                          isSelected
+                                            ? 'bg-amber-100/95 border-amber-400 shadow-xs ring-1 ring-amber-400'
+                                            : 'bg-white hover:bg-slate-100 border-slate-200'
+                                        }`}
+                                      >
+                                        {/* Left: Checkbox + Receipt + Date + Product */}
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                          <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={() => {}} // toggled by parent onClick
+                                            className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer pointer-events-none"
+                                          />
+                                          <div className="min-w-0">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className="font-bold text-slate-900 font-numbers">
+                                                رسید #{receiptNo}
+                                              </span>
+                                              {lotDate && (
+                                                <span className="text-[10px] text-slate-600 font-numbers bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                  {lotDate}
+                                                </span>
+                                              )}
+                                              <span className="font-bold text-amber-950 font-urdu-sans truncate">
+                                                {lot.productUrdu || lot.productName}
+                                              </span>
+                                            </div>
+                                            <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                                              <span>کل واجب: <strong className="font-numbers text-slate-700">{formatPKR(lot.summary.netPayableToVendor, settings.currencySymbol, settings.language)}</strong></span>
+                                              <span>•</span>
+                                              <span>ادا: <strong className="font-numbers text-emerald-700">{formatPKR(lotPaid, settings.currencySymbol, settings.language)}</strong></span>
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        {/* Right: Remaining Due + Status Badge */}
+                                        <div className="text-end flex-shrink-0">
+                                          <div className="text-xs font-black font-numbers text-rose-700">
+                                            بقایا: {formatPKR(remainingDue, settings.currencySymbol, settings.language)}
+                                          </div>
+                                          <span
+                                            className={`inline-block text-[10px] font-bold px-1.5 py-0.2 rounded mt-0.5 ${
+                                              isPaid
+                                                ? 'bg-emerald-100 text-emerald-800'
+                                                : lotPaid > 0
+                                                ? 'bg-amber-100 text-amber-800'
+                                                : 'bg-rose-100 text-rose-800'
+                                            }`}
+                                          >
+                                            {isPaid ? (isUrdu ? 'مکمل ادا' : 'Paid') : lotPaid > 0 ? (isUrdu ? 'جزوی' : 'Partial') : (isUrdu ? 'واجب الادا' : 'Unpaid')}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+
+                              {/* Selected Lots Summary Footer with Auto-fill helper */}
+                              {vendorPaymentSelectedLotIds.length > 0 && (
+                                <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-300 flex flex-wrap items-center justify-between gap-2 text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-amber-950">
+                                      منتخب شدہ ({vendorPaymentSelectedLotIds.length} لاٹس) کا کل بقایا:
+                                    </span>
+                                    <span className="font-black text-rose-800 font-numbers text-sm">
+                                      {formatPKR(selectedLotsPendingTotal, settings.currencySymbol, settings.language)}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      sound.playTick();
+                                      setVendorPaymentAmount(selectedLotsPendingTotal);
+                                    }}
+                                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md font-bold text-[11px] shadow-xs transition active:scale-95"
+                                  >
+                                    💡 منتخب رقم درج کریں
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {/* Payment Note / Description */}
                         <div>

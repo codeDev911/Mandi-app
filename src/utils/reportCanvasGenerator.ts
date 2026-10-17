@@ -142,15 +142,19 @@ function drawTableHeader(
   tableX: number,
   tableW: number,
   curY: number,
-  colDefs: TableColumnDef[]
+  colDefs: TableColumnDef[],
+  isSingleCust: boolean = false
 ): number {
+  const headerH = isSingleCust ? 32 : 26;
   ctx.fillStyle = '#0f766e';
-  ctx.fillRect(tableX, curY, tableW, 26);
+  ctx.fillRect(tableX, curY, tableW, headerH);
   ctx.strokeStyle = '#0d9488';
-  ctx.strokeRect(tableX, curY, tableW, 26);
+  ctx.strokeRect(tableX, curY, tableW, headerH);
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 12.5px "Noto Sans Arabic", system-ui, sans-serif';
+  ctx.font = isSingleCust
+    ? 'bold 15px "Noto Sans Arabic", system-ui, sans-serif'
+    : 'bold 12.5px "Noto Sans Arabic", system-ui, sans-serif';
 
   let currentX = tableX;
   colDefs.forEach((h) => {
@@ -158,11 +162,11 @@ function drawTableHeader(
     let textX = currentX + h.w / 2;
     if (h.align === 'left') textX = currentX + 8;
     if (h.align === 'right') textX = currentX + h.w - 8;
-    ctx.fillText(h.title, textX, curY + 17);
+    ctx.fillText(h.title, textX, curY + (isSingleCust ? 21 : 17));
     currentX += h.w;
   });
 
-  return curY + 26;
+  return curY + headerH;
 }
 
 /**
@@ -189,9 +193,10 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
     singleLot,
   } = previewData;
 
+  const isSingleCust = Boolean(singleCustomer || reportType === 'single_customer');
   const tableX = 36;
   const tableW = PAGE_WIDTH - 72;
-  const rowH = 26;
+  const rowH = isSingleCust ? 34 : 26;
 
   // Determine active rows & column definitions
   let rows: any[] = [];
@@ -311,54 +316,55 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
     rows = sc.transactions || [];
     colDefs = [
       { title: '#', w: 35, align: 'center' },
-      { title: 'تاریخ', w: 90, align: 'center' },
-      { title: 'جنس و تفصیل', w: 230, align: 'right' },
-      { title: 'تعداد (پیکنگ)', w: 95, align: 'center' },
-      { title: 'ریٹ (روپے)', w: 105, align: 'right' },
-      { title: 'کل خریداری رقم', w: 223, align: 'right' },
+      { title: 'تاریخ (Date)', w: 90, align: 'center' },
+      { title: 'جنس و تفصیل (Commodity)', w: 230, align: 'right' },
+      { title: 'تعداد (Qty)', w: 95, align: 'center' },
+      { title: 'ریٹ (Rate)', w: 105, align: 'right' },
+      { title: 'کل خریداری رقم (PKR)', w: 223, align: 'right' },
     ];
     drawRowFn = (ctx, tx, idx, y) => {
       let currentX = tableX;
       // #
       ctx.fillStyle = '#475569';
-      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.font = 'bold 15px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${idx + 1}`, currentX + 17, y + 18);
+      ctx.fillText(`${idx + 1}`, currentX + 17, y + 22);
       currentX += 35;
       // Date
       ctx.fillStyle = '#1e293b';
-      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.font = 'bold 15px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(tx.date || '-', currentX + 45, y + 18);
+      ctx.fillText(tx.date || '-', currentX + 45, y + 22);
       currentX += 90;
-      // Product
+      // Product / Commodity - 18px text
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 15.5px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
+      ctx.font = 'bold 18px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
       ctx.textAlign = 'right';
-      ctx.fillText(tx.productUrdu || (tx as any).productName || '-', currentX + 220, y + 19);
+      ctx.fillText(tx.productUrdu || (tx as any).productName || '-', currentX + 220, y + 23);
       currentX += 230;
       // Qty
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.font = 'bold 17px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${tx.quantity}`, currentX + 47, y + 18);
+      ctx.fillText(`${tx.quantity}`, currentX + 47, y + 22);
       currentX += 95;
       // Rate
       ctx.fillStyle = '#334155';
-      ctx.font = 'bold 13.5px system-ui, sans-serif';
+      ctx.font = 'bold 17px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(`Rs. ${tx.ratePerUnit}`, currentX + 95, y + 18);
+      ctx.fillText(`Rs. ${tx.ratePerUnit}`, currentX + 95, y + 22);
       currentX += 105;
-      // Total
+      // Total Amount - 18px text
       ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 15px system-ui, sans-serif';
+      ctx.font = 'bold 18px system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText(formatPKR(tx.totalAmount, '', 'en'), currentX + 215, y + 18);
+      ctx.fillText(formatPKR(tx.totalAmount, '', 'en'), currentX + 215, y + 22);
     };
 
-    const scOldUdhaar = (sc as any)?.oldUdhaar !== undefined ? (sc as any).oldUdhaar : (summary?.oldUdhaar || 0);
-    const scKulUdhaar = (sc as any)?.allTimeCredit !== undefined ? (sc as any).allTimeCredit : (summary?.allTimeCredit || 0);
-    totalSummaryText = `کل خریداری: ${rows.length} بار • مال خریدا: ${formatPKR(sc.totalAmount, 'Rs.', 'en')} • نقد وصول: ${formatPKR(sc.cashPaid, 'Rs.', 'en')} • سابقہ ادھار: ${formatPKR(scOldUdhaar, 'Rs.', 'en')} • کل ادھار تمام وقت: ${formatPKR(scKulUdhaar, 'Rs.', 'en')}`;
+    const scOldUdhaar = (sc as any)?.oldUdhaar !== undefined
+      ? (sc as any).oldUdhaar
+      : (summary?.oldUdhaar || 0);
+    totalSummaryText = `کل خریداری: ${rows.length} بار • مال خریدا: ${formatPKR(sc.totalAmount, 'Rs.', 'en')} • نقد وصول: ${formatPKR(sc.cashPaid, 'Rs.', 'en')} • سابقہ ادھار: ${formatPKR(scOldUdhaar, 'Rs.', 'en')}`;
   }
   // 3. Single Product Report
   else if (singleProduct || reportType === 'single_product') {
@@ -973,10 +979,9 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
   // Page 1 has header + summary cards + table header. Fits up to 26 rows.
   // Subsequent pages have compact header (70px) + table header (26px). Fits up to 34 rows (or 28 rows if last page with signatures).
 
-  const isSingleCust = Boolean(singleCustomer || reportType === 'single_customer');
-  const PAGE1_ROW_LIMIT_SINGLE_PAGE = isSingleCust ? 18 : 26;
-  const PAGE1_ROW_LIMIT_MULTI_PAGE = isSingleCust ? 20 : 28;
-  const SUBSEQUENT_PAGE_ROW_LIMIT = 32;
+  const PAGE1_ROW_LIMIT_SINGLE_PAGE = isSingleCust ? 20 : 26;
+  const PAGE1_ROW_LIMIT_MULTI_PAGE = isSingleCust ? 22 : 28;
+  const SUBSEQUENT_PAGE_ROW_LIMIT = isSingleCust ? 26 : 32;
 
   const totalRows = rows.length;
 
@@ -1052,41 +1057,6 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
       ctx.font = '11px "Noto Sans Arabic", system-ui, sans-serif';
       ctx.fillText(`تاریخ و وقت: ${generatedDate || new Date().toISOString().slice(0, 10)}`, 50, curY + 17);
       curY += 34;
-
-      // 1.5 WELL-DEFINED CUSTOMER PROFILE & CONTACT DETAILS CARD (PROMINENT & ENLARGED)
-      if (singleCustomer || reportType === 'single_customer') {
-        const sc: any = singleCustomer || { customerName: 'خریدار' };
-        const custBoxH = 56;
-        ctx.fillStyle = '#f8fafc';
-        ctx.fillRect(36, curY, PAGE_WIDTH - 72, custBoxH);
-        ctx.strokeStyle = '#94a3b8';
-        ctx.lineWidth = 1.2;
-        ctx.strokeRect(36, curY, PAGE_WIDTH - 72, custBoxH);
-
-        // Right side: Customer Name (large & bold) + Shop & Address
-        ctx.textAlign = 'right';
-        ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 16.5px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif, system-ui';
-        ctx.fillText(`خریدار / کھاتہ دار: ${(sc.customerName || '').toUpperCase()}`, PAGE_WIDTH - 50, curY + 23);
-
-        ctx.fillStyle = '#334155';
-        ctx.font = 'bold 12.5px "Noto Sans Arabic", system-ui, sans-serif';
-        const shopLabel = sc.shopName ? `دکان / مارکیٹ: ${sc.shopName}` : 'دکان / کاروبار: ذاتی';
-        const addressLabel = [sc.address, sc.city].filter(Boolean).join(', ') || 'سبزی و پھل منڈی';
-        ctx.fillText(`${shopLabel}   •   پتہ / شہر: ${addressLabel}`, PAGE_WIDTH - 50, curY + 45);
-
-        // Left side: Phone + Statement Period / Date
-        ctx.textAlign = 'left';
-        ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 14px system-ui, sans-serif';
-        ctx.fillText(`📞 رابطہ / موبائل: ${sc.phone || 'N/A'}`, 50, curY + 23);
-
-        ctx.fillStyle = '#64748b';
-        ctx.font = '11.5px "Noto Sans Arabic", system-ui, sans-serif';
-        ctx.fillText(`دورانیہ: ${dateFilterLabel || 'تمام ریکارڈ'}   •   تاریخ پرنٹ: ${generatedDate || new Date().toISOString().slice(0, 10)}`, 50, curY + 45);
-
-        curY += custBoxH + 10;
-      }
 
       // Summary Metric Cards
       if (summary) {
@@ -1192,13 +1162,15 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
           const oldUdhaarVal = (singleCustomer as any)?.oldUdhaar !== undefined
             ? (singleCustomer as any).oldUdhaar
             : (summary.oldUdhaar || 0);
-          card3Title = 'سابقہ ادھار (Old Udhaar)';
+          card3Title = 'سابقہ ادھار';
           card3Val = formatPKR(oldUdhaarVal, 'Rs.', 'en');
           card3Bg = oldUdhaarVal > 0 ? '#fffbeb' : '#f8fafc';
           card3Border = oldUdhaarVal > 0 ? '#fde68a' : '#e2e8f0';
           card3Text = oldUdhaarVal > 0 ? '#b45309' : '#475569';
 
-          const allTimeCreditVal = summary.allTimeCredit !== undefined ? summary.allTimeCredit : ((singleCustomer as any)?.allTimeCredit ?? summary.creditPending ?? 0);
+          const allTimeCreditVal = (singleCustomer as any)?.allTimeCredit !== undefined
+            ? (singleCustomer as any).allTimeCredit
+            : (summary.allTimeCredit !== undefined ? summary.allTimeCredit : (summary.creditPending || 0));
           card4Title = 'کل ادھار (تمام وقت)';
           card4Val = formatPKR(allTimeCreditVal, 'Rs.', 'en');
           card4Bg = allTimeCreditVal > 0 ? '#fef2f2' : '#ecfdf5';
@@ -1257,9 +1229,9 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
           card4Text = '#1e40af';
         }
 
-        const cardH = isSingleCust ? 50 : 46;
-        const titleFont = isSingleCust ? 'bold 12.5px "Noto Sans Arabic", system-ui, sans-serif' : 'bold 11.5px "Noto Sans Arabic", system-ui, sans-serif';
-        const valFont = isSingleCust ? 'bold 16px system-ui, sans-serif' : 'bold 14px system-ui, sans-serif';
+        const cardH = isSingleCust ? 54 : 46;
+        const titleFont = isSingleCust ? 'bold 13.5px "Noto Sans Arabic", system-ui, sans-serif' : 'bold 11.5px "Noto Sans Arabic", system-ui, sans-serif';
+        const valFont = isSingleCust ? 'bold 18px system-ui, sans-serif' : 'bold 14px system-ui, sans-serif';
 
         // Card 1
         ctx.fillStyle = card1Bg;
@@ -1269,10 +1241,10 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         ctx.textAlign = 'center';
         ctx.fillStyle = '#475569';
         ctx.font = titleFont;
-        ctx.fillText(card1Title, 36 + cardWidth / 2, curY + (isSingleCust ? 18 : 16));
+        ctx.fillText(card1Title, 36 + cardWidth / 2, curY + (isSingleCust ? 20 : 16));
         ctx.fillStyle = card1Text;
         ctx.font = valFont;
-        ctx.fillText(card1Val, 36 + cardWidth / 2, curY + (isSingleCust ? 38 : 34));
+        ctx.fillText(card1Val, 36 + cardWidth / 2, curY + (isSingleCust ? 42 : 34));
 
         // Card 2
         const c2X = 36 + cardWidth + 12;
@@ -1282,10 +1254,10 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         ctx.strokeRect(c2X, curY, cardWidth, cardH);
         ctx.fillStyle = '#475569';
         ctx.font = titleFont;
-        ctx.fillText(card2Title, c2X + cardWidth / 2, curY + (isSingleCust ? 18 : 16));
+        ctx.fillText(card2Title, c2X + cardWidth / 2, curY + (isSingleCust ? 20 : 16));
         ctx.fillStyle = card2Text;
         ctx.font = valFont;
-        ctx.fillText(card2Val, c2X + cardWidth / 2, curY + (isSingleCust ? 38 : 34));
+        ctx.fillText(card2Val, c2X + cardWidth / 2, curY + (isSingleCust ? 42 : 34));
 
         // Card 3
         const c3X = c2X + cardWidth + 12;
@@ -1295,10 +1267,10 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         ctx.strokeRect(c3X, curY, cardWidth, cardH);
         ctx.fillStyle = '#475569';
         ctx.font = titleFont;
-        ctx.fillText(card3Title, c3X + cardWidth / 2, curY + (isSingleCust ? 18 : 16));
+        ctx.fillText(card3Title, c3X + cardWidth / 2, curY + (isSingleCust ? 20 : 16));
         ctx.fillStyle = card3Text;
         ctx.font = valFont;
-        ctx.fillText(card3Val, c3X + cardWidth / 2, curY + (isSingleCust ? 38 : 34));
+        ctx.fillText(card3Val, c3X + cardWidth / 2, curY + (isSingleCust ? 42 : 34));
 
         // Card 4
         const c4X = c3X + cardWidth + 12;
@@ -1308,10 +1280,10 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
         ctx.strokeRect(c4X, curY, cardWidth, cardH);
         ctx.fillStyle = '#475569';
         ctx.font = titleFont;
-        ctx.fillText(card4Title, c4X + cardWidth / 2, curY + (isSingleCust ? 18 : 16));
+        ctx.fillText(card4Title, c4X + cardWidth / 2, curY + (isSingleCust ? 20 : 16));
         ctx.fillStyle = card4Text;
         ctx.font = valFont;
-        ctx.fillText(card4Val, c4X + cardWidth / 2, curY + (isSingleCust ? 38 : 34));
+        ctx.fillText(card4Val, c4X + cardWidth / 2, curY + (isSingleCust ? 42 : 34));
 
         curY += cardH + 10;
       }
@@ -1343,7 +1315,7 @@ export function generateReportCanvas2DPages(previewData: PDFPreviewData): HTMLCa
 
     // DRAW REPEATED TABLE HEADER ON EVERY PAGE
     if (colDefs.length > 0) {
-      curY = drawTableHeader(ctx, tableX, tableW, curY, colDefs);
+      curY = drawTableHeader(ctx, tableX, tableW, curY, colDefs, isSingleCust);
     }
 
     // Determine how many rows go onto this page

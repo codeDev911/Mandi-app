@@ -320,24 +320,36 @@ async function startServer() {
     const expenses = payload.expenses || [];
     const drawerAdjustments = payload.drawerAdjustments || [];
 
+    const systemLogs = payload.systemLogs || [];
+
     const uploadEnvelope = {
       version: '2.0.0',
+      appName: 'MandiMunshiMasterSystem',
+      exportedAt: timestamp,
+      uploadedAt: timestamp,
       storageType: 'neon_s3_object_storage',
       shopId: cleanShopId,
       shopPin: cleanPin,
-      uploadedAt: timestamp,
       stats: {
         lotsCount: lots.length,
         customersCount: customers.length,
         vendorsCount: vendors.length,
         expensesCount: expenses.length,
         drawerCount: drawerAdjustments.length,
+        logsCount: systemLogs.length,
       },
+      settings: payload.settings,
+      lots,
+      customers,
+      vendors,
+      expenses,
+      drawerAdjustments,
+      systemLogs,
       payload,
     };
 
     try {
-      // Ensure bucket exists or create if possible
+      // Ensure bucket exists or create if possible (non-blocking for scoped credentials)
       try {
         await client.send(new HeadBucketCommand({ Bucket: bucketName }));
       } catch (headErr: any) {
@@ -345,12 +357,12 @@ async function startServer() {
           try {
             await client.send(new CreateBucketCommand({ Bucket: bucketName }));
           } catch {
-            // Proceed to upload
+            // Proceed to upload directly
           }
         }
       }
 
-      // Automatically configure CORS so future browser client uploads/downloads do not get CORS errors
+      // Non-blocking CORS setup
       ensureBucketCors(client, bucketName).catch(() => {});
 
       const payloadJson = JSON.stringify(uploadEnvelope, null, 2);

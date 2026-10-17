@@ -567,24 +567,36 @@ async function uploadDirectS3Client(
     message: 'Direct browser S3 upload in progress...',
   });
 
+  // Convert full dataset to exact settings JSON export structure
   const uploadEnvelope = {
     version: '2.0.0',
+    appName: 'MandiMunshiMasterSystem',
+    exportedAt: timestamp,
+    uploadedAt: timestamp,
     storageType: 'neon_s3_object_storage',
     shopId: cleanShopId,
     shopPin: cleanPin,
-    uploadedAt: timestamp,
     stats: {
       lotsCount: data.lots?.length || 0,
       customersCount: data.customers?.length || 0,
       vendorsCount: data.vendors?.length || 0,
       expensesCount: data.expenses?.length || 0,
       drawerCount: data.drawerAdjustments?.length || 0,
+      logsCount: (data.systemLogs || []).length,
     },
+    settings: data.settings,
+    lots: data.lots || [],
+    customers: data.customers || [],
+    vendors: data.vendors || [],
+    expenses: data.expenses || [],
+    drawerAdjustments: data.drawerAdjustments || [],
+    systemLogs: data.systemLogs || [],
     payload: data,
   };
 
-  const payloadJson = JSON.stringify(uploadEnvelope);
+  const payloadJson = JSON.stringify(uploadEnvelope, null, 2);
 
+  // 5-minute timeout for large datasets
   await client.send(
     new PutObjectCommand({
       Bucket: bucketName,
@@ -592,7 +604,7 @@ async function uploadDirectS3Client(
       Body: payloadJson,
       ContentType: 'application/json; charset=utf-8',
     }),
-    { abortSignal: AbortSignal.timeout(20000) }
+    { abortSignal: AbortSignal.timeout(300000) }
   );
 
   const updatedConfig: CloudSyncMetadata = {
@@ -674,7 +686,7 @@ async function downloadDirectS3Client(
         Bucket: bucketName,
         Key: objectKey,
       }),
-      { abortSignal: AbortSignal.timeout(15000) }
+      { abortSignal: AbortSignal.timeout(300000) }
     );
   } catch (err: any) {
     if (err?.name === 'NoSuchKey' || err?.$metadata?.httpStatusCode === 404) {
@@ -788,7 +800,7 @@ export async function uploadDataToCloud(
     };
   }
 
-  // 1. Initial packaging state
+  // 1. Convert all data into the exact settings JSON export file format
   onProgress?.({
     stage: 'preparing',
     direction: 'upload',
@@ -797,8 +809,39 @@ export async function uploadDataToCloud(
     percentage: 5,
     speedBytesPerSec: 0,
     estimatedSecondsLeft: 0,
-    message: 'Packaging and preparing data payload...',
+    message: 'تمام ڈیٹا کو سیٹنگز کی طرح مکمل .json فائل میں تبدیل کیا جا رہا ہے (Converting to .json file)...',
   });
+
+  const fullJsonBackup = {
+    version: '2.0.0',
+    appName: 'MandiMunshiMasterSystem',
+    exportedAt: timestamp,
+    uploadedAt: timestamp,
+    shopId: cleanShopId,
+    shopPin: cleanPin,
+    stats: {
+      lotsCount: data.lots?.length || 0,
+      customersCount: data.customers?.length || 0,
+      vendorsCount: data.vendors?.length || 0,
+      expensesCount: data.expenses?.length || 0,
+      drawerCount: data.drawerAdjustments?.length || 0,
+      logsCount: (data.systemLogs || []).length,
+    },
+    settings: data.settings,
+    lots: data.lots || [],
+    customers: data.customers || [],
+    vendors: data.vendors || [],
+    expenses: data.expenses || [],
+    drawerAdjustments: data.drawerAdjustments || [],
+    systemLogs: data.systemLogs || [],
+    payload: data,
+  };
+
+  const backupJsonString = JSON.stringify(fullJsonBackup, null, 2);
+  const backupJsonBlob = new Blob([backupJsonString], { type: 'application/json; charset=utf-8' });
+  const backupJsonFileName = `${cleanShopId}-backup-${timestamp.slice(0, 10)}.json`;
+  // Create File instance matching file export
+  new File([backupJsonBlob], backupJsonFileName, { type: 'application/json' });
 
   const payloadString = JSON.stringify({
     shopId: cleanShopId,
@@ -808,10 +851,11 @@ export async function uploadDataToCloud(
     secretAccessKey: config.secretAccessKey,
     region: config.region,
     bucketName: config.bucketName,
+    fileName: backupJsonFileName,
     payload: data,
   });
 
-  const totalPayloadBytes = new Blob([payloadString]).size;
+  const totalPayloadBytes = backupJsonBlob.size;
 
   onProgress?.({
     stage: 'preparing',
@@ -821,7 +865,7 @@ export async function uploadDataToCloud(
     percentage: 10,
     speedBytesPerSec: 0,
     estimatedSecondsLeft: 0,
-    message: 'Connecting to S3 Object Storage...',
+    message: `.json فائل تیار ہو گئی (${(totalPayloadBytes / 1024).toFixed(1)} KB)۔ S3 کنکشن قائم ہو رہا ہے...`,
   });
 
   // In standalone mobile/desktop environments (Capacitor Android) without custom proxy,
@@ -842,14 +886,14 @@ export async function uploadDataToCloud(
     let isSettled = false;
     const uploadApiUrl = resolveApiUrl('/api/s3/upload', config.apiProxyUrl);
     const xhr = new XMLHttpRequest();
-    xhr.timeout = 10000; // Strict 10-second timeout
+    xhr.timeout = 300000; // 5-minute timeout for large datasets
 
     const safetyTimer = setTimeout(() => {
       if (!isSettled) {
         try { xhr.abort(); } catch {}
         fallbackToDirect();
       }
-    }, 10500);
+    }, 310000);
 
     const fallbackToDirect = async (initialErrMsg?: string) => {
       if (isSettled) return;
@@ -1074,14 +1118,14 @@ export async function downloadDataFromCloud(
     let isSettled = false;
     const downloadApiUrl = resolveApiUrl('/api/s3/download', mergedConfig.apiProxyUrl);
     const xhr = new XMLHttpRequest();
-    xhr.timeout = 8000; // Strict 8-second timeout so it never sticks indefinitely
+    xhr.timeout = 300000; // 5-minute timeout for large downloads
 
     const safetyTimer = setTimeout(() => {
       if (!isSettled) {
         try { xhr.abort(); } catch {}
         fallbackToDirect();
       }
-    }, 8500);
+    }, 310000);
 
     const fallbackToDirect = async (initialErrMsg?: string) => {
       if (isSettled) return;

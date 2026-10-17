@@ -189,7 +189,9 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       percentage: 5,
       speedBytesPerSec: 0,
       estimatedSecondsLeft: 0,
-      message: 'Preparing data package...',
+      message: isUrdu
+        ? 'سیٹنگز کی طرح تمام ڈیٹا کو .json بیک اپ فائل میں تبدیل کیا جا رہا ہے...'
+        : 'Converting all data to .json backup file (just like settings export)...',
     });
     setShowProgressModal(true);
     sound.playPop();

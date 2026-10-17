@@ -828,6 +828,7 @@ export default function App() {
     vendorName: string,
     payment: {
       lotId?: string;
+      lotIds?: string[];
       amount: number;
       notes?: string;
       paymentDate?: string;
@@ -837,25 +838,26 @@ export default function App() {
   ) => {
     sound.playCashChime();
     const paymentDate = payment.paymentDate || new Date().toISOString().slice(0, 10);
+    const resolvedLotId = payment.lotId || (payment.lotIds && payment.lotIds.length === 1 ? payment.lotIds[0] : undefined);
 
     addSystemLog({
       title: 'VP',
       status: 'created',
       description: `زمیندار ادائیگی درج: زمیندار ${vendorName} کو رقم Rs.${payment.amount.toLocaleString()} ادا کی گئی [${payment.paymentMethod || 'کیش'}]${payment.notes ? ` (${payment.notes})` : ''}`,
       descriptionEn: `Vendor payment recorded: ${vendorName} - Rs.${payment.amount}`,
-      meta: { vendorName, amount: payment.amount, lotId: payment.lotId },
+      meta: { vendorName, amount: payment.amount, lotId: resolvedLotId, lotIds: payment.lotIds },
     });
 
     // 1. Create a persistent VendorPaymentRecord
     const newVendorPaymentRecord: VendorPaymentRecord = {
       id: `vpay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       vendorName,
-      lotId: payment.lotId,
+      lotId: resolvedLotId,
       amount: payment.amount,
       paymentDate,
       date: paymentDate,
       paymentMethod: payment.paymentMethod || 'cash',
-      notes: payment.notes || (payment.lotId ? 'لاٹ کی ادائیگی' : 'مجموعی کھاتہ ادائیگی'),
+      notes: payment.notes || (resolvedLotId ? 'لاٹ کی ادائیگی' : (payment.lotIds && payment.lotIds.length > 1 ? `${payment.lotIds.length} منتخب شدہ لاٹس کی ادائیگی` : 'مجموعی کھاتہ ادائیگی')),
       timestamp: new Date().toISOString(),
     };
 
@@ -893,7 +895,53 @@ export default function App() {
     });
 
     setLots((prev) => {
-      // 2. If a specific lot is targeted:
+      // 2. If specific lot(s) are targeted:
+      if (payment.lotIds && payment.lotIds.length > 0) {
+        let remainingToDistribute = payment.amount;
+        const targetIds = payment.lotIds;
+
+        const updated = prev.map((lot) => {
+          if (!targetIds.includes(lot.id)) return lot;
+
+          const totalNet = lot.summary.netPayableToVendor;
+          const currentAlreadyPaid =
+            lot.vendorPaymentAmount !== undefined
+              ? lot.vendorPaymentAmount
+              : lot.vendorPaymentStatus === 'paid'
+              ? totalNet
+              : 0;
+
+          const unPaidOnThisLot = Math.max(0, totalNet - currentAlreadyPaid);
+
+          let additionalPaidForThisLot = 0;
+          if (remainingToDistribute > 0 && unPaidOnThisLot > 0) {
+            if (remainingToDistribute >= unPaidOnThisLot) {
+              additionalPaidForThisLot = unPaidOnThisLot;
+              remainingToDistribute -= unPaidOnThisLot;
+            } else {
+              additionalPaidForThisLot = remainingToDistribute;
+              remainingToDistribute = 0;
+            }
+          }
+
+          const newTotalPaid = currentAlreadyPaid + additionalPaidForThisLot;
+          const status: VendorPaymentStatus =
+            payment.status || (newTotalPaid >= totalNet ? 'paid' : newTotalPaid > 0 ? 'partial' : 'pending');
+
+          return {
+            ...lot,
+            vendorPaymentStatus: status,
+            vendorPaymentAmount: newTotalPaid,
+            vendorPaymentDate: additionalPaidForThisLot > 0 ? paymentDate : lot.vendorPaymentDate,
+            vendorPaymentNotes: additionalPaidForThisLot > 0 && payment.notes ? payment.notes : lot.vendorPaymentNotes,
+            vendorPaymentMethod: additionalPaidForThisLot > 0 && payment.paymentMethod ? payment.paymentMethod : lot.vendorPaymentMethod || 'cash',
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        saveLotsToIndexedDB(updated).catch(console.error);
+        return updated;
+      }
+
       if (payment.lotId) {
         const updated = prev.map((lot) => {
           if (lot.id !== payment.lotId) return lot;

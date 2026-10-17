@@ -1052,54 +1052,14 @@ export function buildSingleCustomerReportPDF(
     `Customer Statement & Account Ledger | Period: ${periodInfo || 'All Records'}`
   );
 
-  // 1. WELL-DEFINED CUSTOMER PROFILE & CONTACT DETAILS CARD (PROMINENT & ENLARGED)
-  doc.setFillColor(248, 250, 252); // slate-50
-  doc.setDrawColor(148, 163, 184); // slate-400
-  doc.setLineWidth(0.4);
-  doc.roundedRect(14, currentY, pageWidth - 28, 28, 3, 3, 'FD');
-
-  // Left Column: Customer Name, Shop, and Address
-  doc.setFontSize(15);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42); // slate-900
-  doc.text(`BUYER / KHAATA: ${customer.customerName.toUpperCase()}`, 19, currentY + 8);
-
-  doc.setFontSize(11.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(51, 65, 85); // slate-700
-  const shopLabel = customer.shopName ? `Shop / Dukan: ${customer.shopName}` : 'Shop / Business: N/A';
-  doc.text(shopLabel, 19, currentY + 15.5);
-
-  const addressText = [customer.address, customer.city].filter(Boolean).join(', ') || 'Sabzi & Fruit Mandi';
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105); // slate-600
-  doc.text(`Address / City: ${addressText}`, 19, currentY + 22.5);
-
-  // Right Column: Phone, Period, and Statement Date
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(`Phone: ${customer.phone || 'N/A'}`, pageWidth - 19, currentY + 8, { align: 'right' });
-
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Period: ${periodInfo || 'All Records'}`, pageWidth - 19, currentY + 15.5, { align: 'right' });
-
-  doc.setTextColor(100, 116, 139);
-  doc.text(`Date Printed: ${new Date().toISOString().slice(0, 10)}`, pageWidth - 19, currentY + 22.5, { align: 'right' });
-
-  currentY += 32;
-
-  const allTimeOutstanding = customer.allTimeCredit !== undefined ? customer.allTimeCredit : customer.creditPending;
+  const allTimeOutstanding = customer.allTimeCredit !== undefined ? customer.allTimeCredit : (customer.creditPending || 0);
   const oldUdhaarAmount = customer.oldUdhaar !== undefined ? customer.oldUdhaar : 0;
 
-  // 2. ENLARGED CUSTOMER SUMMARY CARD (WITH OLD UDHAAR REPLACING SAFI BAQAYA)
+  // 1. ENLARGED CUSTOMER SUMMARY CARD (OLD UDHAAR)
   doc.setFillColor(245, 248, 252);
   doc.setDrawColor(203, 213, 225);
   doc.setLineWidth(0.4);
-  doc.roundedRect(14, currentY, pageWidth - 28, 24, 3, 3, 'FD');
+  doc.roundedRect(14, currentY, pageWidth - 28, 26, 3, 3, 'FD');
 
   const colW = (pageWidth - 28) / 4;
   const col1X = 14 + 4;
@@ -1107,44 +1067,44 @@ export function buildSingleCustomerReportPDF(
   const col3X = 14 + colW * 2 + 2;
   const col4X = 14 + colW * 3 + 2;
 
-  // Header Labels (Enlarged 10pt Bold)
-  doc.setFontSize(10);
+  // Header Labels (Enlarged 11pt Bold)
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(71, 85, 105);
-  doc.text('TOTAL PURCHASES (کل خریداری)', col1X, currentY + 6.5);
-  doc.text('CASH PAID (نقد وصول)', col2X, currentY + 6.5);
-  doc.text('OLD UDHAAR (سابقہ ادھار)', col3X, currentY + 6.5);
-  doc.text('KUL UDHAAR (کل ادھار تمام وقت)', col4X, currentY + 6.5);
+  doc.text('TOTAL PURCHASES (کل خریداری)', col1X, currentY + 7);
+  doc.text('CASH PAID (نقد وصول)', col2X, currentY + 7);
+  doc.text('OLD UDHAAR (سابقہ ادھار)', col3X, currentY + 7);
+  doc.text('KUL UDHAAR (کل واجب الادا)', col4X, currentY + 7);
 
-  // Metric Values (Enlarged 13.5pt Bold)
-  doc.setFontSize(13.5);
+  // Metric Values (Enlarged 15pt Bold - up to 18px equivalent)
+  doc.setFontSize(15);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(`Rs. ${customer.totalAmount.toLocaleString()}`, col1X, currentY + 15);
-  doc.setFontSize(9.5);
+  doc.text(`Rs. ${customer.totalAmount.toLocaleString()}`, col1X, currentY + 16.5);
+  doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text(`(${customer.totalUnitsBought} Units)`, col1X, currentY + 20);
+  doc.text(`(${customer.totalUnitsBought} Units)`, col1X, currentY + 22);
 
-  doc.setFontSize(13.5);
+  doc.setFontSize(15);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 120, 50); // Emerald
-  doc.text(`Rs. ${customer.cashPaid.toLocaleString()}`, col2X, currentY + 15);
+  doc.text(`Rs. ${customer.cashPaid.toLocaleString()}`, col2X, currentY + 16.5);
 
-  doc.setTextColor(180, 83, 9); // Amber-700 for Old Udhaar
-  doc.text(`Rs. ${oldUdhaarAmount.toLocaleString()}`, col3X, currentY + 15);
+  doc.setTextColor(180, 83, 9); // Amber-700 for Old Udhaar (All Time)
+  doc.text(`Rs. ${oldUdhaarAmount.toLocaleString()}`, col3X, currentY + 16.5);
 
   doc.setTextColor(190, 24, 24); // Red-700 for Kul Udhaar
-  doc.text(`Rs. ${allTimeOutstanding.toLocaleString()}`, col4X, currentY + 15);
+  doc.text(`Rs. ${allTimeOutstanding.toLocaleString()}`, col4X, currentY + 16.5);
 
-  currentY += 29;
+  currentY += 31;
 
-  // 3. PURCHASES & TRANSACTIONS TABLE (ENLARGED FONT SIZE & COMFORTABLE PADDING)
-  doc.setFontSize(13);
+  // 2. PURCHASES & TRANSACTIONS TABLE (ENLARGED FONT SIZE UP TO 18PX & COMFORTABLE PADDING)
+  doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
   doc.text('PURCHASES & COMMODITY TRANSACTIONS (خریداری و بولی تفصیلات)', 14, currentY);
-  currentY += 4;
+  currentY += 5;
 
   const txRows = customer.transactions.map((tx, idx) => [
     idx + 1,
@@ -1160,8 +1120,8 @@ export function buildSingleCustomerReportPDF(
     head: [['#', 'Date (تاریخ)', 'Product / Commodity (جنس)', 'Qty (تعداد)', 'Rate (PKR)', 'Total Amount (PKR)']],
     body: txRows,
     theme: 'grid',
-    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 11, fontStyle: 'bold' },
-    styles: { fontSize: 10.5, cellPadding: 4 },
+    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 13, fontStyle: 'bold' },
+    styles: { fontSize: 13, cellPadding: 5 },
     columnStyles: {
       0: { cellWidth: 12, halign: 'center' },
       1: { cellWidth: 30, halign: 'center' },
@@ -1178,7 +1138,7 @@ export function buildSingleCustomerReportPDF(
       '',
       `Rs. ${customer.totalAmount.toLocaleString()}`,
     ]],
-    footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 11 },
+    footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold', fontSize: 13 },
   });
 
   currentY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 10 : currentY + 32;
@@ -1214,8 +1174,8 @@ export function buildSingleCustomerReportPDF(
       head: [['#', 'Date (تاریخ)', 'Payment Method (طریقہ)', 'Notes / Description (تفصیل)', 'Amount Received (PKR)']],
       body: paymentRows,
       theme: 'grid',
-      headStyles: { fillColor: [15, 110, 50], textColor: 255, fontSize: 11, fontStyle: 'bold' },
-      styles: { fontSize: 10.5, cellPadding: 4 },
+      headStyles: { fillColor: [15, 110, 50], textColor: 255, fontSize: 13, fontStyle: 'bold' },
+      styles: { fontSize: 13, cellPadding: 5 },
       columnStyles: {
         0: { cellWidth: 12, halign: 'center' },
         1: { cellWidth: 30, halign: 'center' },
@@ -1230,7 +1190,7 @@ export function buildSingleCustomerReportPDF(
         'Total Cash Received (کل نقد وصول شدہ)',
         `Rs. ${customer.cashPaid.toLocaleString()}`,
       ]],
-      footStyles: { fillColor: [240, 248, 240], textColor: [15, 110, 50], fontStyle: 'bold', fontSize: 11 },
+      footStyles: { fillColor: [240, 248, 240], textColor: [15, 110, 50], fontStyle: 'bold', fontSize: 13 },
     });
   }
 
