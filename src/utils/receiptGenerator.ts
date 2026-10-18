@@ -731,18 +731,19 @@ export function generateVendorConsolidatedInvoiceCanvas(
   // 5. MAIN RED-RULED TABLE
   const tableY = subY + subH + 4;
   const tableH = 798;
-  const leftColW = Math.round(headerW * 0.30);
-  const rightColW = headerW - leftColW;
+  const expenseColW = Math.round(headerW * 0.30);
+  const salesColW = headerW - expenseColW;
   const totalSubColW = 80;
+  const descSubColW = salesColW - totalSubColW;
 
   ctx.strokeStyle = '#b91c1c';
   ctx.lineWidth = 2;
   ctx.strokeRect(headerX, tableY, headerW, tableH);
 
-  // Vertical divider between Left (Expenses) and Right (Sales)
+  // Vertical divider between Sales (Left & Middle) and Expenses (Right)
   ctx.beginPath();
-  ctx.moveTo(headerX + leftColW, tableY);
-  ctx.lineTo(headerX + leftColW, tableY + tableH);
+  ctx.moveTo(headerX + salesColW, tableY);
+  ctx.lineTo(headerX + salesColW, tableY + tableH);
   ctx.stroke();
 
   // Header row height
@@ -754,23 +755,25 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.lineTo(headerX + headerW, tableY + tHeaderH);
   ctx.stroke();
 
-  // Left Header: اخراجات
+  // 1. Right Header: اخراجات (Placed First to the Right)
   ctx.textAlign = 'center';
   ctx.fillStyle = '#991b1b';
   ctx.font = 'bold 14.5px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('اخراجات', headerX + leftColW / 2, tableY + 21);
+  ctx.fillText('اخراجات', headerX + salesColW + expenseColW / 2, tableY + 21);
 
-  // Right Header: تفصیل مال بکری & ٹوٹل
-  // Vertical line separating ٹوٹل and تفصیل
+  // Vertical line separating تفصیل (left) and ٹوٹل (middle)
   ctx.beginPath();
-  ctx.moveTo(headerX + leftColW + totalSubColW, tableY);
-  ctx.lineTo(headerX + leftColW + totalSubColW, tableY + tableH - 84); // stops above summary bars
+  ctx.moveTo(headerX + descSubColW, tableY);
+  ctx.lineTo(headerX + descSubColW, tableY + tableH - 84); // stops above summary bars
   ctx.stroke();
 
-  ctx.fillText('ٹوٹل', headerX + leftColW + totalSubColW / 2, tableY + 21);
-  ctx.fillText('تفصیل مال بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, tableY + 21);
+  // 2. Middle Header: ٹوٹل
+  ctx.fillText('ٹوٹل', headerX + descSubColW + totalSubColW / 2, tableY + 21);
 
-  // 5A. LEFT COLUMN: 7 BADGES & ICS LOGO
+  // 3. Left Header: تفصیل مال بکری
+  ctx.fillText('تفصیل مال بکری', headerX + descSubColW / 2, tableY + 21);
+
+  // 5A. RIGHT COLUMN: 7 BADGES & ICS LOGO (Expense Column on the Right)
   const badgesData = [
     { label: 'کمیشن', val: aggregatedExpenses.commission, color: '#4f46e5' },
     { label: 'کرایہ', val: aggregatedExpenses.kiraya, color: '#16a34a' },
@@ -785,11 +788,11 @@ export function generateVendorConsolidatedInvoiceCanvas(
   badgesData.forEach((b) => {
     const pillW = 52;
     const pillH = 26;
-    const boxW = leftColW - pillW - 14;
+    const boxW = expenseColW - pillW - 14;
     const boxH = 26;
 
-    const boxX = headerX + 6;
-    const pillX = headerX + leftColW - pillW - 6;
+    const boxX = headerX + salesColW + 6;
+    const pillX = headerX + salesColW + expenseColW - pillW - 6;
 
     // Amount box
     ctx.fillStyle = b.isMeezan ? '#faf5ff' : '#ffffff';
@@ -819,10 +822,10 @@ export function generateVendorConsolidatedInvoiceCanvas(
     badgeY += 34;
   });
 
-  // Bottom Left: ICS Trust Badge
-  const icsBoxW = leftColW - 16;
+  // Bottom Right: ICS Trust Badge (Inside Expense Column)
+  const icsBoxW = expenseColW - 16;
   const icsBoxH = 50;
-  const icsBoxX = headerX + 8;
+  const icsBoxX = headerX + salesColW + 8;
   const icsBoxY = tableY + tableH - icsBoxH - 8;
 
   ctx.fillStyle = '#881337';
@@ -840,7 +843,7 @@ export function generateVendorConsolidatedInvoiceCanvas(
   ctx.font = 'bold 22px monospace';
   ctx.fillText('ICS', icsBoxX + icsBoxW / 2, icsBoxY + 40);
 
-  // 5B. RIGHT COLUMN: SALE ITEMS + EMPTY ROWS + 3 SUMMARY BARS
+  // 5B. MIDDLE & LEFT COLUMNS: SALE ITEMS + EMPTY ROWS + 3 SUMMARY BARS
   let rowY = tableY + tHeaderH;
   const rowH = 28;
   const maxRowsOnPage = 18;
@@ -848,28 +851,28 @@ export function generateVendorConsolidatedInvoiceCanvas(
   for (let i = 0; i < maxRowsOnPage; i++) {
     const item = allItems[i];
 
-    // Bottom horizontal line
+    // Bottom horizontal line for sales section
     ctx.strokeStyle = '#b91c1c';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(headerX + leftColW, rowY + rowH);
-    ctx.lineTo(headerX + headerW, rowY + rowH);
+    ctx.moveTo(headerX, rowY + rowH);
+    ctx.lineTo(headerX + salesColW, rowY + rowH);
     ctx.stroke();
 
     if (item) {
-      // Total amount in subcolumn
+      // Total amount in middle subcolumn (under ٹوٹل)
       ctx.textAlign = 'center';
       ctx.fillStyle = '#0f172a';
       ctx.font = 'bold 11.5px monospace';
-      ctx.fillText(Math.round(item.totalAmount).toLocaleString(), headerX + leftColW + totalSubColW / 2, rowY + 18);
+      ctx.fillText(Math.round(item.totalAmount).toLocaleString(), headerX + descSubColW + totalSubColW / 2, rowY + 18);
 
-      // Description in wide column: Rate, Product Name, Unit Type, Qty from left
+      // Description in left column (under تفصیل مال بکری): Rate, Product Name, Unit Type, Qty from left
       ctx.textAlign = 'left';
       ctx.font = 'bold 11px "Noto Nastaliq Urdu", "Noto Sans Arabic", serif';
       ctx.fillStyle = '#0f172a';
       ctx.fillText(
         `${Math.round(item.ratePerUnit).toLocaleString()}   •   ${item.productUrdu}   •   ${item.unitLabel}   •   ${item.quantity}`,
-        headerX + leftColW + totalSubColW + 12,
+        headerX + 12,
         rowY + 18
       );
     }
@@ -885,69 +888,69 @@ export function generateVendorConsolidatedInvoiceCanvas(
 
   // 1. خام بکری (Clean White Background, Crisp Red Border - Colored Background Removed)
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(headerX + leftColW, sumY1, rightColW, summaryBarH);
+  ctx.fillRect(headerX, sumY1, salesColW, summaryBarH);
   ctx.strokeStyle = '#b91c1c';
   ctx.lineWidth = 1.2;
-  ctx.strokeRect(headerX + leftColW, sumY1, rightColW, summaryBarH);
+  ctx.strokeRect(headerX, sumY1, salesColW, summaryBarH);
 
   // Vertical divider between amount and label
   ctx.beginPath();
-  ctx.moveTo(headerX + leftColW + totalSubColW, sumY1);
-  ctx.lineTo(headerX + leftColW + totalSubColW, sumY1 + summaryBarH);
+  ctx.moveTo(headerX + descSubColW, sumY1);
+  ctx.lineTo(headerX + descSubColW, sumY1 + summaryBarH);
   ctx.stroke();
 
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 13px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(Math.round(totalGross).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY1 + 18);
+  ctx.fillText(Math.round(totalGross).toLocaleString(), headerX + descSubColW + totalSubColW / 2, sumY1 + 18);
 
   ctx.fillStyle = '#991b1b';
   ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('خام بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY1 + 18);
+  ctx.fillText('خام بکری', headerX + descSubColW / 2, sumY1 + 18);
 
   // 2. جملہ اخراجات (Clean White Background, Crisp Red Border - Colored Background Removed)
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(headerX + leftColW, sumY2, rightColW, summaryBarH);
+  ctx.fillRect(headerX, sumY2, salesColW, summaryBarH);
   ctx.strokeStyle = '#b91c1c';
   ctx.lineWidth = 1.2;
-  ctx.strokeRect(headerX + leftColW, sumY2, rightColW, summaryBarH);
+  ctx.strokeRect(headerX, sumY2, salesColW, summaryBarH);
 
   // Vertical divider between amount and label
   ctx.beginPath();
-  ctx.moveTo(headerX + leftColW + totalSubColW, sumY2);
-  ctx.lineTo(headerX + leftColW + totalSubColW, sumY2 + summaryBarH);
+  ctx.moveTo(headerX + descSubColW, sumY2);
+  ctx.lineTo(headerX + descSubColW, sumY2 + summaryBarH);
   ctx.stroke();
 
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 13px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(Math.round(meezanExpenses).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY2 + 18);
+  ctx.fillText(Math.round(meezanExpenses).toLocaleString(), headerX + descSubColW + totalSubColW / 2, sumY2 + 18);
 
   ctx.fillStyle = '#991b1b';
   ctx.font = 'bold 13px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('جملہ اخراجات', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY2 + 18);
+  ctx.fillText('جملہ اخراجات', headerX + descSubColW / 2, sumY2 + 18);
 
   // 3. پختہ بکری (Clean White Background, Crisp Red Border - Colored Background Removed)
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(headerX + leftColW, sumY3, rightColW, summaryBarH);
+  ctx.fillRect(headerX, sumY3, salesColW, summaryBarH);
   ctx.strokeStyle = '#b91c1c';
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(headerX + leftColW, sumY3, rightColW, summaryBarH);
+  ctx.strokeRect(headerX, sumY3, salesColW, summaryBarH);
 
   // Vertical divider between amount and label
   ctx.beginPath();
-  ctx.moveTo(headerX + leftColW + totalSubColW, sumY3);
-  ctx.lineTo(headerX + leftColW + totalSubColW, sumY3 + summaryBarH);
+  ctx.moveTo(headerX + descSubColW, sumY3);
+  ctx.lineTo(headerX + descSubColW, sumY3 + summaryBarH);
   ctx.stroke();
 
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 14px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(Math.round(totalNetPayable).toLocaleString(), headerX + leftColW + totalSubColW / 2, sumY3 + 18);
+  ctx.fillText(Math.round(totalNetPayable).toLocaleString(), headerX + descSubColW + totalSubColW / 2, sumY3 + 18);
 
   ctx.fillStyle = '#991b1b';
   ctx.font = 'bold 14px "Noto Nastaliq Urdu", serif';
-  ctx.fillText('پختہ بکری', headerX + leftColW + totalSubColW + (rightColW - totalSubColW) / 2, sumY3 + 18);
+  ctx.fillText('پختہ بکری', headerX + descSubColW / 2, sumY3 + 18);
 
   // 6. FOOTER ROW
   const footY = tableY + tableH + 6;

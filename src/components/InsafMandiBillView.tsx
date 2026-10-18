@@ -294,7 +294,7 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
           </div>
 
           {/* 2. SUBHEADER METADATA ROWS - Bill Baname placed under Lot Number */}
-          <div className="my-1 border-y-2 border-red-700 py-1 px-2 sm:px-2.5 bg-white flex flex-col gap-1 text-slate-900">
+          <div className="my-1 border-y-2 border-red-700 py-1.5 px-2 sm:px-2.5 bg-white flex flex-col gap-1 text-slate-900">
             {/* Top Row: Raseed Number on Right, Date on Left */}
             <div className="flex items-center justify-between text-[11px] sm:text-xs font-bold">
               <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -312,11 +312,11 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
               </div>
             </div>
 
-            {/* Bottom Row: Directly UNDER the Lot Number -> Bill Baname */}
-            <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-red-100 min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            {/* Bottom Row: Directly UNDER the Lot Number -> Bill Baname with vertical space for ygjqp descenders */}
+            <div className="flex items-center justify-between gap-2 pt-1.5 pb-2.5 sm:pb-3 border-t border-red-100 min-w-0 min-h-[40px] sm:min-h-[46px]">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-visible">
                 <span className="text-red-700 font-urdu-nastaliq text-sm sm:text-base font-black flex-shrink-0">بل بنام:</span>
-                <span className="underline decoration-red-600 decoration-2 font-black text-slate-950 font-urdu-nastaliq text-base sm:text-lg md:text-xl px-1 truncate tracking-wide leading-tight drop-shadow-2xs">
+                <span className="underline decoration-red-600 decoration-2 underline-offset-[8px] sm:underline-offset-[10px] font-black text-slate-950 font-urdu-nastaliq text-base sm:text-lg md:text-xl px-1 whitespace-nowrap tracking-wide leading-loose pt-1 pb-2 sm:pb-2.5 inline-block drop-shadow-2xs overflow-visible">
                   {vendorName} {vendorCity ? `(${vendorCity})` : ''}
                 </span>
               </div>
@@ -333,7 +333,125 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
 
           {/* 3. MAIN RED-RULED TABLE (Landscape Half-A4 Proportions) */}
           <div className="flex-1 flex border-2 border-red-700 bg-white min-h-0">
-            {/* LEFT COLUMN: اخراجات (7 Pills + ICS Badge) */}
+            {/* 1. LEFT & MIDDLE COLUMNS: تفصیل مال بکری (Left) & ٹوٹل (Middle) */}
+            <div className="flex-1 flex flex-col justify-between bg-white min-h-0">
+              <div className="min-h-0 overflow-hidden">
+                {/* Header Row: تفصیل مال بکری (Left) & ٹوٹل (Middle) */}
+                <div className="h-6 sm:h-7 border-b-2 border-red-700 bg-red-50 flex items-center">
+                  <div className="flex-1 h-full flex items-center justify-center">
+                    <span className="text-[11px] sm:text-xs font-black font-urdu-nastaliq text-red-800">
+                      تفصیل مال بکری
+                    </span>
+                  </div>
+                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700 flex items-center justify-center">
+                    <span className="text-[11px] sm:text-xs font-black font-urdu-nastaliq text-red-800">
+                      ٹوٹل
+                    </span>
+                  </div>
+                </div>
+
+                {/* Itemized Sale Rows */}
+                <div className="divide-y divide-red-700/60">
+                  {allItems.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="h-6 sm:h-7 flex items-center text-[11px] sm:text-xs font-semibold text-slate-900"
+                    >
+                      {/* Detail Column (Description) - on the left under تفصیل مال بکری */}
+                      <div
+                        dir="ltr"
+                        className="flex-1 h-full flex items-center justify-start px-2 text-left overflow-hidden select-none"
+                      >
+                        {/* 1. Rate (from left) - rate number only, NO (ریٹ) */}
+                        <div className="w-16 sm:w-20 text-left flex-shrink-0">
+                          <span className="font-numbers font-bold text-slate-900 text-xs sm:text-sm tracking-tight">
+                            {Math.round(item.ratePerUnit).toLocaleString()}
+                          </span>
+                        </div>
+
+                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
+
+                        {/* 2. Product Name */}
+                        <div className="flex-1 min-w-0 text-center px-1">
+                          <span dir="rtl" className="inline-block font-urdu-nastaliq font-bold text-slate-950 text-xs sm:text-sm truncate">
+                            {item.productUrdu}
+                          </span>
+                        </div>
+
+                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
+
+                        {/* 3. Unit Type */}
+                        <div className="w-12 sm:w-16 text-center flex-shrink-0">
+                          <span dir="rtl" className="inline-block font-urdu-sans font-bold text-slate-700 text-[11px] sm:text-xs">
+                            {item.unitLabel}
+                          </span>
+                        </div>
+
+                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
+
+                        {/* 4. Qty */}
+                        <div className="w-12 sm:w-14 text-center flex-shrink-0">
+                          <span className="font-numbers font-black text-slate-950 text-xs sm:text-sm">
+                            {item.quantity}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Amount Box (Total) - in the middle under ٹوٹل */}
+                      <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers font-bold text-slate-950 text-[11px] sm:text-xs">
+                        {Math.round(item.totalAmount).toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Empty Ruled Rows */}
+                  {Array.from({ length: emptyRowsCount }).map((_, idx) => (
+                    <div
+                      key={`empty-${idx}`}
+                      className="h-6 sm:h-7 flex items-center"
+                    >
+                      <div className="flex-1 h-full" />
+                      <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bottom 3 Summary Rows */}
+              <div className="border-t-2 border-red-700 font-urdu-sans mt-auto bg-white">
+                {/* 1. خام بکری (Clean White Background) */}
+                <div className="h-6 sm:h-7 flex items-center bg-white text-slate-900 font-bold border-b border-red-700/60">
+                  <div className="flex-1 h-full flex items-center justify-center px-2 text-[11px] sm:text-xs font-urdu-nastaliq font-bold text-red-900">
+                    خام بکری
+                  </div>
+                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-[11px] sm:text-xs text-slate-900 font-black">
+                    {Math.round(totalGross).toLocaleString()}
+                  </div>
+                </div>
+
+                {/* 2. جملہ اخراجات (Clean White Background) */}
+                <div className="h-6 sm:h-7 flex items-center bg-white text-slate-900 font-bold border-b border-red-700/60">
+                  <div className="flex-1 h-full flex items-center justify-center px-2 text-[11px] sm:text-xs font-urdu-nastaliq font-bold text-red-900">
+                    جملہ اخراجات
+                  </div>
+                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-[11px] sm:text-xs text-slate-900 font-black">
+                    {Math.round(meezanExpenses).toLocaleString()}
+                  </div>
+                </div>
+
+                {/* 3. پختہ بکری (Clean White Background) */}
+                <div className="h-7 sm:h-8 flex items-center bg-white text-slate-900 font-bold">
+                  <div className="flex-1 h-full flex items-center justify-center px-2 text-xs sm:text-sm font-urdu-nastaliq font-black text-red-900">
+                    پختہ بکری
+                  </div>
+                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-xs sm:text-sm text-slate-950 font-black">
+                    {Math.round(totalNetPayable).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. RIGHT COLUMN: اخراجات (7 Pills + ICS Badge) - On the Right */}
             <div className="w-[30%] sm:w-[28%] border-l-2 border-red-700 flex flex-col justify-between bg-white">
               <div>
                 {/* Column Header */}
@@ -431,124 +549,6 @@ export const InsafMandiBillView: React.FC<InsafMandiBillViewProps> = ({
                     }}
                   >
                     ICS
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* RIGHT COLUMN: تفصیل مال بکری & ٹوٹل */}
-            <div className="flex-1 flex flex-col justify-between bg-white min-h-0">
-              <div className="min-h-0 overflow-hidden">
-                {/* Header Row */}
-                <div className="h-6 sm:h-7 border-b-2 border-red-700 bg-red-50 flex items-center">
-                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700 flex items-center justify-center">
-                    <span className="text-[11px] sm:text-xs font-black font-urdu-nastaliq text-red-800">
-                      ٹوٹل
-                    </span>
-                  </div>
-                  <div className="flex-1 h-full flex items-center justify-center">
-                    <span className="text-[11px] sm:text-xs font-black font-urdu-nastaliq text-red-800">
-                      تفصیل مال بکری
-                    </span>
-                  </div>
-                </div>
-
-                {/* Itemized Sale Rows */}
-                <div className="divide-y divide-red-700/60">
-                  {allItems.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="h-6 sm:h-7 flex items-center text-[11px] sm:text-xs font-semibold text-slate-900"
-                    >
-                      {/* Amount Box */}
-                      <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers font-bold text-slate-950 text-[11px] sm:text-xs">
-                        {Math.round(item.totalAmount).toLocaleString()}
-                      </div>
-
-                      {/* Detail Column: strictly from left: rate, product name, unit type, qty */}
-                      <div
-                        dir="ltr"
-                        className="flex-1 h-full flex items-center justify-start px-2 text-left overflow-hidden select-none"
-                      >
-                        {/* 1. Rate (from left) - rate number only, NO (ریٹ) */}
-                        <div className="w-16 sm:w-20 text-left flex-shrink-0">
-                          <span className="font-numbers font-bold text-slate-900 text-xs sm:text-sm tracking-tight">
-                            {Math.round(item.ratePerUnit).toLocaleString()}
-                          </span>
-                        </div>
-
-                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
-
-                        {/* 2. Product Name */}
-                        <div className="flex-1 min-w-0 text-center px-1">
-                          <span dir="rtl" className="inline-block font-urdu-nastaliq font-bold text-slate-950 text-xs sm:text-sm truncate">
-                            {item.productUrdu}
-                          </span>
-                        </div>
-
-                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
-
-                        {/* 3. Unit Type */}
-                        <div className="w-12 sm:w-16 text-center flex-shrink-0">
-                          <span dir="rtl" className="inline-block font-urdu-sans font-bold text-slate-700 text-[11px] sm:text-xs">
-                            {item.unitLabel}
-                          </span>
-                        </div>
-
-                        <span className="text-red-300 font-bold text-[10px] mx-1 sm:mx-2 select-none flex-shrink-0">•</span>
-
-                        {/* 4. Qty */}
-                        <div className="w-12 sm:w-14 text-center flex-shrink-0">
-                          <span className="font-numbers font-black text-slate-950 text-xs sm:text-sm">
-                            {item.quantity}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Empty Ruled Rows */}
-                  {Array.from({ length: emptyRowsCount }).map((_, idx) => (
-                    <div
-                      key={`empty-${idx}`}
-                      className="h-6 sm:h-7 flex items-center"
-                    >
-                      <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60" />
-                      <div className="flex-1 h-full" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Bottom 3 Summary Rows */}
-              <div className="border-t-2 border-red-700 font-urdu-sans mt-auto bg-white">
-                {/* 1. خام بکری (Clean White Background) */}
-                <div className="h-6 sm:h-7 flex items-center bg-white text-slate-900 font-bold border-b border-red-700/60">
-                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-[11px] sm:text-xs text-slate-900 font-black">
-                    {Math.round(totalGross).toLocaleString()}
-                  </div>
-                  <div className="flex-1 h-full flex items-center justify-center px-2 text-[11px] sm:text-xs font-urdu-nastaliq font-bold text-red-900">
-                    خام بکری
-                  </div>
-                </div>
-
-                {/* 2. جملہ اخراجات (Clean White Background) */}
-                <div className="h-6 sm:h-7 flex items-center bg-white text-slate-900 font-bold border-b border-red-700/60">
-                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-[11px] sm:text-xs text-slate-900 font-black">
-                    {Math.round(meezanExpenses).toLocaleString()}
-                  </div>
-                  <div className="flex-1 h-full flex items-center justify-center px-2 text-[11px] sm:text-xs font-urdu-nastaliq font-bold text-red-900">
-                    جملہ اخراجات
-                  </div>
-                </div>
-
-                {/* 3. پختہ بکری (Clean White Background) */}
-                <div className="h-7 sm:h-8 flex items-center bg-white text-slate-900 font-bold">
-                  <div className="w-20 sm:w-24 h-full border-l-2 border-red-700/60 flex items-center justify-center px-1 font-numbers text-xs sm:text-sm text-slate-950 font-black">
-                    {Math.round(totalNetPayable).toLocaleString()}
-                  </div>
-                  <div className="flex-1 h-full flex items-center justify-center px-2 text-xs sm:text-sm font-urdu-nastaliq font-black text-red-900">
-                    پختہ بکری
                   </div>
                 </div>
               </div>

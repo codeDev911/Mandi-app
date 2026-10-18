@@ -345,7 +345,6 @@ async function startServer() {
       expenses,
       drawerAdjustments,
       systemLogs,
-      payload,
     };
 
     try {
@@ -365,7 +364,8 @@ async function startServer() {
       // Non-blocking CORS setup
       ensureBucketCors(client, bucketName).catch(() => {});
 
-      const payloadJson = JSON.stringify(uploadEnvelope, null, 2);
+      // Use compact JSON to prevent heap exhaustion on large datasets (50MB+)
+      const payloadJson = JSON.stringify(uploadEnvelope);
       const sizeBytes = Buffer.byteLength(payloadJson, 'utf-8');
 
       await client.send(

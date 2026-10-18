@@ -48,6 +48,7 @@ import {
   FileJson,
   CheckCircle2,
   Database,
+  RefreshCw,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -95,6 +96,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editingMazdooriId, setEditingMazdooriId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [editingRate, setEditingRate] = useState<number>(25);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   // Mandi Produce / Products in Settings State
   const [newProdName, setNewProdName] = useState('');
@@ -269,52 +271,74 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsShareModalOpen(true);
   };
 
-  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string;
-        const res = parseAndValidateBackupPayload(text);
-        if (res.success) {
-          const lotsCount = res.lots?.length || 0;
-          const custCount = res.customers?.length || 0;
-          const vendCount = res.vendors?.length || 0;
-          const expCount = res.expenses?.length || 0;
-          const drawerCount = res.drawerAdjustments?.length || 0;
-          if (
-            confirm(
-              isUrdu
-                ? `کیا آپ یہ مکمل بیک اپ بحال کرنا چاہتے ہیں؟\n• لاٹس: ${lotsCount}\n• خریدار کھاتے: ${custCount}\n• زمیندار کھاتے: ${vendCount}\n• دکان اخراجات: ${expCount}\n• دراز ریکارڈز: ${drawerCount}`
-                : `Restore full backup?\n• Lots: ${lotsCount}\n• Buyers: ${custCount}\n• Vendors: ${vendCount}\n• Expenses: ${expCount}\n• Drawer entries: ${drawerCount}`
-            )
-          ) {
-            sound.playCashChime();
-            if (res.settings) {
-              setForm(res.settings);
-            }
-            onRestoreBackup?.({
-              settings: res.settings || settings,
-              lots: res.lots || [],
-              customers: res.customers || [],
-              vendors: res.vendors || [],
-              expenses: res.expenses || [],
-              drawerAdjustments: res.drawerAdjustments || [],
-              systemLogs: res.systemLogs || [],
-            });
-            alert(isUrdu ? 'مکمل بیک اپ کامیابی سے بحال ہو گیا ہے!' : 'Full backup successfully restored!');
+    const sizeMb = Number((file.size / (1024 * 1024)).toFixed(1));
+    setImportStatus(
+      isUrdu
+        ? `بیک اپ فائل (${sizeMb} MB) پڑھی جا رہی ہے...`
+        : `Reading backup file (${sizeMb} MB)...`
+    );
+
+    // Yield to let React paint the loading overlay
+    await new Promise((r) => setTimeout(r, 60));
+
+    try {
+      let text: string | null = await file.text();
+      const res = parseAndValidateBackupPayload(text);
+      text = null; // Release 58MB+ string from memory immediately
+
+      if (res.success) {
+        const lotsCount = res.lots?.length || 0;
+        const custCount = res.customers?.length || 0;
+        const vendCount = res.vendors?.length || 0;
+        const expCount = res.expenses?.length || 0;
+        const drawerCount = res.drawerAdjustments?.length || 0;
+
+        setImportStatus(null);
+
+        const shouldRestore = confirm(
+          isUrdu
+            ? `کیا آپ یہ مکمل بیک اپ بحال کرنا چاہتے ہیں؟\n• لاٹس: ${lotsCount}\n• خریدار کھاتے: ${custCount}\n• زمیندار کھاتے: ${vendCount}\n• دکان اخراجات: ${expCount}\n• دراز ریکارڈز: ${drawerCount}`
+            : `Restore full backup?\n• Lots: ${lotsCount}\n• Buyers: ${custCount}\n• Vendors: ${vendCount}\n• Expenses: ${expCount}\n• Drawer entries: ${drawerCount}`
+        );
+
+        if (shouldRestore) {
+          setImportStatus(
+            isUrdu
+              ? `ڈیٹا بیس میں ریکارڈز بحال ہو رہے ہیں (${lotsCount} لاٹس)...`
+              : `Restoring into database (${lotsCount} lots)...`
+          );
+          await new Promise((r) => setTimeout(r, 60));
+
+          sound.playCashChime();
+          if (res.settings) {
+            setForm(res.settings);
           }
-        } else {
-          alert(res.error || (isUrdu ? 'غلط بیک اپ فائل فارمیٹ' : 'Invalid backup file format'));
+          onRestoreBackup?.({
+            settings: res.settings || settings,
+            lots: res.lots || [],
+            customers: res.customers || [],
+            vendors: res.vendors || [],
+            expenses: res.expenses || [],
+            drawerAdjustments: res.drawerAdjustments || [],
+            systemLogs: res.systemLogs || [],
+          });
+          setImportStatus(null);
+          alert(isUrdu ? 'مکمل بیک اپ کامیابی سے بحال ہو گیا ہے!' : 'Full backup successfully restored!');
         }
-      } catch (err) {
-        alert(isUrdu ? 'فائل پڑھنے میں غلطی' : 'Error reading backup file');
+      } else {
+        setImportStatus(null);
+        alert(res.error || (isUrdu ? 'غلط بیک اپ فائل فارمیٹ' : 'Invalid backup file format'));
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+    } catch (err: any) {
+      setImportStatus(null);
+      alert(isUrdu ? 'فائل پڑھنے میں غلطی' : (err?.message || 'Error reading backup file'));
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleExportSettingsOnly = async () => {
@@ -1451,6 +1475,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 ? 'تمام لاٹس، خریدار، زمیندار، دکان اخراجات، دراز کیش اور ترتیبات کا مکمل بیک اپ محفوظ کریں۔'
                 : 'Back up all produce lots, buyers, vendors, shop expenses, cash drawer, and settings.'}
             </p>
+            {importStatus && (
+              <div className="p-3 bg-blue-100 border border-blue-300 rounded-xl flex items-center gap-2.5 text-blue-900 font-bold text-xs font-urdu-sans animate-pulse">
+                <RefreshCw className="w-4 h-4 animate-spin text-blue-700 shrink-0" />
+                <span>{importStatus}</span>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
               <button
                 type="button"

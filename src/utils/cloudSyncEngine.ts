@@ -567,7 +567,7 @@ async function uploadDirectS3Client(
     message: 'Direct browser S3 upload in progress...',
   });
 
-  // Convert full dataset to exact settings JSON export structure
+  // Convert full dataset to clean export structure without duplicating data
   const uploadEnvelope = {
     version: '2.0.0',
     appName: 'MandiMunshiMasterSystem',
@@ -591,17 +591,18 @@ async function uploadDirectS3Client(
     expenses: data.expenses || [],
     drawerAdjustments: data.drawerAdjustments || [],
     systemLogs: data.systemLogs || [],
-    payload: data,
   };
 
-  const payloadJson = JSON.stringify(uploadEnvelope, null, 2);
+  // Compact JSON serialization without pretty-print indentation prevents memory spikes
+  const payloadJson = JSON.stringify(uploadEnvelope);
+  const payloadBlob = new Blob([payloadJson], { type: 'application/json; charset=utf-8' });
 
   // 5-minute timeout for large datasets
   await client.send(
     new PutObjectCommand({
       Bucket: bucketName,
       Key: objectKey,
-      Body: payloadJson,
+      Body: payloadBlob,
       ContentType: 'application/json; charset=utf-8',
     }),
     { abortSignal: AbortSignal.timeout(300000) }
@@ -812,38 +813,10 @@ export async function uploadDataToCloud(
     message: 'تمام ڈیٹا کو سیٹنگز کی طرح مکمل .json فائل میں تبدیل کیا جا رہا ہے (Converting to .json file)...',
   });
 
-  const fullJsonBackup = {
-    version: '2.0.0',
-    appName: 'MandiMunshiMasterSystem',
-    exportedAt: timestamp,
-    uploadedAt: timestamp,
-    shopId: cleanShopId,
-    shopPin: cleanPin,
-    stats: {
-      lotsCount: data.lots?.length || 0,
-      customersCount: data.customers?.length || 0,
-      vendorsCount: data.vendors?.length || 0,
-      expensesCount: data.expenses?.length || 0,
-      drawerCount: data.drawerAdjustments?.length || 0,
-      logsCount: (data.systemLogs || []).length,
-    },
-    settings: data.settings,
-    lots: data.lots || [],
-    customers: data.customers || [],
-    vendors: data.vendors || [],
-    expenses: data.expenses || [],
-    drawerAdjustments: data.drawerAdjustments || [],
-    systemLogs: data.systemLogs || [],
-    payload: data,
-  };
-
-  const backupJsonString = JSON.stringify(fullJsonBackup, null, 2);
-  const backupJsonBlob = new Blob([backupJsonString], { type: 'application/json; charset=utf-8' });
   const backupJsonFileName = `${cleanShopId}-backup-${timestamp.slice(0, 10)}.json`;
-  // Create File instance matching file export
-  new File([backupJsonBlob], backupJsonFileName, { type: 'application/json' });
 
-  const payloadString = JSON.stringify({
+  // Build clean payload without duplicating data in memory
+  const payloadObject = {
     shopId: cleanShopId,
     pin: cleanPin,
     endpointUrl: config.endpointUrl,
@@ -852,10 +825,21 @@ export async function uploadDataToCloud(
     region: config.region,
     bucketName: config.bucketName,
     fileName: backupJsonFileName,
-    payload: data,
-  });
+    payload: {
+      settings: data.settings,
+      lots: data.lots || [],
+      customers: data.customers || [],
+      vendors: data.vendors || [],
+      expenses: data.expenses || [],
+      drawerAdjustments: data.drawerAdjustments || [],
+      systemLogs: data.systemLogs || [],
+    },
+  };
 
-  const totalPayloadBytes = backupJsonBlob.size;
+  // Compact single serialization avoids multiple 50MB+ allocations
+  const payloadString = JSON.stringify(payloadObject);
+  const payloadBlob = new Blob([payloadString], { type: 'application/json; charset=utf-8' });
+  const totalPayloadBytes = payloadBlob.size;
 
   onProgress?.({
     stage: 'preparing',
@@ -865,7 +849,7 @@ export async function uploadDataToCloud(
     percentage: 10,
     speedBytesPerSec: 0,
     estimatedSecondsLeft: 0,
-    message: `.json فائل تیار ہو گئی (${(totalPayloadBytes / 1024).toFixed(1)} KB)۔ S3 کنکشن قائم ہو رہا ہے...`,
+    message: `.json فائل تیار ہو گئی (${(totalPayloadBytes / (1024 * 1024)).toFixed(1)} MB)۔ S3 کنکشن قائم ہو رہا ہے...`,
   });
 
   // In standalone mobile/desktop environments (Capacitor Android) without custom proxy,
@@ -1044,7 +1028,7 @@ export async function uploadDataToCloud(
       await fallbackToDirect();
     };
 
-    xhr.send(payloadString);
+    xhr.send(payloadBlob);
   });
 }
 
@@ -1308,6 +1292,12 @@ function saveLocalBackupVault(
   },
   timestamp: string
 ): void {
+  // CRITICAL: NEVER write large datasets (e.g. >100 lots or multi-MBs) to localStorage!
+  // In WebViews and Chromium, passing large strings to localStorage causes native OOM/SIGABRT crashes.
+  const totalRecords = (data.lots?.length || 0) + (data.customers?.length || 0);
+  if (totalRecords > 100) {
+    return; // Primary high-capacity storage is safely handled by IndexedDB
+  }
   try {
     const vaultKey = `${LOCAL_VAULT_PREFIX}${shopId}`;
     const vaultObject = {
@@ -1316,7 +1306,10 @@ function saveLocalBackupVault(
       uploadedAt: timestamp,
       data,
     };
-    localStorage.setItem(vaultKey, JSON.stringify(vaultObject));
+    const jsonStr = JSON.stringify(vaultObject);
+    if (jsonStr.length < 400000) { // Keep strictly below 400KB
+      localStorage.setItem(vaultKey, jsonStr);
+    }
   } catch (e) {
     console.warn('Failed to save local backup vault:', e);
   }

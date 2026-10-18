@@ -95,38 +95,40 @@ export async function saveBlobFile(
     console.warn('Blob direct download failed, trying FileReader data URI:', blobErr);
   }
 
-  // Strategy 3: FileReader Data URI Download Trigger
-  try {
-    const reader = new FileReader();
-    const result = await new Promise<{ success: boolean; method: 'download' | 'failed'; message: string }>((resolve) => {
-      reader.onloadend = () => {
-        try {
-          const dataUri = reader.result as string;
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = dataUri;
-          a.download = fileName;
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            if (document.body.contains(a)) {
-              document.body.removeChild(a);
-            }
-          }, 2000);
-          resolve({ success: true, method: 'download', message: `Saved ${fileName}` });
-        } catch {
-          resolve({ success: false, method: 'failed', message: 'Failed to download file' });
-        }
-      };
-      reader.onerror = () => {
-        resolve({ success: false, method: 'failed', message: 'FileReader failed' });
-      };
-      reader.readAsDataURL(blob);
-    });
+  // Strategy 3: FileReader Data URI Download Trigger (Only safe for files under 2MB)
+  if (blob.size <= 2 * 1024 * 1024) {
+    try {
+      const reader = new FileReader();
+      const result = await new Promise<{ success: boolean; method: 'download' | 'failed'; message: string }>((resolve) => {
+        reader.onloadend = () => {
+          try {
+            const dataUri = reader.result as string;
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = dataUri;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+              if (document.body.contains(a)) {
+                document.body.removeChild(a);
+              }
+            }, 2000);
+            resolve({ success: true, method: 'download', message: `Saved ${fileName}` });
+          } catch {
+            resolve({ success: false, method: 'failed', message: 'Failed to download file' });
+          }
+        };
+        reader.onerror = () => {
+          resolve({ success: false, method: 'failed', message: 'FileReader failed' });
+        };
+        reader.readAsDataURL(blob);
+      });
 
-    if (result.success) return result;
-  } catch (err) {
-    console.warn('Data URI download failed:', err);
+      if (result.success) return result;
+    } catch (err) {
+      console.warn('Data URI download failed:', err);
+    }
   }
 
   // Strategy 4: Web Share API fallback on mobile browsers
@@ -305,7 +307,8 @@ export async function downloadJSONBackup(
 ): Promise<{ success: boolean; method: string; message: string }> {
   const dateStr = new Date().toISOString().split('T')[0];
   const fileName = `${fileNamePrefix}-${dateStr}.json`;
-  const jsonStr = JSON.stringify(data, null, 2);
+  const isLarge = (Array.isArray(data?.lots) && data.lots.length > 100) || (Array.isArray(data?.customers) && data.customers.length > 200);
+  const jsonStr = isLarge ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   return saveTextFile(jsonStr, fileName, 'application/json;charset=utf-8', 'Mandi JSON Backup');
 }
 
@@ -326,7 +329,8 @@ export async function shareJSONBackup(
 }> {
   const dateStr = new Date().toISOString().split('T')[0];
   const fileName = `${fileNamePrefix}-${dateStr}.json`;
-  const jsonStr = JSON.stringify(data, null, 2);
+  const isLarge = (Array.isArray(data?.lots) && data.lots.length > 100) || (Array.isArray(data?.customers) && data.customers.length > 200);
+  const jsonStr = isLarge ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
 
   const lotsCount = Array.isArray(data?.lots) ? data.lots.length : 0;

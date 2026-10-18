@@ -335,9 +335,6 @@ export function generateInsafMandiBillHtmlSingle(
     .map(
       (item) => `
     <div style="height: 22px; display: flex; align-items: center; border-bottom: 1px solid rgba(185, 28, 28, 0.6); font-size: 11px; font-weight: 600; color: #0f172a;">
-      <div style="width: 82px; height: 100%; border-left: 1.5px solid rgba(185, 28, 28, 0.6); display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: monospace, sans-serif;">
-        ${Math.round(item.totalAmount).toLocaleString()}
-      </div>
       <div dir="ltr" style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: flex-start; padding: 0 6px; text-align: left;">
         <!-- 1. Rate (from left) -->
         <div style="width: 58px; text-align: left; flex-shrink: 0; font-family: monospace, sans-serif; font-size: 11.5px; font-weight: bold; color: #0f172a;">
@@ -359,6 +356,9 @@ export function generateInsafMandiBillHtmlSingle(
           ${item.quantity}
         </div>
       </div>
+      <div style="width: 82px; height: 100%; border-left: 1.5px solid rgba(185, 28, 28, 0.6); display: flex; align-items: center; justify-content: center; font-weight: bold; font-family: monospace, sans-serif;">
+        ${Math.round(item.totalAmount).toLocaleString()}
+      </div>
     </div>
   `
     )
@@ -368,8 +368,8 @@ export function generateInsafMandiBillHtmlSingle(
     .map(
       () => `
     <div style="height: 21px; display: flex; align-items: center; border-bottom: 1px solid rgba(185, 28, 28, 0.6);">
-      <div style="width: 82px; height: 100%; border-left: 1.5px solid rgba(185, 28, 28, 0.6);"></div>
       <div style="flex: 1; height: 100%;"></div>
+      <div style="width: 82px; height: 100%; border-left: 1.5px solid rgba(185, 28, 28, 0.6);"></div>
     </div>
   `
     )
@@ -442,10 +442,10 @@ export function generateInsafMandiBillHtmlSingle(
               <span style="text-decoration: underline; font-family: monospace; font-weight: bold; padding: 0 4px; font-size: 11.5px; color: #0f172a;">${displayDate}</span>
             </div>
           </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #fee2e2; padding-top: 2px;">
-            <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+          <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #fee2e2; padding-top: 4px; padding-bottom: 8px; min-height: 42px;">
+            <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: visible;">
               <span style="color: #b91c1c; font-family: 'Noto Nastaliq Urdu', serif; font-size: 14px; font-weight: 900; flex-shrink: 0;">بل بنام:</span>
-              <span style="text-decoration: underline; text-decoration-color: #b91c1c; font-size: 19px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif; padding: 0 4px; color: #020617; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">${vendorName} ${vendorCity ? `(${vendorCity})` : ''}</span>
+              <span style="text-decoration: underline; text-decoration-color: #b91c1c; text-underline-offset: 8px; font-size: 19px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', system-ui, sans-serif; padding: 2px 4px 6px 4px; color: #020617; white-space: nowrap; overflow: visible; line-height: 1.8; display: inline-block;">${vendorName} ${vendorCity ? `(${vendorCity})` : ''}</span>
             </div>
             ${vendorPhone ? `<span style="font-family: monospace; font-size: 11px; font-weight: bold; color: #475569; flex-shrink: 0;">${vendorPhone}</span>` : ''}
           </div>
@@ -453,7 +453,61 @@ export function generateInsafMandiBillHtmlSingle(
 
         <!-- Red Ruled Table Grid (Half-A4 Landscape Sizing) -->
         <div style="flex: 1; display: flex; border: 2px solid #b91c1c; background: #ffffff; min-height: 0; overflow: hidden;">
-          <!-- Left Column: اخراجات (7 Badges + ICS Badge) -->
+          <!-- 1. Left & Middle Columns: تفصیل مال بکری (Left) & ٹوٹل (Middle) -->
+          <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; min-height: 0; overflow: hidden;">
+            <div style="overflow: hidden;">
+              <!-- Header Row -->
+              <div style="height: 22px; border-bottom: 2px solid #b91c1c; background: #fef2f2; display: flex; align-items: center;">
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #991b1b;">
+                  تفصیل مال بکری
+                </div>
+                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #991b1b;">
+                  ٹوٹل
+                </div>
+              </div>
+
+              <!-- Item Rows -->
+              <div>
+                ${saleRowsHtml}
+                ${emptyRowsHtml}
+              </div>
+            </div>
+
+            <!-- Bottom 3 Summary Rows (Background colors removed) -->
+            <div style="border-top: 2px solid #b91c1c; margin-top: auto; background: #ffffff;">
+              <!-- خام بکری -->
+              <div style="height: 22px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: bold; border-bottom: 1px solid #b91c1c;">
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold; color: #991b1b;">
+                  خام بکری
+                </div>
+                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11.5px; font-weight: 900; color: #0f172a;">
+                  ${Math.round(totalGross).toLocaleString()}
+                </div>
+              </div>
+
+              <!-- جملہ اخراجات -->
+              <div style="height: 22px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: bold; border-bottom: 1px solid #b91c1c;">
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold; color: #991b1b;">
+                  جملہ اخراجات
+                </div>
+                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11.5px; font-weight: 900; color: #0f172a;">
+                  ${Math.round(meezanExpenses).toLocaleString()}
+                </div>
+              </div>
+
+              <!-- پختہ بکری -->
+              <div style="height: 24px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: 900;">
+                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 13px; font-weight: 900; color: #991b1b;">
+                  پختہ بکری
+                </div>
+                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 13.5px; font-weight: 900; color: #0f172a;">
+                  ${Math.round(totalNetPayable).toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Right Column: اخراجات (7 Badges + ICS Badge) - On the Right -->
           <div style="width: 28%; border-left: 2px solid #b91c1c; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff;">
             <div>
               <div style="height: 22px; border-bottom: 2px solid #b91c1c; background: #fef2f2; display: flex; align-items: center; justify-content: center;">
@@ -542,59 +596,6 @@ export function generateInsafMandiBillHtmlSingle(
                 </div>
                 <div style="font-size: 16px; font-weight: 900; font-family: monospace; color: #facc15; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, 0 1px 2px rgba(0,0,0,0.8); line-height: 1.1;">
                   ICS
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Right Column: تفصیل مال بکری & ٹوٹل -->
-          <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; min-height: 0; overflow: hidden;">
-            <div style="overflow: hidden;">
-              <div style="height: 22px; border-bottom: 2px solid #b91c1c; background: #fef2f2; display: flex; align-items: center;">
-                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #991b1b;">
-                  ٹوٹل
-                </div>
-                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; font-family: 'Noto Nastaliq Urdu', serif; color: #991b1b;">
-                  تفصیل مال بکری
-                </div>
-              </div>
-
-              <!-- Item Rows -->
-              <div>
-                ${saleRowsHtml}
-                ${emptyRowsHtml}
-              </div>
-            </div>
-
-            <!-- Bottom 3 Summary Rows (Background colors removed) -->
-            <div style="border-top: 2px solid #b91c1c; margin-top: auto; background: #ffffff;">
-              <!-- خام بکری -->
-              <div style="height: 22px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: bold; border-bottom: 1px solid #b91c1c;">
-                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11.5px; font-weight: 900; color: #0f172a;">
-                  ${Math.round(totalGross).toLocaleString()}
-                </div>
-                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold; color: #991b1b;">
-                  خام بکری
-                </div>
-              </div>
-
-              <!-- جملہ اخراجات -->
-              <div style="height: 22px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: bold; border-bottom: 1px solid #b91c1c;">
-                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 11.5px; font-weight: 900; color: #0f172a;">
-                  ${Math.round(meezanExpenses).toLocaleString()}
-                </div>
-                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 11.5px; font-weight: bold; color: #991b1b;">
-                  جملہ اخراجات
-                </div>
-              </div>
-
-              <!-- پختہ بکری -->
-              <div style="height: 24px; display: flex; align-items: center; background: #ffffff; color: #0f172a; font-weight: 900;">
-                <div style="width: 82px; height: 100%; border-left: 2px solid #b91c1c; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 13.5px; font-weight: 900; color: #0f172a;">
-                  ${Math.round(totalNetPayable).toLocaleString()}
-                </div>
-                <div style="flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; font-family: 'Noto Nastaliq Urdu', serif; font-size: 13px; font-weight: 900; color: #991b1b;">
-                  پختہ بکری
                 </div>
               </div>
             </div>

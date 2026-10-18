@@ -422,31 +422,69 @@ export async function saveLotsToIndexedDB(lots: VendorLot[]): Promise<void> {
   }
   pendingLotsToSave = null;
 
-  writeNeutralinoStorage(NEU_KEY_LOTS, lots);
+  if (lots.length <= 1000) {
+    writeNeutralinoStorage(NEU_KEY_LOTS, lots);
+  }
 
   const db = await getIndexedDB();
   if (!db) return;
 
-  return new Promise((resolve, reject) => {
+  // For small datasets, standard single transaction is fastest
+  if (lots.length <= 800) {
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE_LOTS, 'readwrite');
+        const store = tx.objectStore(STORE_LOTS);
+        const clearReq = store.clear();
+        clearReq.onsuccess = () => {
+          for (let i = 0; i < lots.length; i++) {
+            store.put(lots[i]);
+          }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  // High-capacity chunked streaming writes for massive datasets (50MB+ / thousands of lots)
+  // Step 1: Clear existing store
+  await new Promise<void>((resolve, reject) => {
     try {
       const tx = db.transaction(STORE_LOTS, 'readwrite');
-      const store = tx.objectStore(STORE_LOTS);
-      
-      const clearReq = store.clear();
-      clearReq.onsuccess = () => {
-        const len = lots.length;
-        for (let i = 0; i < len; i++) {
-          store.put(lots[i]);
-        }
-      };
-
+      tx.objectStore(STORE_LOTS).clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
     } catch (e) {
       reject(e);
     }
   });
+
+  // Step 2: Write in clean 400-record chunks with micro-yields to prevent blocking UI
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < lots.length; i += CHUNK_SIZE) {
+    const chunk = lots.slice(i, i + CHUNK_SIZE);
+    await new Promise<void>((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE_LOTS, 'readwrite');
+        const store = tx.objectStore(STORE_LOTS);
+        for (let j = 0; j < chunk.length; j++) {
+          store.put(chunk[j]);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+    if (i + CHUNK_SIZE < lots.length) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
 }
 
 /**
@@ -463,7 +501,9 @@ export function saveCustomersAsync(customers: CustomerBuyer[]): void {
       const data = pendingCustomersToSave;
       pendingCustomersToSave = null;
       saveCustomersToIndexedDB(data);
-      writeNeutralinoStorage(NEU_KEY_CUSTOMERS, data);
+      if (data.length <= 1000) {
+        writeNeutralinoStorage(NEU_KEY_CUSTOMERS, data);
+      }
       try {
         if (data.length <= 150) {
           localStorage.setItem('mandi_bolli_customers_v1', JSON.stringify(data));
@@ -482,27 +522,65 @@ export async function saveCustomersToIndexedDB(customers: CustomerBuyer[]): Prom
   }
   pendingCustomersToSave = null;
 
-  writeNeutralinoStorage(NEU_KEY_CUSTOMERS, customers);
+  if (customers.length <= 1000) {
+    writeNeutralinoStorage(NEU_KEY_CUSTOMERS, customers);
+  }
 
   const db = await getIndexedDB();
   if (!db) return;
 
-  return new Promise((resolve, reject) => {
+  if (customers.length <= 800) {
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE_CUSTOMERS, 'readwrite');
+        const store = tx.objectStore(STORE_CUSTOMERS);
+        store.clear().onsuccess = () => {
+          for (let i = 0; i < customers.length; i++) {
+            store.put(customers[i]);
+          }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  // Chunked writes for large customer bases
+  await new Promise<void>((resolve, reject) => {
     try {
       const tx = db.transaction(STORE_CUSTOMERS, 'readwrite');
-      const store = tx.objectStore(STORE_CUSTOMERS);
-      store.clear().onsuccess = () => {
-        for (let i = 0; i < customers.length; i++) {
-          store.put(customers[i]);
-        }
-      };
+      tx.objectStore(STORE_CUSTOMERS).clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
     } catch (e) {
       reject(e);
     }
   });
+
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < customers.length; i += CHUNK_SIZE) {
+    const chunk = customers.slice(i, i + CHUNK_SIZE);
+    await new Promise<void>((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE_CUSTOMERS, 'readwrite');
+        const store = tx.objectStore(STORE_CUSTOMERS);
+        for (let j = 0; j < chunk.length; j++) {
+          store.put(chunk[j]);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+    if (i + CHUNK_SIZE < customers.length) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
 }
 
 /**
@@ -519,7 +597,9 @@ export function saveVendorsAsync(vendors: SavedVendor[]): void {
       const data = pendingVendorsToSave;
       pendingVendorsToSave = null;
       saveVendorsToIndexedDB(data);
-      writeNeutralinoStorage(NEU_KEY_VENDORS, data);
+      if (data.length <= 1000) {
+        writeNeutralinoStorage(NEU_KEY_VENDORS, data);
+      }
       try {
         if (data.length <= 150) {
           localStorage.setItem('mandi_bolli_vendors_v1', JSON.stringify(data));
@@ -538,27 +618,65 @@ export async function saveVendorsToIndexedDB(vendors: SavedVendor[]): Promise<vo
   }
   pendingVendorsToSave = null;
 
-  writeNeutralinoStorage(NEU_KEY_VENDORS, vendors);
+  if (vendors.length <= 1000) {
+    writeNeutralinoStorage(NEU_KEY_VENDORS, vendors);
+  }
 
   const db = await getIndexedDB();
   if (!db) return;
 
-  return new Promise((resolve, reject) => {
+  if (vendors.length <= 800) {
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE_VENDORS, 'readwrite');
+        const store = tx.objectStore(STORE_VENDORS);
+        store.clear().onsuccess = () => {
+          for (let i = 0; i < vendors.length; i++) {
+            store.put(vendors[i]);
+          }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  // Chunked writes for large vendor databases
+  await new Promise<void>((resolve, reject) => {
     try {
       const tx = db.transaction(STORE_VENDORS, 'readwrite');
-      const store = tx.objectStore(STORE_VENDORS);
-      store.clear().onsuccess = () => {
-        for (let i = 0; i < vendors.length; i++) {
-          store.put(vendors[i]);
-        }
-      };
+      tx.objectStore(STORE_VENDORS).clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
     } catch (e) {
       reject(e);
     }
   });
+
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < vendors.length; i += CHUNK_SIZE) {
+    const chunk = vendors.slice(i, i + CHUNK_SIZE);
+    await new Promise<void>((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE_VENDORS, 'readwrite');
+        const store = tx.objectStore(STORE_VENDORS);
+        for (let j = 0; j < chunk.length; j++) {
+          store.put(chunk[j]);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+    if (i + CHUNK_SIZE < vendors.length) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
 }
 
 /**
@@ -575,7 +693,9 @@ export function saveExpensesAsync(expenses: ShopExpense[]): void {
       const data = pendingExpensesToSave;
       pendingExpensesToSave = null;
       saveExpensesToIndexedDB(data);
-      writeNeutralinoStorage(NEU_KEY_EXPENSES, data);
+      if (data.length <= 1000) {
+        writeNeutralinoStorage(NEU_KEY_EXPENSES, data);
+      }
       try {
         if (data.length <= 500) {
           localStorage.setItem('mandi_bolli_expenses_v1', JSON.stringify(data));
@@ -594,7 +714,9 @@ export async function saveExpensesToIndexedDB(expenses: ShopExpense[]): Promise<
   }
   pendingExpensesToSave = null;
 
-  writeNeutralinoStorage(NEU_KEY_EXPENSES, expenses);
+  if (expenses.length <= 1000) {
+    writeNeutralinoStorage(NEU_KEY_EXPENSES, expenses);
+  }
 
   const db = await getIndexedDB();
   if (!db) return;
@@ -693,8 +815,12 @@ export function flushPendingStorageSaves(): void {
     const lots = pendingLotsToSave;
     pendingLotsToSave = null;
     saveLotsToIndexedDB(lots);
-    writeNeutralinoStorage(NEU_KEY_LOTS, lots);
-    try { localStorage.setItem('mandi_bolli_lots_v1', JSON.stringify(lots)); } catch {}
+    if (lots.length <= 1000) {
+      writeNeutralinoStorage(NEU_KEY_LOTS, lots);
+    }
+    if (lots.length <= 100) {
+      try { localStorage.setItem('mandi_bolli_lots_v1', JSON.stringify(lots)); } catch {}
+    }
   }
   if (saveCustomersTimer && pendingCustomersToSave) {
     clearTimeout(saveCustomersTimer);
@@ -702,8 +828,12 @@ export function flushPendingStorageSaves(): void {
     const customers = pendingCustomersToSave;
     pendingCustomersToSave = null;
     saveCustomersToIndexedDB(customers);
-    writeNeutralinoStorage(NEU_KEY_CUSTOMERS, customers);
-    try { localStorage.setItem('mandi_bolli_customers_v1', JSON.stringify(customers)); } catch {}
+    if (customers.length <= 1000) {
+      writeNeutralinoStorage(NEU_KEY_CUSTOMERS, customers);
+    }
+    if (customers.length <= 150) {
+      try { localStorage.setItem('mandi_bolli_customers_v1', JSON.stringify(customers)); } catch {}
+    }
   }
   if (saveVendorsTimer && pendingVendorsToSave) {
     clearTimeout(saveVendorsTimer);
@@ -711,8 +841,12 @@ export function flushPendingStorageSaves(): void {
     const vendors = pendingVendorsToSave;
     pendingVendorsToSave = null;
     saveVendorsToIndexedDB(vendors);
-    writeNeutralinoStorage(NEU_KEY_VENDORS, vendors);
-    try { localStorage.setItem('mandi_bolli_vendors_v1', JSON.stringify(vendors)); } catch {}
+    if (vendors.length <= 1000) {
+      writeNeutralinoStorage(NEU_KEY_VENDORS, vendors);
+    }
+    if (vendors.length <= 150) {
+      try { localStorage.setItem('mandi_bolli_vendors_v1', JSON.stringify(vendors)); } catch {}
+    }
   }
   if (saveExpensesTimer && pendingExpensesToSave) {
     clearTimeout(saveExpensesTimer);
@@ -720,8 +854,12 @@ export function flushPendingStorageSaves(): void {
     const expenses = pendingExpensesToSave;
     pendingExpensesToSave = null;
     saveExpensesToIndexedDB(expenses);
-    writeNeutralinoStorage(NEU_KEY_EXPENSES, expenses);
-    try { localStorage.setItem('mandi_bolli_expenses_v1', JSON.stringify(expenses)); } catch {}
+    if (expenses.length <= 1000) {
+      writeNeutralinoStorage(NEU_KEY_EXPENSES, expenses);
+    }
+    if (expenses.length <= 150) {
+      try { localStorage.setItem('mandi_bolli_expenses_v1', JSON.stringify(expenses)); } catch {}
+    }
   }
 }
 
@@ -815,7 +953,9 @@ export function generateFullBackupPayload(
     drawerAdjustments,
     systemLogs,
   };
-  return JSON.stringify(payload, null, 2);
+  // Use compact JSON for large datasets (>100 records) to keep heap usage flat
+  const isLarge = lots.length > 100 || customers.length > 200;
+  return isLarge ? JSON.stringify(payload) : JSON.stringify(payload, null, 2);
 }
 
 /**
