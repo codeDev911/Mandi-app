@@ -799,29 +799,73 @@ export default function App() {
   const handleToggleVendorPaymentStatus = (lotId: string, customStatus?: 'pending' | 'paid') => {
     sound.playCashChime();
     const targetLot = lots.find((l) => l.id === lotId);
-    const currentStatus = targetLot?.vendorPaymentStatus || 'pending';
-    const nextStatus: 'pending' | 'paid' = customStatus || (currentStatus === 'paid' ? 'pending' : 'paid');
+    const isCurrentlyPaid =
+      targetLot?.vendorPaymentStatus === 'paid' ||
+      (targetLot?.vendorPaymentAmount !== undefined &&
+        targetLot.vendorPaymentAmount >= targetLot.summary.netPayableToVendor);
+    const nextStatus: 'pending' | 'paid' = customStatus || (isCurrentlyPaid ? 'pending' : 'paid');
+
+    const paymentDate = new Date().toISOString().slice(0, 10);
+    const totalNet = targetLot?.summary.netPayableToVendor || 0;
+    const vendorName = targetLot?.vendorName || '';
 
     addSystemLog({
       title: 'VP',
       status: 'updated',
-      description: `زمیندار ادائیگی اسٹیٹس تبدیل: لاٹ #${targetLot?.lotNumber || ''} بنام ${targetLot?.vendorName || ''} -> ${nextStatus === 'paid' ? 'ادائیگی مکمل (Paid)' : 'ادائیگی باقی (Pending)'}`,
+      description: `زمیندار ادائیگی اسٹیٹس تبدیل: لاٹ #${targetLot?.lotNumber || ''} بنام ${vendorName} -> ${nextStatus === 'paid' ? 'ادائیگی مکمل (Paid)' : 'ادائیگی باقی (Pending)'}`,
       descriptionEn: `Vendor payment status toggled for lot #${targetLot?.lotNumber}`,
       entityId: lotId,
     });
 
-    setLots((prev) =>
-      prev.map((lot) => {
+    setLots((prev) => {
+      const updated = prev.map((lot) => {
         if (lot.id !== lotId) return lot;
         return {
           ...lot,
           vendorPaymentStatus: nextStatus,
-          vendorPaymentAmount: nextStatus === 'paid' ? lot.summary.netPayableToVendor : 0,
-          vendorPaymentDate: nextStatus === 'paid' ? (lot.vendorPaymentDate || new Date().toISOString().slice(0, 10)) : undefined,
+          vendorPaymentAmount: nextStatus === 'paid' ? totalNet : 0,
+          vendorPaymentDate: nextStatus === 'paid' ? (lot.vendorPaymentDate || paymentDate) : undefined,
           updatedAt: new Date().toISOString(),
         };
-      })
-    );
+      });
+      saveLotsToIndexedDB(updated).catch(console.error);
+      return updated;
+    });
+
+    // Also keep vendor.payments in sync so vendor ledger accurately reflects the payment
+    if (vendorName) {
+      setVendors((prevVendors) => {
+        const existing = prevVendors.find((v) => v.name.trim().toLowerCase() === vendorName.trim().toLowerCase());
+        if (!existing) return prevVendors;
+
+        let updatedPayments = [...(existing.payments || [])];
+        if (nextStatus === 'paid') {
+          const alreadyHasRecord = updatedPayments.some((p) => p.lotId === lotId);
+          if (!alreadyHasRecord) {
+            const newRecord: VendorPaymentRecord = {
+              id: `vpay-toggle-${Date.now()}-${lotId}`,
+              vendorName,
+              lotId,
+              amount: totalNet,
+              paymentDate,
+              date: paymentDate,
+              paymentMethod: 'cash',
+              notes: `لاٹ #${targetLot?.lotNumber || ''} (${targetLot?.productUrdu || ''}) کی ادائیگی`,
+              timestamp: new Date().toISOString(),
+            };
+            updatedPayments = [newRecord, ...updatedPayments];
+          }
+        } else {
+          updatedPayments = updatedPayments.filter((p) => p.lotId !== lotId && p.id !== `vpay-toggle-${lotId}`);
+        }
+
+        const updated = prevVendors.map((v) =>
+          v.id === existing.id ? { ...v, payments: updatedPayments, updatedAt: new Date().toISOString() } : v
+        );
+        saveVendorsToIndexedDB(updated).catch(console.error);
+        return updated;
+      });
+    }
   };
 
   const handleRecordVendorPayment = (
@@ -974,13 +1018,24 @@ export default function App() {
       // 3. If recorded for the vendor across all lots incrementally:
       let remainingToDistribute = payment.amount;
 
-      // Sort vendor lots by date ascending (oldest first) or unpaid lots first
-      const vendorLotIds = prev
-        .filter((l) => l.vendorName.trim().toLowerCase() === vendorName.trim().toLowerCase())
+      // Sort vendor lots by arrival date ascending (oldest first - FIFO) so date 12 is paid before date 19!
+      const vendorLots = prev.filter(
+        (l) => l.vendorName.trim().toLowerCase() === vendorName.trim().toLowerCase()
+      );
+      const sortedVendorLotIds = [...vendorLots]
+        .sort((a, b) => {
+          const dateA = a.arrivalDate || a.createdAt || '';
+          const dateB = b.arrivalDate || b.createdAt || '';
+          return dateA.localeCompare(dateB);
+        })
         .map((l) => l.id);
 
-      const updated = prev.map((lot) => {
-        if (!vendorLotIds.includes(lot.id)) return lot;
+      const updatedMap = new Map<string, (typeof prev)[0]>();
+      prev.forEach((l) => updatedMap.set(l.id, l));
+
+      for (const lotId of sortedVendorLotIds) {
+        const lot = updatedMap.get(lotId);
+        if (!lot) continue;
 
         const totalNet = lot.summary.netPayableToVendor;
         const currentAlreadyPaid =
@@ -1007,7 +1062,7 @@ export default function App() {
         const status: VendorPaymentStatus =
           newTotalPaid >= totalNet ? 'paid' : newTotalPaid > 0 ? 'partial' : 'pending';
 
-        return {
+        updatedMap.set(lot.id, {
           ...lot,
           vendorPaymentStatus: status,
           vendorPaymentAmount: newTotalPaid,
@@ -1015,8 +1070,10 @@ export default function App() {
           vendorPaymentNotes: additionalPaidForThisLot > 0 && payment.notes ? payment.notes : lot.vendorPaymentNotes,
           vendorPaymentMethod: additionalPaidForThisLot > 0 && payment.paymentMethod ? payment.paymentMethod : lot.vendorPaymentMethod || 'cash',
           updatedAt: new Date().toISOString(),
-        };
-      });
+        });
+      }
+
+      const updated = prev.map((l) => updatedMap.get(l.id) || l);
       saveLotsToIndexedDB(updated).catch(console.error);
       return updated;
     });

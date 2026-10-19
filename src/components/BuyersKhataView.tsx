@@ -498,7 +498,9 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
       entry.lots.push(lot);
     });
 
-    return Array.from(vendorMap.values()).map((v) => {
+    return Array.from(vendorMap.values())
+      .filter((v) => v.totalLots > 0 && v.lots.length > 0)
+      .map((v) => {
       // Build unified payment history for this vendor
       const historyMap = new Map<string, VendorPaymentRecord>();
       const seenSignatures = new Set<string>();
@@ -2762,7 +2764,10 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                   {paginatedVendorLots.map((lot) => {
-                                    const isLotPaid = lot.vendorPaymentStatus === 'paid';
+                                    const lotNet = lot.summary.netPayableToVendor;
+                                    const lotPaid = lot.vendorPaymentAmount !== undefined ? lot.vendorPaymentAmount : (lot.vendorPaymentStatus === 'paid' ? lotNet : 0);
+                                    const isLotPaid = lot.vendorPaymentStatus === 'paid' || lotPaid >= lotNet;
+                                    const isLotPartial = !isLotPaid && lotPaid > 0;
                                     const lotUnitLabel = getUnitDisplayLabel(lot.unitType, settings.language);
 
                                     return (
@@ -2789,14 +2794,16 @@ export const BuyersKhataView: React.FC<BuyersKhataViewProps> = ({
                                           <button
                                             type="button"
                                             onClick={() => onToggleVendorPaymentStatus && onToggleVendorPaymentStatus(lot.id)}
-                                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition ${
+                                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition flex items-center justify-center gap-1 mx-auto ${
                                               isLotPaid
                                                 ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                                : isLotPartial
+                                                ? 'bg-blue-100 text-blue-900 hover:bg-blue-200'
                                                 : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
                                             }`}
                                             title="کلک کر کے ادا شدہ / بقایا سوئچ کریں"
                                           >
-                                            {isLotPaid ? '✅ ادا شدہ' : '⏳ بقایا'}
+                                            {isLotPaid ? '✅ ادا شدہ' : isLotPartial ? `🔷 جزوی (${formatPKR(lotPaid, settings.currencySymbol, settings.language)})` : '⏳ بقایا'}
                                           </button>
                                         </td>
                                         <td className="py-2 px-2.5 text-center">
